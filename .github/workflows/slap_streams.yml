@@ -1,0 +1,57 @@
+name: slap_streams
+
+on:
+  push:
+    paths:
+      - "slap_streams/**"
+      - "slap_cluster/**"
+      - "slap_slatedb/**"
+      - ".github/workflows/slap_streams.yml"
+  pull_request:
+    paths:
+      - "slap_streams/**"
+      - "slap_cluster/**"
+      - "slap_slatedb/**"
+      - ".github/workflows/slap_streams.yml"
+
+defaults:
+  run:
+    working-directory: slap_streams
+
+env:
+  MIX_ENV: test
+  SLAP_LOCAL_DEPS: "1"
+  SLAP_SLATEDB_BUILD: "1"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Streams Checks
+    runs-on: ubuntu-24.04
+    env:
+      # More model-based sequences than the local default.
+      SLAP_STREAMS_PROP_RUNS: "1000"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          elixir-version: "1.20"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: slap_slatedb/native/slatedb_nif
+      - run: mix deps.get
+      # Dialyzer's PLTs take minutes to build; they depend on the runtime
+      # and the dependencies.
+      - name: Cache Dialyzer PLTs
+        uses: actions/cache@v4
+        with:
+          path: |
+            slap_streams/_build/test/*.plt
+            slap_streams/_build/test/*.plt.hash
+            ~/.mix/*.plt
+            ~/.mix/*.plt.hash
+          key: plt-slap_streams-${{ runner.os }}-otp29-elixir1.20-${{ hashFiles('slap_streams/mix.exs', 'slap_slatedb/mix.exs', 'slap_cluster/mix.exs') }}
+          restore-keys: plt-slap_streams-${{ runner.os }}-otp29-elixir1.20-
+      - run: mix check

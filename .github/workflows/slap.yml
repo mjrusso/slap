@@ -1,0 +1,244 @@
+name: slap
+
+on:
+  push:
+    paths:
+      - "slap/**"
+      - "slap_streams/**"
+      - "slap_kv/**"
+      - "slap_cluster/**"
+      - "slap_slatedb/**"
+      - ".github/workflows/slap.yml"
+  pull_request:
+    paths:
+      - "slap/**"
+      - "slap_streams/**"
+      - "slap_kv/**"
+      - "slap_cluster/**"
+      - "slap_slatedb/**"
+      - ".github/workflows/slap.yml"
+
+defaults:
+  run:
+    working-directory: slap
+
+env:
+  MIX_ENV: test
+  SLAP_LOCAL_DEPS: "1"
+  SLAP_SLATEDB_BUILD: "1"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Server Checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          elixir-version: "1.20"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: slap_slatedb/native/slatedb_nif
+      - run: mix deps.get
+      # Dialyzer's PLTs take minutes to build; they depend on the runtime
+      # and the dependencies.
+      - name: Cache Dialyzer PLTs
+        uses: actions/cache@v4
+        with:
+          path: |
+            slap/_build/test/*.plt
+            slap/_build/test/*.plt.hash
+            ~/.mix/*.plt
+            ~/.mix/*.plt.hash
+          key: plt-slap-${{ runner.os }}-otp29-elixir1.20-${{ hashFiles('slap/mix.exs', 'slap_streams/mix.exs', 'slap_kv/mix.exs', 'slap_slatedb/mix.exs', 'slap_cluster/mix.exs') }}
+          restore-keys: plt-slap-${{ runner.os }}-otp29-elixir1.20-
+      - run: mix check
+
+  # The official Durable Streams conformance suite against `mix slap.server`,
+  # on the in-memory store and on RustFS.
+  streams-conformance:
+    name: Streams Conformance (${{ matrix.store }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        store: [memory, rustfs]
+    env:
+      MIX_ENV: dev
+    steps:
+      - uses: actions/checkout@v5
+      - name: Start RustFS 1.0.0
+        if: matrix.store == 'rustfs'
+        working-directory: .
+        run: |
+          docker run -d --name rustfs -p 9000:9000 \
+            -e RUSTFS_ACCESS_KEY=rustfsadmin -e RUSTFS_SECRET_KEY=rustfsadmin \
+            rustfs/rustfs@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
+          # RustFS answers before it can create buckets: retry until the
+          # bucket exists.
+          s3() { curl -sf -o /dev/null --aws-sigv4 "aws:amz:us-east-1:s3" \
+            --user rustfsadmin:rustfsadmin "$@" http://127.0.0.1:9000/slap-streams-conformance; }
+          for i in $(seq 1 30); do
+            s3 -X PUT || true; s3 -I && break; sleep 1
+          done
+          s3 -I
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          elixir-version: "1.20"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: slap_slatedb/native/slatedb_nif
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - run: mix deps.get
+      - run: mix compile
+      - name: Start the server
+        run: |
+          if [ "${{ matrix.store }}" = rustfs ]; then
+            export AWS_ENDPOINT=http://127.0.0.1:9000 AWS_ALLOW_HTTP=true AWS_REGION=us-east-1
+            export AWS_ACCESS_KEY_ID=rustfsadmin AWS_SECRET_ACCESS_KEY=rustfsadmin
+            store=s3:s3://slap-streams-conformance/ci
+          else
+            store=memory
+          fi
+          # The reference servers run this suite with a 500 ms long-poll timeout.
+          nohup mix slap.server --streams --port 4437 --store "$store" --long-poll-timeout 500 \
+            --streams-flush-interval 10ms > server.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf -o /dev/null http://127.0.0.1:4437/health && break; sleep 1; done
+      - name: Run the Durable Streams conformance suite
+        working-directory: slap/durable_streams
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          DURABLE_STREAMS_URL=http://127.0.0.1:4437 pnpm test
+      - name: Server log
+        if: always()
+        run: tail -100 server.log
+
+  # kill -9 under load, 20 runs in a row: every acknowledged append must
+  # survive at its acknowledged offset (scripts/crash_test.exs).
+  crash:
+    name: Crash Recovery (${{ matrix.store }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        store: [local, rustfs]
+    env:
+      MIX_ENV: dev
+    steps:
+      - uses: actions/checkout@v5
+      - name: Start RustFS 1.0.0
+        if: matrix.store == 'rustfs'
+        working-directory: .
+        run: |
+          docker run -d --name rustfs -p 9000:9000 \
+            -e RUSTFS_ACCESS_KEY=rustfsadmin -e RUSTFS_SECRET_KEY=rustfsadmin \
+            rustfs/rustfs@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
+          # RustFS answers before it can create buckets: retry until the
+          # bucket exists.
+          s3() { curl -sf -o /dev/null --aws-sigv4 "aws:amz:us-east-1:s3" \
+            --user rustfsadmin:rustfsadmin "$@" http://127.0.0.1:9000/slap-crash; }
+          for i in $(seq 1 30); do
+            s3 -X PUT || true; s3 -I && break; sleep 1
+          done
+          s3 -I
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          elixir-version: "1.20"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: slap_slatedb/native/slatedb_nif
+      - run: mix deps.get
+      - run: mix compile
+      - name: 20 runs
+        run: |
+          if [ "${{ matrix.store }}" = rustfs ]; then
+            export AWS_ENDPOINT=http://127.0.0.1:9000 AWS_ALLOW_HTTP=true AWS_REGION=us-east-1
+            export AWS_ACCESS_KEY_ID=rustfsadmin AWS_SECRET_ACCESS_KEY=rustfsadmin
+            mix run scripts/crash_test.exs --runs 20 --store s3:s3://slap-crash/ci
+          else
+            mix run scripts/crash_test.exs --runs 20
+          fi
+
+  cluster:
+    name: Cluster Failover (${{ matrix.placement }}, ${{ matrix.store }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - store: local
+            shards: 64
+            placement: distributed
+          # RustFS on the same runner is slower to reopen shards; fewer of them.
+          - store: rustfs
+            shards: 16
+            placement: object-lease
+          - store: rustfs
+            shards: 16
+            placement: distributed
+    env:
+      MIX_ENV: dev
+    steps:
+      - uses: actions/checkout@v5
+      - name: Start RustFS 1.0.0
+        if: matrix.store == 'rustfs'
+        working-directory: .
+        run: |
+          docker run -d --name rustfs -p 9000:9000 \
+            -e RUSTFS_ACCESS_KEY=rustfsadmin -e RUSTFS_SECRET_KEY=rustfsadmin \
+            rustfs/rustfs@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
+          # RustFS answers before it can create buckets: retry until the
+          # bucket exists.
+          s3() { curl -sf -o /dev/null --aws-sigv4 "aws:amz:us-east-1:s3" \
+            --user rustfsadmin:rustfsadmin "$@" http://127.0.0.1:9000/slap-cluster; }
+          for i in $(seq 1 30); do
+            s3 -X PUT || true; s3 -I && break; sleep 1
+          done
+          s3 -I
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          elixir-version: "1.20"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: slap_slatedb/native/slatedb_nif
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - run: mix deps.get
+      - run: mix compile
+      - name: Streams conformance through one node of three
+        if: matrix.store == 'local'
+        run: |
+          scripts/cluster.sh start "$RUNNER_TEMP/cluster"
+          cd durable_streams
+          corepack enable
+          pnpm install --frozen-lockfile
+          DURABLE_STREAMS_URL=http://127.0.0.1:4442 pnpm test
+      - name: Stop the streams conformance cluster
+        if: always() && matrix.store == 'local'
+        run: |
+          scripts/cluster.sh stop "$RUNNER_TEMP/cluster"
+          tail -50 "$RUNNER_TEMP"/cluster/n*.log || true
+      - name: Faults under load, 6 runs
+        run: |
+          if [ "${{ matrix.store }}" = rustfs ]; then
+            export AWS_ENDPOINT=http://127.0.0.1:9000 AWS_ALLOW_HTTP=true AWS_REGION=us-east-1
+            export AWS_ACCESS_KEY_ID=rustfsadmin AWS_SECRET_ACCESS_KEY=rustfsadmin
+            store=s3:s3://slap-cluster/ci-${{ matrix.placement }}
+          else
+            store=local
+          fi
+          mix run scripts/cluster_crash_test.exs --runs 6 --shards ${{ matrix.shards }} --store "$store" \
+            --placement ${{ matrix.placement }}

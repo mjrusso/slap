@@ -1,0 +1,145 @@
+name: slap_slatedb
+
+on:
+  push:
+    paths:
+      - "slap_slatedb/**"
+      - ".github/workflows/slap_slatedb*.yml"
+  pull_request:
+    paths:
+      - "slap_slatedb/**"
+      - ".github/workflows/slap_slatedb*.yml"
+
+defaults:
+  run:
+    working-directory: slap_slatedb
+
+env:
+  MIX_ENV: test
+  # Build the NIF from source with rustler instead of downloading a release.
+  SLAP_SLATEDB_BUILD: "1"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust Checks
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: slap_slatedb/native/slatedb_nif
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: slap_slatedb/native/slatedb_nif
+      - run: cargo fmt --check
+      - run: cargo clippy --release --all-targets -- -D warnings
+      # Unit tests for code that does not need a running BEAM.
+      - run: cargo test --release
+
+  check:
+    name: SlateDB Checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          elixir-version: "1.20"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: slap_slatedb/native/slatedb_nif
+      - run: mix deps.get
+      # Dialyzer's PLTs take minutes to build; they depend on the runtime
+      # and the dependencies.
+      - name: Cache Dialyzer PLTs
+        uses: actions/cache@v4
+        with:
+          path: |
+            slap_slatedb/_build/test/*.plt
+            slap_slatedb/_build/test/*.plt.hash
+            ~/.mix/*.plt
+            ~/.mix/*.plt.hash
+          key: plt-slap_slatedb-${{ runner.os }}-otp29-elixir1.20-${{ hashFiles('slap_slatedb/mix.exs', 'slap_slatedb/mix.exs', 'slap_cluster/mix.exs') }}
+          restore-keys: plt-slap_slatedb-${{ runner.os }}-otp29-elixir1.20-
+      - run: mix check
+
+  test:
+    name: Compatibility Tests (${{ matrix.os }}, OTP ${{ matrix.otp }}, Elixir ${{ matrix.elixir }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, otp: "27", elixir: "1.18" }
+          - { os: ubuntu-24.04, otp: "28", elixir: "1.19" }
+          - { os: ubuntu-24.04, otp: "29", elixir: "1.20" }
+          - { os: macos-14, otp: "29", elixir: "1.20" }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: slap_slatedb/native/slatedb_nif
+      - run: mix deps.get
+      - run: mix format --check-formatted
+      - run: mix compile --warnings-as-errors
+      # :slow checks that schedulers stay free during slow I/O; :crash kills a
+      # writer VM and checks that durable writes survive.
+      - run: mix test --include slow --include crash
+
+  object-stores:
+    name: Object Store Tests (RustFS, Azurite)
+    runs-on: ubuntu-24.04
+    env:
+      SLAP_TEST_S3_ENDPOINT: http://127.0.0.1:9000
+      SLAP_TEST_AZURITE: "1"
+    steps:
+      - uses: actions/checkout@v5
+      # Pinned images. RustFS must answer 412 to conflicting conditional
+      # PUTs, or fencing does not work; the next step checks that.
+      - name: Start RustFS 1.0.0 and Azurite 3.37.0
+        working-directory: .
+        run: |
+          docker run -d --name rustfs -p 9000:9000 \
+            -e RUSTFS_ACCESS_KEY=rustfsadmin -e RUSTFS_SECRET_KEY=rustfsadmin \
+            rustfs/rustfs@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
+          docker run -d --name azurite -p 10000:10000 \
+            mcr.microsoft.com/azure-storage/azurite:3.37.0 \
+            azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck --loose
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://127.0.0.1:9000/ && curl -s -o /dev/null http://127.0.0.1:10000/ && break
+            sleep 1
+          done
+      - name: Create the bucket and container, and check conditional writes
+        run: |
+          s3() { curl -s -o /dev/null -w "%{http_code}" --aws-sigv4 "aws:amz:us-east-1:s3" \
+            --user rustfsadmin:rustfsadmin "$@"; }
+          s3 -X PUT http://127.0.0.1:9000/slatedb-test; echo
+          s3 -X PUT --data x http://127.0.0.1:9000/slatedb-test/conditional-check; echo
+          status=$(s3 -X PUT -H 'If-None-Match: *' --data y http://127.0.0.1:9000/slatedb-test/conditional-check)
+          test "$status" = 412 || { echo "RustFS answered $status to If-None-Match, not 412"; exit 1; }
+          status=$(s3 -X PUT -H 'If-Match: "wrong-etag"' --data y http://127.0.0.1:9000/slatedb-test/conditional-check)
+          test "$status" = 412 || { echo "RustFS answered $status to If-Match, not 412"; exit 1; }
+          python3 scripts/azurite_container.py slatedb
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          elixir-version: "1.20"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: slap_slatedb/native/slatedb_nif
+      - run: mix deps.get
+      # The :s3 and :azure tests run because their environment variables are
+      # set. They cover fencing, durability subscriptions and the crash test
+      # on S3.
+      - run: mix test --include slow --include crash

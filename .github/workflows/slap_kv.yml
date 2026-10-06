@@ -1,0 +1,57 @@
+name: slap_kv
+
+on:
+  push:
+    paths:
+      - "slap_kv/**"
+      - "slap_cluster/**"
+      - "slap_slatedb/**"
+      - ".github/workflows/slap_kv.yml"
+  pull_request:
+    paths:
+      - "slap_kv/**"
+      - "slap_cluster/**"
+      - "slap_slatedb/**"
+      - ".github/workflows/slap_kv.yml"
+
+defaults:
+  run:
+    working-directory: slap_kv
+
+env:
+  MIX_ENV: test
+  SLAP_LOCAL_DEPS: "1"
+  SLAP_SLATEDB_BUILD: "1"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: KV Checks
+    runs-on: ubuntu-24.04
+    env:
+      # More model-based sequences than the local default.
+      SLAP_KV_PROP_RUNS: "1000"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          elixir-version: "1.20"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: slap_slatedb/native/slatedb_nif
+      - run: mix deps.get
+      # Dialyzer's PLTs take minutes to build; they depend on the runtime
+      # and the dependencies.
+      - name: Cache Dialyzer PLTs
+        uses: actions/cache@v4
+        with:
+          path: |
+            slap_kv/_build/test/*.plt
+            slap_kv/_build/test/*.plt.hash
+            ~/.mix/*.plt
+            ~/.mix/*.plt.hash
+          key: plt-slap_kv-${{ runner.os }}-otp29-elixir1.20-${{ hashFiles('slap_kv/mix.exs', 'slap_slatedb/mix.exs', 'slap_cluster/mix.exs') }}
+          restore-keys: plt-slap_kv-${{ runner.os }}-otp29-elixir1.20-
+      - run: mix check
