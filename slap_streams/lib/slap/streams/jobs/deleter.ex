@@ -130,7 +130,9 @@ defmodule Slap.Streams.Jobs.Deleter do
   defp write!(_db, []), do: :ok
 
   defp write!(db, ops) do
-    {:ok, _} = SlateDB.write(db, ops)
-    :ok
+    case SlateDB.write(db, ops) do
+      {:ok, _} -> :ok
+      {:error, error} -> raise error
+    end
   end
 end
