@@ -1,0 +1,4 @@
+.nix-mix/
+.nix-hex/
+.direnv/
+/result

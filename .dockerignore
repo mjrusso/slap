@@ -1,0 +1,11 @@
+.git
+.direnv
+**/.nix-hex
+**/.nix-mix
+**/_build
+**/deps
+**/target
+**/priv/native
+**/.elixir_ls
+**/node_modules
+jepsen/store
