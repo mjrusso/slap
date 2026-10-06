@@ -55,8 +55,9 @@ from this checkout. `just deps`
 installs Hex and fetches dependencies;
 `just check [project]` runs `mix check` in every project, or in one, and
 for slap_slatedb also the NIF's Rust checks (`just check-rust`: rustfmt,
-clippy and `cargo test`, as CI runs them). `just format` formats the Nix,
-Rust and Elixir code.
+clippy and `cargo test`, as CI runs them). `just smells [project]` reports
+Reach's smell findings, which are advisory and not part of `mix check`.
+`just format` formats the Nix, Rust and Elixir code.
 Each package README has the same preamble, between `<!-- slap-preamble -->`
 lines: edit `scripts/readme_preamble.md` and run `just readme-preamble`.
 `just readme-preamble-check` (run by `just check`, `just lint` and CI) fails

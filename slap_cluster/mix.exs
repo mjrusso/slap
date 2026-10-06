@@ -66,6 +66,7 @@ defmodule Slap.Cluster.MixProject do
       {:credo, "~> 1.7.19", only: [:dev, :test], runtime: false},
       {:ex_slop, "~> 0.4.5", only: [:dev, :test], runtime: false},
       {:ex_dna, "~> 1.5.4", only: [:dev, :test], runtime: false},
+      {:reach, "~> 2.8.4", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4.8", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false},
       {:usage_rules, "~> 1.2.8", only: :dev},

@@ -66,6 +66,10 @@ lint project="":
     just _each "{{ project }}" "MIX_ENV=test mix credo"
     if [ -z "{{ project }}" ]; then just readme-preamble-check; fi
 
+# Reports Reach's smell findings without failing on them.
+smells project="":
+    just _each "{{ project }}" "MIX_ENV=test mix reach.check --smells"
+
 typecheck project="":
     just _each "{{ project }}" "MIX_ENV=test mix dialyzer"
 
