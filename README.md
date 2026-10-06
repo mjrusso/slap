@@ -331,10 +331,9 @@ The Nix shell sets `SLAP_LOCAL_DEPS=1`, so the Mix projects use sibling
 packages from this checkout. CI and the Jepsen node build set the same
 variable. With the variable unset or set to `0`, their dependencies use
 versioned Hex packages. The Nix shell also sets `SLAP_SLATEDB_BUILD=1`, which
-builds the SlateDB NIF from source (this needs Rust). To check a package for
-publication from the Nix shell, run `SLAP_LOCAL_DEPS=0 mix deps.get` and then
-`SLAP_LOCAL_DEPS=0 mix hex.publish --dry-run` in its directory after its
-dependencies have been published.
+builds the SlateDB NIF from source (this needs Rust).
+
+[RELEASING.md](RELEASING.md) describes how to release the packages to Hex.
 
 ## License
 

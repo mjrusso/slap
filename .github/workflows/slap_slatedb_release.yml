@@ -1,7 +1,6 @@
 # Builds the slap_slatedb NIF for every target and NIF version, and attaches
 # the libraries to the GitHub release for tag `slap_slatedb-v<version>`.
-# rustler_precompiled downloads them from there. See "Releasing" in
-# slap_slatedb/README.md.
+# rustler_precompiled downloads them from there. See RELEASING.md.
 name: slap_slatedb Release
 
 on:

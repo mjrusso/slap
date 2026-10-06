@@ -74,6 +74,18 @@ format:
 
 ci: check
 
+# Shows each package's version, tag, Hex and CHANGELOG state, and commits since its last tag.
+release-status *packages:
+    @scripts/release.sh status "{{ projects }}" {{ packages }}
+
+# Tags HEAD `<package>-v<version>` for each untagged package version, after confirming.
+release-tags *packages:
+    @scripts/release.sh tags "{{ projects }}" {{ packages }}
+
+# Publishes to Hex each tagged package version not on Hex yet (RELEASING.md).
+publish *packages:
+    @scripts/release.sh publish "{{ projects }}" {{ packages }}
+
 _each project command:
     #!/usr/bin/env bash
     set -euo pipefail

@@ -60,7 +60,9 @@ Rust and Elixir code.
 `just streams-conformance` runs the Durable Streams conformance suite
 against `mix slap.server`; run it after changing `slap_streams`' protocol
 behaviour. `just streams-bench` runs the official Durable Streams benchmarks
-against `mix slap.server` and the official Caddy server.
+against `mix slap.server` and the official Caddy server. `RELEASING.md`
+describes releases, through `just release-status`, `just release-tags` and
+`just publish`.
 
 ## Checks
 
