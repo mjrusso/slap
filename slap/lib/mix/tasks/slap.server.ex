@@ -54,7 +54,8 @@ defmodule Mix.Tasks.Slap.Server do
   alias Slap.Cluster.Strategy
   alias Slap.SlateDB
 
-  @stream_child_options Slap.Streams.Cluster.child_option_keys()
+  @stream_child_switches for key <- Slap.Streams.Cluster.child_option_keys(),
+                             do: {key, :"streams_#{key}"}
 
   @switches [
               help: :boolean,
@@ -76,7 +77,7 @@ defmodule Mix.Tasks.Slap.Server do
               kv_flush_interval: :string,
               kv_partition_writers: :integer
             ] ++
-              for(key <- @stream_child_options, do: {String.to_atom("streams_#{key}"), :integer})
+              for({_key, switch} <- @stream_child_switches, do: {switch, :integer})
 
   @impl true
   def run(args) do
@@ -172,7 +173,7 @@ defmodule Mix.Tasks.Slap.Server do
     if !opts[:streams] and
          Enum.any?(
            [:streams_shards, :streams_flush_interval, :long_poll_timeout, :sse_timeout] ++
-             Enum.map(@stream_child_options, &String.to_atom("streams_#{&1}")),
+             Keyword.values(@stream_child_switches),
            &Keyword.has_key?(opts, &1)
          ),
        do: Mix.raise("Streams options require --streams")
@@ -204,8 +205,8 @@ defmodule Mix.Tasks.Slap.Server do
           settings: %{flush_interval: Keyword.get(opts, :streams_flush_interval, "10ms")},
           child_options:
             for(
-              key <- @stream_child_options,
-              value = opts[String.to_atom("streams_#{key}")],
+              {key, switch} <- @stream_child_switches,
+              value = opts[switch],
               value != nil,
               do: {key, value}
             ),
