@@ -117,7 +117,8 @@ jobs:
           path: slap_slatedb/bench/results
 
       # Main: results go to gh-pages. github-action-benchmark needs the
-      # branch to exist, so create it (empty) on the first run.
+      # branch to exist, so create it (one empty commit) on the first run,
+      # without changing the checkout that the later steps use.
       - name: Create the gh-pages branch
         if: github.ref == 'refs/heads/main'
         working-directory: .
@@ -125,10 +126,9 @@ jobs:
           if ! git ls-remote --exit-code --heads origin gh-pages > /dev/null; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git switch --orphan gh-pages
-            git commit --allow-empty -m "Start gh-pages for benchmark results"
-            git push origin gh-pages
-            git switch -
+            empty_tree=$(git hash-object -t tree /dev/null)
+            commit=$(git commit-tree "$empty_tree" -m "Start gh-pages for benchmark results")
+            git push origin "$commit:refs/heads/gh-pages"
           fi
       - name: Store results (lower is better)
         if: github.ref == 'refs/heads/main'
