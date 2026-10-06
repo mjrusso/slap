@@ -1,18 +1,19 @@
 # slap
 
-`slap` provides a Mix-run HTTP server for evaluating, testing, and benchmarking
-[Durable Streams](https://github.com/durable-streams/durable-streams) and KV.
-It serves either or both services from one listener. It does not serve Files or
-Yjs, and it does not authenticate requests.
+`slap` is a standalone HTTP server for two Slap services: [Durable
+Streams](https://durablestreams.com)
+([`slap_streams`](https://hexdocs.pm/slap_streams/)) and partitioned key-value
+storage ([`slap_kv`](https://hexdocs.pm/slap_kv/)). It serves either or both
+from one listener, and it does not authenticate requests.
 
-Applications normally depend on the embeddable service packages instead, so
-that they own their supervision tree and HTTP routing; see below. Adding `slap`
-as a dependency does not start a listener: run `mix slap.server`, or supervise
-`{Slap.Server, opts}`. The Mix task is not available in a release, so a release
-that needs this listener supervises `{Slap.Server, opts}`.
+Use `slap` (specifically, `mix slap.server`) to evaluate, test, and benchmark
+these services without writing an application; see [Try the standalone
+server](#try-the-standalone-server) for details.
 
-The supported setup has one `Slap.Streams.Cluster` and one `Slap.KV.Cluster`
-per VM. A cluster can have many shards and span several VMs.
+Applications should depend on a service package instead, such as `slap_streams`
+or `slap_kv`, so that they own their supervision tree, HTTP routing, and
+authentication; see [Embed a service in your
+application](#embed-a-service-in-your-application).
 
 <!-- slap-preamble -->
 > #### About Slap {: .info}
@@ -51,67 +52,34 @@ per VM. A cluster can have many shards and span several VMs.
 >   benchmarking `slap_streams` and `slap_kv`
 <!-- /slap-preamble -->
 
-## Embed a service in your application
-
-Choose the package for the service your application needs:
-
-| Need | Package | Integration |
-| --- | --- | --- |
-| Direct key-value access to SlateDB | [`slap_slatedb`](https://hexdocs.pm/slap_slatedb/) | Open a database and use `Slap.SlateDB`. |
-| Custom sharded storage | [`slap_cluster`](https://hexdocs.pm/slap_cluster/) | Define shard children and supervise your module that uses `Slap.Cluster`. |
-| Durable Streams | [`slap_streams`](https://hexdocs.pm/slap_streams/) | Supervise `Slap.Streams.Cluster`; call `Slap.Streams` or serve `Slap.Streams.HTTP.Router` as a Plug. |
-| Partitioned KV | [`slap_kv`](https://hexdocs.pm/slap_kv/) | Supervise `Slap.KV.Cluster`; call `Slap.KV` or serve `Slap.KV.HTTP.Router` as a Plug. |
-| Files | [`slap_files`](https://hexdocs.pm/slap_files/) | Supervise `Slap.KV.Cluster` before `Slap.Files`. |
-| Yjs documents | [`slap_yjs`](https://hexdocs.pm/slap_yjs/) | Supervise `Slap.Streams.Cluster` and `Slap.Yjs.Docs`. |
-| Snapshot logs | [`slap_snapshot_log`](https://hexdocs.pm/slap_snapshot_log/) | Supervise `Slap.Streams.Cluster` before using the log. |
-
-The embeddable packages do not start an HTTP listener. The Streams and KV
-HTTP routers are Plugs that can be mounted in your application's HTTP
-pipeline or served by a listener you supervise. Put your authentication and
-authorization in front of them. The linked package READMEs show the required
-children and in-process APIs.
-
-## Install the Mix-run server
-
-If another Mix project needs this server, add `slap` to its
-`mix.exs`:
-
-```elixir
-defp deps do
-  [
-    {:slap, "~> 0.1.0"}
-  ]
-end
-```
-
-Run `mix deps.get`. API documentation is on
-[HexDocs](https://hexdocs.pm/slap/).
-
 ## Try the standalone server
 
-With Elixir 1.18 or later, from `slap/` in a checkout of the
-[repository](https://github.com/mjrusso/slap), run `mix deps.get`, then one of
-these commands. Without `SLAP_LOCAL_DEPS=1`, `mix deps.get` uses the packages
-published on Hex and records them in `slap/mix.lock`; run
-`git restore mix.lock` afterwards to undo that.
+You need Elixir 1.18 or later. Clone the
+[repository](https://github.com/mjrusso/slap), then, from its `slap/`
+directory, fetch the dependencies and start the server:
 
 ```sh
-mix slap.server --streams --store memory
-mix slap.server --kv --store memory
+mix deps.get
 mix slap.server --streams --kv --store memory
 ```
 
+`--streams` and `--kv` select the services; pass one or both.
+
+The server listens on `http://127.0.0.1:4437`. It serves Streams under
+`/v1/stream/` and KV under `/v1/kv/`, and `GET /health` answers 200 once it is
+up. Use `--ip` to listen on another address, and `--port` for another port.
 Use `iex -S mix slap.server --streams --store memory` to keep an IEx prompt
 while the server runs.
 
-The listener binds to `127.0.0.1` by default. Use `--ip` to listen on another
-address. The memory store loses its data when the server stops. To try S3,
-create the bucket, configure `AWS_REGION` and credentials in the server's
-environment, then run:
+The memory store loses its data when the server stops. To use S3, create the
+bucket, set `AWS_REGION` and credentials (such as `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY`) in the server's environment, then run:
 
 ```sh
 mix slap.server --streams --kv --store s3:s3://my-bucket/my-app
 ```
+
+`--store local:DIR` keeps the data in a local directory.
 
 ### Streams
 
@@ -159,20 +127,25 @@ curl 'http://localhost:4437/v1/kv/people?gte=a&lt=c'
 
 The scan returns JSON with keys and values encoded as unpadded base64url.
 
+### Options
+
 `mix help slap.server` lists the options: the store, the listener address,
 each service's shard count and flush interval, the long-poll and SSE timeouts,
 a pid file, and the placement (`local`, `object-lease`, `distributed` or
-`static`) for running as one node of a cluster.
+`static`) for running as one node of a cluster. `object-lease` requires an S3
+store; `--peers` requires a placement other than `local`.
 
-`object-lease` requires an S3 store; `--peers` requires a placement other
-than `local`.
+Each service has its own shards: in a store, the streams' shards are under
+`streams/` and KV's under `kv/`, each with its own leases when the placement
+uses them. Run one server per VM; a cluster can have many shards and span
+several VMs.
 
-In a store, the streams' shards are under `streams/` and KV's under `kv/`,
-each with its own leases when the placement uses them.
+### Supervising the server
 
-To supervise the standalone listener in a test or benchmark harness, add
-`{Slap.Server, opts}` as a child. It starts the selected clusters and a Bandit
-listener together:
+The Mix task is not available in a release. To run the server in a release,
+or in a test or benchmark harness, add `slap` as a dependency and add
+`{Slap.Server, opts}` as a child. It starts the selected services and a
+Bandit listener together:
 
 ```elixir
 children = [
@@ -183,6 +156,27 @@ children = [
     port: 4437}
 ]
 ```
+
+## Embed a service in your application
+
+To use a service in your application, depend on its package and add its
+processes to your supervision tree:
+
+| Package | Integration |
+| --- | --- |
+| [`slap_streams`](https://hexdocs.pm/slap_streams/) | Supervise `Slap.Streams.Cluster`; call `Slap.Streams` or serve `Slap.Streams.HTTP.Router` as a Plug. |
+| [`slap_kv`](https://hexdocs.pm/slap_kv/) | Supervise `Slap.KV.Cluster`; call `Slap.KV` or serve `Slap.KV.HTTP.Router` as a Plug. |
+| [`slap_files`](https://hexdocs.pm/slap_files/) | Supervise `Slap.KV.Cluster` before `Slap.Files`. |
+| [`slap_yjs`](https://hexdocs.pm/slap_yjs/) | Supervise `Slap.Streams.Cluster` and `Slap.Yjs.Docs`. |
+| [`slap_snapshot_log`](https://hexdocs.pm/slap_snapshot_log/) | Supervise `Slap.Streams.Cluster` before using the log. |
+| [`slap_cluster`](https://hexdocs.pm/slap_cluster/) | Define shard children and supervise your module that uses `Slap.Cluster`. |
+| [`slap_slatedb`](https://hexdocs.pm/slap_slatedb/) | Open a database and use `Slap.SlateDB`. |
+
+These packages do not start an HTTP listener. The Streams and KV HTTP routers
+are Plugs: mount them in your application's HTTP pipeline, or serve them with a
+listener you supervise, and put your authentication and authorization in front
+of them. Each package's README shows the children it needs and its in-process
+API.
 
 ## Development and testing
 
