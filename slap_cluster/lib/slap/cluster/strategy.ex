@@ -51,20 +51,14 @@ defmodule Slap.Cluster.Strategy do
   def validate_options!(opts, allowed, positive \\ [], nonnegative \\ []) do
     Keyword.validate!(opts, allowed)
 
-    for key <- positive, Keyword.has_key?(opts, key), not positive_integer?(opts[key]) do
-      raise ArgumentError,
-            "#{inspect(key)} must be a positive integer, got: #{inspect(opts[key])}"
-    end
-
-    for key <- nonnegative,
-        Keyword.has_key?(opts, key),
-        not (is_integer(opts[key]) and opts[key] >= 0) do
-      raise ArgumentError,
-            "#{inspect(key)} must be a nonnegative integer, got: #{inspect(opts[key])}"
-    end
-
+    validate_integers!(opts, positive, "a positive integer", &(&1 > 0))
+    validate_integers!(opts, nonnegative, "a nonnegative integer", &(&1 >= 0))
     :ok
   end
 
-  defp positive_integer?(value), do: is_integer(value) and value > 0
+  defp validate_integers!(opts, keys, expected, valid?) do
+    for {key, value} <- Keyword.take(opts, keys), not (is_integer(value) and valid?.(value)) do
+      raise ArgumentError, "#{inspect(key)} must be #{expected}, got: #{inspect(value)}"
+    end
+  end
 end
