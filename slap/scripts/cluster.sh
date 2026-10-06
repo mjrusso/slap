@@ -50,7 +50,16 @@ case $cmd in
     exit 1
     ;;
   stop)
-    for f in "$dir"/n*.pid; do [ -f "$f" ] && kill "$(cat "$f")" 2>/dev/null || true; done
+    # The next cluster uses the same node names, and a node cannot start while
+    # another node with its name is running. A node with SSE streams open
+    # takes tens of seconds to stop.
+    pids=
+    for f in "$dir"/n*.pid; do [ -f "$f" ] && pids="$pids $(cat "$f")" || true; done
+    for pid in $pids; do kill "$pid" 2>/dev/null || true; done
+    for pid in $pids; do
+      for t in $(seq 1 600); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+      kill -9 "$pid" 2>/dev/null || true
+    done
     ;;
   *)
     echo "usage: $0 start|stop DIR [NODES] [BASE_PORT]" >&2
