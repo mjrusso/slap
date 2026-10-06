@@ -2,7 +2,8 @@
 
 ***Slap it in a bucket!*** Use object storage as a database.
 
-**Slap** provides Elixir bindings for SlateDB, and services built on them:
+**Slap** provides Elixir bindings for [SlateDB](https://slatedb.io), and
+services built on them:
 
 - a [Durable Streams](https://durablestreams.com) server that passes the
   official conformance suite
@@ -14,8 +15,9 @@
 
 The services are designed to be embedded in your existing application. Each
 service can run across several nodes, with a choice of placement strategies and
-failover. A standalone HTTP server is also provided for evaluation, testing,
-and benchmarking.
+failover. These services acknowledge a write only once it is durable in the
+store. A standalone HTTP server is also provided for evaluation, testing, and
+benchmarking.
 
 ---
 
@@ -31,12 +33,14 @@ and benchmarking.
 
 # Slap
 
-[SlateDB](https://slatedb.io/docs/design/overview/) is a log-structured
-merge-tree key-value engine embedded in an application. It stores its
-write-ahead log and sorted string table files in object storage (S3, Google
-Cloud Storage, Azure Blob Storage, or compatible services such as Tigris). A
-**store** is where SlateDB keeps its data; the Elixir binding also supports
-local directories and memory.
+## SlateDB
+
+SlateDB is an embedded [log-structured merge-tree key-value
+engine](https://slatedb.io/docs/design/overview/). It stores its write-ahead
+log and sorted string table files in object storage (S3, Google Cloud Storage,
+Azure Blob Storage, or compatible services such as Tigris). A **store** is
+where SlateDB keeps its data; the Elixir binding also supports local
+directories and memory.
 
 SlateDB batches writes to limit PUT requests and periodically flushes its
 in-memory write-ahead log for durability. A shorter flush interval makes writes
@@ -54,14 +58,14 @@ log position. Any later write from the previous process fails. (The object
 store must honor conditional writes.) See [SlateDB's writer
 protocol](https://slatedb.io/rfcs/0001-manifest/#writer-protocol).
 
+## Sharding
+
 Slap uses multiple SlateDB databases as **shards**, each with its own writer.
 Writes to different shards can run in parallel, increasing throughput. Slap
 assigns each shard to one node and routes Streams and KV requests to its
 owner. SlateDB's fencing protects against nodes disagreeing about ownership.
 KV keeps each **partition**'s rows on one shard; Streams keeps paths in the
 same **placement group** on one shard.
-
-Streams and KV acknowledge writes only when they are durable in the store.
 
 ## Usage Examples
 
@@ -294,9 +298,12 @@ the suite, CI runs every combination of the five workloads, two placement
 strategies (object leases and distributed), and four faults: 40 jobs, each
 running two 120-second trials.
 
-Which guarantees are checked depends on the placement strategy; the Jepsen
-README lists them. A passing run shows that no violation occurred in the
-operations and faults it ran, not that none can occur.
+With object leases, the checkers require every read to see each write that was
+acknowledged before the read started. With distributed placement, a node can
+serve stale reads during a fault, so the checkers allow stale reads but still
+require every acknowledged write to be present once the cluster recovers. The
+[Jepsen README](jepsen/README.md#placement) lists the checks for each
+placement.
 
 To run a workload, install Docker with Compose, JDK 21, Leiningen, gnuplot,
 Graphviz, and `just` (the Nix shell provides all but Docker). Then, from the
