@@ -1,27 +1,31 @@
 # slap_streams
 
-`slap_streams` is a [Durable
-Streams](https://github.com/durable-streams/durable-streams) server that
-persists data using SlateDB, built on
+`slap_streams` is a server for [Durable Streams](https://durablestreams.com),
+an HTTP protocol for append-only streams of messages. Clients read a stream
+from an offset, and resume from their last offset after a disconnect or
+restart.
+
+`slap_streams` stores streams in SlateDB, and acknowledges an append only once
+it is durably stored in object storage. It passes the official Durable Streams
+conformance suite, and is built on top of
 [`slap_cluster`](https://hexdocs.pm/slap_cluster/) and
-[`slap_slatedb`](https://hexdocs.pm/slap_slatedb/). It is meant to be embedded:
-your application starts `Slap.Streams.Cluster`, calls `Slap.Streams`
-in-process, and can mount `Slap.Streams.HTTP.Router` in its
-[`Plug`](https://hexdocs.pm/plug/) pipeline.
+[`slap_slatedb`](https://hexdocs.pm/slap_slatedb/).
 
-Use `slap_streams` for named, append-only streams of messages that clients read
-from a saved offset, so that they can catch up after a disconnect or restart.
-For example, an application can append a document's changes to a stream, and
-each client continues reading from its last offset. The package handles durable
-appends, reads by offset, waits for new messages, producer deduplication,
-stream expiry, and forks. It does not define your message format or apply
-messages to your application's state.
+Use `slap_streams` to deliver a sequence of messages to clients. For example,
+an application can append a document's changes to a stream, and each client
+keeps reading from its last offset. The package handles durable appends, reads
+by offset, waits for new messages, producer deduplication, stream expiry, and
+forks. It does not define your message format or apply messages to your
+application's state.
 
-Also see the [`slap`](https://hexdocs.pm/slap/) package, which provides a Mix
-task for running `slap_streams` as a standalone server (`mix slap.server
---streams --store memory`). It contains the code for running the official
-Durable Streams conformance suite and benchmarks, the crash and cluster tests,
-and the HTTP load benchmark.
+`slap_streams` runs inside your application, on one node or several. You start
+`Slap.Streams.Cluster`, call `Slap.Streams` in-process, and can mount
+`Slap.Streams.HTTP.Router` in your [`Plug`](https://hexdocs.pm/plug/) pipeline.
+Streams are divided among SlateDB databases called shards, and a call for a
+stream goes to the node that owns its shard.
+
+The [`slap`](https://hexdocs.pm/slap/) package runs `slap_streams` as a
+standalone server (`mix slap.server --streams --store memory`).
 
 Section numbers (§) in the API documentation refer to the [Durable Streams
 specification](https://github.com/durable-streams/durable-streams/blob/main/PROTOCOL.md).
