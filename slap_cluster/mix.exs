@@ -16,7 +16,7 @@ defmodule Slap.Cluster.MixProject do
       dialyzer: [plt_add_apps: [:ex_unit]],
       usage_rules: [file: "AGENTS.md", usage_rules: [:usage_rules]],
       description:
-        "Runs N SlateDB databases (shards) in one bucket, with placement, fencing, " <>
+        "Runs N SlateDB databases (shards) in one store, with placement, fencing, " <>
           "durability notifications and routing.",
       source_url: @source_url,
       package: [licenses: ["Apache-2.0"], links: %{"GitHub" => @source_url}],
