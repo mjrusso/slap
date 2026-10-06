@@ -57,6 +57,10 @@ installs Hex and fetches dependencies;
 for slap_slatedb also the NIF's Rust checks (`just check-rust`: rustfmt,
 clippy and `cargo test`, as CI runs them). `just format` formats the Nix,
 Rust and Elixir code.
+Each package README has the same preamble, between `<!-- slap-preamble -->`
+lines: edit `scripts/readme_preamble.md` and run `just readme-preamble`.
+`just readme-preamble-check` (run by `just check`, `just lint` and CI) fails
+if a copy differs.
 `just streams-conformance` runs the Durable Streams conformance suite
 against `mix slap.server`; run it after changing `slap_streams`' protocol
 behaviour. `just streams-bench` runs the official Durable Streams benchmarks

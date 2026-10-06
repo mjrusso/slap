@@ -21,6 +21,7 @@ dev:
 check project="":
     just _each "{{ project }}" "mix check"
     if [ -z "{{ project }}" ] || [ "{{ project }}" = slap_slatedb ]; then just check-rust; fi
+    if [ -z "{{ project }}" ]; then just readme-preamble-check; fi
 
 # The SlateDB NIF's Rust checks, as CI runs them.
 check-rust:
@@ -63,9 +64,18 @@ lint project="":
     just _each "{{ project }}" "MIX_ENV=test mix format --check-formatted"
     just _each "{{ project }}" "MIX_ENV=test mix deps.unlock --check-unused"
     just _each "{{ project }}" "MIX_ENV=test mix credo"
+    if [ -z "{{ project }}" ]; then just readme-preamble-check; fi
 
 typecheck project="":
     just _each "{{ project }}" "MIX_ENV=test mix dialyzer"
+
+# Writes scripts/readme_preamble.md into each package README.
+readme-preamble:
+    scripts/readme_preamble.sh write "{{ projects }}"
+
+# Checks that each package README contains scripts/readme_preamble.md, as CI does.
+readme-preamble-check:
+    scripts/readme_preamble.sh check "{{ projects }}"
 
 format:
     nixpkgs-fmt flake.nix
