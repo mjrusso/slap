@@ -1,0 +1,24 @@
+name: readme_preamble
+
+on:
+  push:
+    paths:
+      - "*/README.md"
+      - "scripts/readme_preamble.*"
+      - "justfile"
+      - ".github/workflows/readme_preamble.yml"
+  pull_request:
+    paths:
+      - "*/README.md"
+      - "scripts/readme_preamble.*"
+      - "justfile"
+      - ".github/workflows/readme_preamble.yml"
+
+jobs:
+  check:
+    name: Package README preambles
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: extractions/setup-just@v3
+      - run: just readme-preamble-check
