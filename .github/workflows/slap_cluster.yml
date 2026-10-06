@@ -65,7 +65,7 @@ jobs:
             slap_cluster/_build/test/*.plt.hash
             ~/.mix/*.plt
             ~/.mix/*.plt.hash
-          key: plt-slap_cluster-${{ runner.os }}-otp29-elixir1.20-${{ hashFiles('slap_cluster/mix.exs', 'slap_slatedb/mix.exs', 'slap_cluster/mix.exs') }}
+          key: plt-slap_cluster-${{ runner.os }}-otp29-elixir1.20-${{ hashFiles('slap_cluster/mix.exs', 'slap_cluster/mix.lock', 'slap_slatedb/mix.exs') }}
           restore-keys: plt-slap_cluster-${{ runner.os }}-otp29-elixir1.20-
       - run: mix check
       - name: Failover suites, repeated

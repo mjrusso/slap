@@ -52,6 +52,6 @@ jobs:
             slap_streams/_build/test/*.plt.hash
             ~/.mix/*.plt
             ~/.mix/*.plt.hash
-          key: plt-slap_streams-${{ runner.os }}-otp29-elixir1.20-${{ hashFiles('slap_streams/mix.exs', 'slap_slatedb/mix.exs', 'slap_cluster/mix.exs') }}
+          key: plt-slap_streams-${{ runner.os }}-otp29-elixir1.20-${{ hashFiles('slap_streams/mix.exs', 'slap_streams/mix.lock', 'slap_slatedb/mix.exs', 'slap_cluster/mix.exs') }}
           restore-keys: plt-slap_streams-${{ runner.os }}-otp29-elixir1.20-
       - run: mix check
