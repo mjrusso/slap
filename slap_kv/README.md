@@ -1,7 +1,7 @@
 # slap_kv
 
-`slap_kv` provides a partitioned, durable key-value store on SlateDB, built on
-[`slap_cluster`](https://hexdocs.pm/slap_cluster/) and
+`slap_kv` provides a partitioned key-value store that persists data using
+SlateDB, built on [`slap_cluster`](https://hexdocs.pm/slap_cluster/) and
 [`slap_slatedb`](https://hexdocs.pm/slap_slatedb/). Rows are addressed by a
 partition and a key; a partition's rows are on one shard, in key order. Writes
 are acknowledged once durable, reads return only durable rows, and writes can
