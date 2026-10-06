@@ -69,6 +69,7 @@ defmodule Slap.SnapshotLog.MixProject do
         "format --check-formatted",
         "deps.unlock --check-unused",
         "credo",
+        "reach.check --arch",
         # The PLT's up-to-date check hashes only the lockfile, which path
         # dependencies are not in: --force-check updates their changed modules.
         "dialyzer --format short --force-check",

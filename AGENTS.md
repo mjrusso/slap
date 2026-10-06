@@ -75,12 +75,19 @@ Run `mix check` in every project you changed, and in the projects that
 depend on it, before finishing a change. Fix every failure. `mix check`
 runs, in the test environment: compilation with warnings as errors,
 `mix format --check-formatted`, `mix deps.unlock --check-unused`, Credo
-(with ExSlop and ExDNA), Dialyzer, a compile-time dependency cycle check,
-and the tests.
+(with ExSlop and ExDNA), Reach's architecture check (`mix reach.check
+--arch`, except in slap_slatedb), Dialyzer, a compile-time dependency cycle
+check, and the tests.
 
 - Run `mix format` to apply formatting.
 - Keep findings from the enabled Credo and duplication checks at zero.
 - Fix findings rather than weakening lint configuration.
+- Each package's `.reach.exs` encodes invariants below as call rules: who
+  opens and writes SlateDB databases, deletes and uploads objects, and what
+  the HTTP layers may call. A new writer or caller changes an invariant:
+  update the policy and its comment with it. Reach attributes the calls in
+  a file with several modules to one of them, so keep a module that a rule
+  names in its own file.
 - Use `mix ex_dna` to inspect duplication groups, and `mix ex_dna.explain N`
   to inspect a particular group.
 - Some tests need RustFS and are excluded without it
