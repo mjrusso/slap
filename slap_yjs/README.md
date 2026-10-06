@@ -1,16 +1,18 @@
 # slap_yjs
 
-`slap_yjs` stores [Yjs](https://yjs.dev) documents in Durable Streams
-([`slap_streams`](https://hexdocs.pm/slap_streams/)), as snapshot logs
-([`slap_snapshot_log`](https://hexdocs.pm/slap_snapshot_log/)), and shares
-presence between the nodes that serve each document.
+`slap_yjs` durably stores [Yjs documents](https://yjs.dev), and keeps each
+document in sync across the nodes of an Elixir cluster. Yjs is a CRDT library:
+its shared data types merge concurrent edits from many clients without
+conflicts, and its protocol exchanges those edits between them. Each document
+is stored as a snapshot log, using
+[`slap_snapshot_log`](https://hexdocs.pm/slap_snapshot_log/). Clients connected
+to different nodes edit the same document and see each other's cursors and
+other Yjs awareness state.
 
-Use `slap_yjs` when an Elixir application uses `y_ex` for collaborative
-documents and needs a durable update history shared by document servers on
-different nodes. Your application provides the client connection, forwards
-sync and awareness messages, and handles authentication. The package does not
-start a WebSocket or HTTP server. For a log of application-defined changes
-rather than Yjs updates, use `slap_snapshot_log`.
+Use `slap_yjs` when your application uses [`y_ex`](https://hexdocs.pm/y_ex/),
+the Elixir bindings for Yjs. Your application is responsible for providing the
+client connection, forwarding sync and awareness messages, and handling
+authentication; this package does not start a WebSocket or HTTP server.
 
 <!-- slap-preamble -->
 > #### About Slap {: .info}
