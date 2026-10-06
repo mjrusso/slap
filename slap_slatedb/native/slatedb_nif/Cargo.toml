@@ -1,0 +1,53 @@
+[package]
+name = "slatedb_nif"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "slatedb_nif"
+crate-type = ["cdylib"]
+
+# NIF 2.15 also runs on newer OTP releases; the release builds one
+# library per target for OTP 22+.
+[features]
+default = ["nif_version_2_15"]
+nif_version_2_15 = ["rustler/nif_version_2_15"]
+
+[dependencies]
+rustler = "0.38"
+# `foyer` (SlateDB's default cache, with a disk tier) is left out to keep
+# build times down; moka covers the in-memory cache.
+# SlateDB is pinned to an exact version: upgrade one minor version at a time
+# and run the crash test (see "Upgrading SlateDB" in the README) each time.
+slatedb = { version = "=0.16.0", default-features = false, features = [
+    # Object stores for `s3://`, `az://` (and `abfs://`, `azure://`) and `gs://`.
+    "aws",
+    "azure",
+    "gcp",
+    # Lets a compactor run a compaction filter (`Slap.SlateDB.CompactionFilter`).
+    "compaction_filters",
+    # In-memory block and metadata cache. Without moka or foyer SlateDB has no
+    # block cache and every read goes to object storage.
+    "moka",
+    # Compression codecs for the `compression_codec` setting. Every process
+    # that reads a database (including a separate compactor) needs the codec
+    # it was written with.
+    "snappy",
+    "zlib",
+    "lz4",
+    "zstd",
+] }
+slatedb-common = "=0.16.0"
+async-trait = "0.1"
+futures = "0.3"
+uuid = "1"
+chrono = { version = "0.4", default-features = false }
+log = "0.4"
+serde = "1"
+serde_json = "1"
+url = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+
+[profile.release]
+lto = "thin"

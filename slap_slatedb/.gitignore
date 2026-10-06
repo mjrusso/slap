@@ -1,0 +1,11 @@
+/_build/
+/deps/
+/doc/
+/native/slatedb_nif/target/
+/priv/native/
+erl_crash.dump
+*.ez
+/bench/results/
+/tmp/
+# Not tracked: each checkout, and CI, resolves dependencies from Hex.
+/mix.lock
