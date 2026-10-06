@@ -1,23 +1,27 @@
 # slap_kv
 
-`slap_kv` provides a partitioned key-value store that persists data using
-SlateDB, built on [`slap_cluster`](https://hexdocs.pm/slap_cluster/) and
-[`slap_slatedb`](https://hexdocs.pm/slap_slatedb/). Rows are addressed by a
-partition and a key; a partition's rows are on one shard, in key order. Writes
-are acknowledged once durable, reads return only durable rows, and writes can
-be conditional on a row's version.
+`slap_kv` provides a partitioned key-value store, with data stored durably in
+object storage.
+
+`slap_kv` is built on [`slap_cluster`](https://hexdocs.pm/slap_cluster/) and
+[`slap_slatedb`](https://hexdocs.pm/slap_slatedb/). Each row is addressed by a
+partition and a key. A partition's rows are stored together, in key order, in
+one of a fixed number of SlateDB databases, called shards. Writes are
+acknowledged once they are durable, reads return only durable rows, and a write
+can be made conditional on a row's version.
 
 Use `slap_kv` when you need records grouped by a partition, such as a user's
-settings or a document's metadata. It routes each partition to a shard, lets
-you list its keys in order, and uses versions to detect concurrent updates.
+settings or a document's metadata. It routes each partition to a shard,
+supports listing keys in order, and uses versions to detect concurrent updates.
 This saves you from building shard ownership and conditional writes on top of
 `slap_slatedb`. If you need direct SlateDB transactions or a different key
-layout, use `slap_slatedb` instead. `slap_kv` has no cross-partition scan or
-transaction.
+layout, use `slap_slatedb` instead. `slap_kv` does not support cross-partition
+scans or cross-partition transactions.
 
-`slap_kv` is meant to be embedded: your application starts `Slap.KV.Cluster`,
-calls `Slap.KV` in-process, and can mount `Slap.KV.HTTP.Router` in its
-[`Plug`](https://hexdocs.pm/plug/) pipeline. The
+`slap_kv` runs inside your application, on one node or several. You start
+`Slap.KV.Cluster`, call `Slap.KV` in-process, and can mount
+`Slap.KV.HTTP.Router` in your [`Plug`](https://hexdocs.pm/plug/) pipeline. A
+call for a partition goes to the node that owns its shard. The
 [`slap`](https://hexdocs.pm/slap/) package runs `slap_kv` as a standalone
 server (`mix slap.server --kv --store memory`).
 
