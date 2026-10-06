@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Release steps for the packages, run through `just release-status`,
-# `just release-tags` and `just publish`. See RELEASING.md.
+# `just release-tags`, `just publish` and `just publish-docs`. See RELEASING.md.
 #
-#     scripts/release.sh status|tags|publish "<all packages, in dependency order>" [package...]
+#     scripts/release.sh status|tags|publish|docs "<all packages, in dependency order>" [package...]
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -148,13 +148,42 @@ publish() {
     selected+=("$p")
   done
   [ ${#selected[@]} -gt 0 ] || { echo "nothing to publish"; return; }
+  hex_publish "" "${selected[@]}"
+}
 
-  # A separate worktree, because SLAP_LOCAL_DEPS=0 rewrites mix.lock files.
+docs() {
+  require_clean "publishing documentation"
+  for p in "${packages[@]}"; do
+    on_hex "$p" ||
+      { echo "$p $(version "$p") is not on Hex: run \`just publish\` instead" >&2; exit 1; }
+    tagged "$p" || { echo "$p-v$(version "$p") is not tagged" >&2; exit 1; }
+  done
+
+  echo "Documentation to replace on HexDocs, built from HEAD ($(git rev-parse --short HEAD)):"
+  for p in "${packages[@]}"; do
+    tag="$p-v$(version "$p")"
+    echo "  $p $(version "$p")"
+    commits=$(git log --oneline "$tag..HEAD" -- "$p/lib")
+    if [ -n "$commits" ]; then
+      echo "    changes to $p/lib since $tag, which the documentation will show:"
+      while read -r line; do echo "      $line"; done <<< "$commits"
+    fi
+  done
+  read -r -p "Publish this documentation? [y/N] " answer
+  [[ "$answer" == [yY] ]] || { echo "nothing published"; exit 1; }
+  hex_publish docs "${packages[@]}"
+}
+
+# Runs `mix hex.publish [docs]` in each package, in a separate worktree of
+# HEAD, because SLAP_LOCAL_DEPS=0 rewrites mix.lock files.
+hex_publish() {
+  local subcommand=$1
+  shift
   dir=$(mktemp -d)
   git worktree add --detach "$dir" HEAD
   trap 'git worktree remove --force "$dir"' EXIT
   export SLAP_LOCAL_DEPS=0 SLAP_SLATEDB_BUILD=0
-  for p in "${selected[@]}"; do
+  for p in "$@"; do
     echo "==> $p"
     (
       cd "$dir/$p"
@@ -166,12 +195,13 @@ publish() {
         echo "retrying mix deps.get in 15 s ($attempt/20)"
         sleep 15
       done
-      mix hex.publish
+      # shellcheck disable=SC2086 # an empty subcommand adds no argument
+      mix hex.publish $subcommand
     )
   done
 }
 
 case "$command" in
-  status | tags | publish) "$command" ;;
+  status | tags | publish | docs) "$command" ;;
   *) echo "unknown command: $command" >&2; exit 1 ;;
 esac

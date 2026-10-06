@@ -86,6 +86,10 @@ release-tags *packages:
 publish *packages:
     @scripts/release.sh publish "{{ projects }}" {{ packages }}
 
+# Replaces each package's HexDocs for its released version with docs built from HEAD.
+publish-docs *packages:
+    @scripts/release.sh docs "{{ projects }}" {{ packages }}
+
 _each project command:
     #!/usr/bin/env bash
     set -euo pipefail

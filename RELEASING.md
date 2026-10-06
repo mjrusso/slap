@@ -75,6 +75,23 @@ The `just` recipes below run in `nix develop`, from the repository root.
    packages. That step changes `slap/mix.lock`; restore it afterwards with
    `git restore slap/mix.lock`.
 
+## Updating documentation
+
+HexDocs can replace a released version's documentation without a new release,
+for example after a README change. Commit the change, then:
+
+```sh
+just publish-docs [package...]
+```
+
+This builds each package's documentation from HEAD and replaces the
+documentation of its `mix.exs` version on HexDocs, in the same kind of
+worktree as `just publish`. It refuses to run with uncommitted changes, and
+refuses a package whose version is not on Hex. Before asking you to confirm,
+it lists the commits since each package's tag that touch its `lib/`: the
+documentation shows them, so publish only if they don't change the API. The
+README inside the released package is not updated until its next version.
+
 ## The SlateDB NIF
 
 `slap_slatedb` loads a Rust NIF. Its Hex package downloads a prebuilt library
