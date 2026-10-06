@@ -33,6 +33,9 @@ checks and CI workflow:
 
 The path dependencies above are selected by `SLAP_LOCAL_DEPS=1`. With the
 variable unset or set to `0`, the packages use versioned Hex dependencies.
+Each project's `mix.lock` is committed, as `mix deps.get` writes it with
+`SLAP_LOCAL_DEPS=1`. With `0`, `mix deps.get` adds the `slap_*` packages from
+Hex to it; do not commit those entries (`git restore` the file).
 
 `jepsen/` holds the Jepsen suite (Clojure, Leiningen) and `jepsen/node/`, the
 Mix project each Jepsen node runs; see `jepsen/README.md`. Build the node
@@ -159,6 +162,7 @@ reason in its commit message and a test.
 
 - Consult dependency usage rules and documentation before using unfamiliar
   APIs.
+- Commit the `mix.lock` changes that come with a dependency change.
 - After changing the usage rules configuration, run
   `MIX_ENV=dev mix usage_rules.sync` in that project (it writes the
   project's own `AGENTS.md`).

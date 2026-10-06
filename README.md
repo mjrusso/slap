@@ -77,7 +77,8 @@ SLAP_LOCAL_DEPS=0 mix deps.get
 SLAP_LOCAL_DEPS=0 iex -S mix
 ```
 
-`SLAP_LOCAL_DEPS=0` uses the packages published on Hex.
+_(`SLAP_LOCAL_DEPS=0` uses the Slap packages published on Hex.
+`SLAP_LOCAL_DEPS=1` uses the packages in the checkout instead.)_
 
 > [!NOTE]
 >

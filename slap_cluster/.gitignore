@@ -2,5 +2,4 @@
 /deps/
 /doc/
 erl_crash.dump
-/mix.lock
 /tmp/

@@ -54,7 +54,9 @@ Run `mix deps.get`. API documentation is on
 
 With Elixir 1.18 or later, from `slap/` in a checkout of the
 [repository](https://github.com/mjrusso/slap), run `mix deps.get`, then one of
-these commands:
+these commands. Without `SLAP_LOCAL_DEPS=1`, `mix deps.get` uses the packages
+published on Hex and records them in `slap/mix.lock`; run
+`git restore mix.lock` afterwards to undo that.
 
 ```sh
 mix slap.server --streams --store memory
