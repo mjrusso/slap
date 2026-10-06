@@ -1,19 +1,25 @@
 # slap_cluster
 
-`slap_cluster` manages a fixed number of SlateDB databases ("shards") in one
-store, using [`slap_slatedb`](https://hexdocs.pm/slap_slatedb/). It assigns
-each shard to a node, opens its database there, routes calls to its owner, and
-reports when writes become durable. If SlateDB fences a writer, the shard
-stops and the placement strategy can assign it elsewhere. The application
-provides the processes that use each shard and decides what they store.
+`slap_cluster` runs a fixed number of SlateDB databases, called shards, across
+the nodes of an Elixir cluster. The shards share one store, such as a prefix in
+an S3 bucket. `slap_cluster` assigns each shard to one node, opens the shard's
+database there, and routes calls for the shard to that node. Depending on the
+placement strategy, a failed node's shards move to other nodes. SlateDB allows
+one writer per database: if two nodes open the same shard, only the newer one
+can write. `slap_cluster` also reports when a shard's writes become durable. It
+opens the databases with [`slap_slatedb`](https://hexdocs.pm/slap_slatedb/).
 
-Use `slap_cluster` when you are building a sharded service with your own data
-model and need to route operations to shard owners or move shards between
-nodes after failures. It manages one SlateDB writer per shard; your shard
-children implement the service's reads, writes, and responses. For one
-database without shard placement, use `slap_slatedb` directly. If your data
-fits the Streams or partitioned KV APIs, use `slap_streams` or `slap_kv`, which
-already build on this package.
+An object store must support conditional writes, as S3 does. The cluster checks
+this when it starts, and does not start if the store fails the check.
+
+`slap_cluster` does not decide what the shards store. Your application provides
+the processes that run with each shard on its node, called shard children, and
+they implement the service's reads, writes, and replies. For one database on
+one node, use `slap_slatedb` directly. Use `slap_cluster` directly if your data
+does not fit an existing service such as
+[`slap_streams`](https://hexdocs.pm/slap_streams/) or
+[`slap_kv`](https://hexdocs.pm/slap_kv/) (which are themselves built on
+`slap_cluster`).
 
 <!-- slap-preamble -->
 > #### About Slap {: .info}
