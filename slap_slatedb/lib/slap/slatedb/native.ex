@@ -12,7 +12,8 @@ defmodule Slap.SlateDB.Native do
   version = Mix.Project.config()[:version]
 
   # Prebuilt NIFs are attached to the GitHub release for this version (see
-  # "Releasing" in the README), and checked against the checksum file.
+  # RELEASING.md at the repository root), and checked against the checksum
+  # file.
   # SLAP_SLATEDB_BUILD=1 builds the NIF from source with rustler instead. The
   # targets must match the release workflow's build matrix.
   use RustlerPrecompiled,

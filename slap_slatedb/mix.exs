@@ -83,7 +83,7 @@ defmodule Slap.SlateDB.MixProject do
         "native/slatedb_nif/Cargo.toml",
         "native/slatedb_nif/Cargo.lock",
         # Written by `mix rustler_precompiled.download Slap.SlateDB.Native --all`
-        # when releasing. See "Releasing" in the README.
+        # when releasing. See RELEASING.md at the repository root.
         "checksum-*.exs",
         "mix.exs",
         "README.md",

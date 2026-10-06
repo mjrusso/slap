@@ -325,31 +325,6 @@ built-in operators and a prefix filter, chosen and configured from Elixir,
 instead. Logs and metrics avoid the problem because they go to Elixir
 without waiting for a reply.
 
-## Releasing
-
-Prebuilt NIFs cover six targets (`aarch64`/`x86_64` macOS, Linux gnu and
-Linux musl) at NIF version 2.15, which runs on OTP 22 and later. The targets
-and NIF version are listed in the native module and in
-`.github/workflows/slap_slatedb_release.yml`; keep the two in sync.
-
-1. Set `@version` in `mix.exs`, commit, and push the tag
-   `slap_slatedb-v<version>`. The release workflow builds the six libraries
-   with [`rustler-precompiled-action`](https://github.com/philss/rustler-precompiled-action)
-   (Linux targets through `cross`) and attaches them to the GitHub release.
-2. Once the release has all six files, write the checksum file:
-   `mix rustler_precompiled.download Slap.SlateDB.Native --all --print`.
-3. `mix hex.publish`. The package includes the checksum file and the Rust
-   source, so users on other platforms can build with `SLAP_SLATEDB_BUILD=1`.
-
-## Upgrading SlateDB
-
-SlateDB is pinned to an exact version in `native/slatedb_nif/Cargo.toml`
-because its APIs and on-disk format can change between minor versions. Upgrade
-one minor version at a time, read its release notes for format changes, and
-run `mix test --include slow --include crash` with the S3 and Azure tests
-enabled. The crash test checks that every write reported durable survives an
-unclean shutdown.
-
 ## License
 
 Slap is released under the terms of the [Apache License 2.0](LICENSE).
