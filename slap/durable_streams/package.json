@@ -1,0 +1,15 @@
+{
+  "name": "slap-durable-streams",
+  "private": true,
+  "type": "module",
+  "description": "Runs the official Durable Streams conformance suite and benchmarks against slap.",
+  "scripts": {
+    "test": "vitest run",
+    "bench": "vitest bench --run"
+  },
+  "devDependencies": {
+    "@durable-streams/server-conformance-tests": "0.3.7",
+    "vitest": "4.1.11",
+    "@durable-streams/benchmarks": "0.2.7"
+  }
+}
