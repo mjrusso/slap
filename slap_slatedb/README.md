@@ -1,16 +1,18 @@
 # slap_slatedb
 
 `slap_slatedb` provides Elixir bindings for [SlateDB](https://slatedb.io) 0.16,
-built with [Rustler](https://github.com/rusterlium/rustler).
+an embedded key-value engine that keeps its data in object storage, such as
+S3. Your application opens a database and calls it directly; there is no
+database server to run. SlateDB batches writes to limit object-store requests.
+A database can also use a local directory or memory. The bindings are a Rust
+NIF, built with [Rustler](https://github.com/rusterlium/rustler).
 
-SlateDB is an embedded key-value engine: your application opens a database and
-calls it directly, without a separate database server. It batches writes to an
-object store, or can use a local directory or memory. Use `slap_slatedb` when
-you want direct control over keys, scans, transactions, and durability. It does
-not place shards across nodes or serve an HTTP API. Use
-[`slap_cluster`](https://hexdocs.pm/slap_cluster/) for custom sharded storage,
-or [`slap_kv`](https://hexdocs.pm/slap_kv/) for a ready-made partitioned KV
-service with versioned writes.
+Use `slap_slatedb` when you want direct control over keys, scans,
+transactions, and durability. It does not distribute databases across nodes
+or serve an HTTP API. To run many databases across several nodes, use
+[`slap_cluster`](https://hexdocs.pm/slap_cluster/). For a ready-made
+partitioned key-value store with conditional writes, use
+[`slap_kv`](https://hexdocs.pm/slap_kv/).
 
 <!-- slap-preamble -->
 > #### About Slap {: .info}
@@ -63,6 +65,12 @@ end
 
 Run `mix deps.get`. API documentation is on
 [HexDocs](https://hexdocs.pm/slap_slatedb/).
+
+Prebuilt NIFs cover macOS and Linux, with glibc or musl, on arm64 and x86_64;
+the package downloads the one for your platform, so you don't need Rust. On
+other platforms, build the NIF from source: install Rust 1.91 or later, add
+`{:rustler, "~> 0.38"}` to your dependencies, and set `SLAP_SLATEDB_BUILD=1`
+when you compile.
 
 ## Example
 
@@ -205,6 +213,11 @@ The database operation continues after the caller times out. See
 timeouts with writes.
 
 ## Object stores
+
+SlateDB uses conditional writes to stop a second writer, so an object store
+must support them. S3, Azure Blob Storage, and RustFS do. Check other stores,
+including Google Cloud Storage, with `probe_store/2` before use; see the notes
+below.
 
 The `:store` option of `open/2` selects where the database lives:
 
