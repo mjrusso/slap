@@ -1,22 +1,19 @@
 # slap_snapshot_log
 
-`slap_snapshot_log` provides an append-only log of opaque entries, with
-snapshots that replace its prefix, stored in Durable Streams
-([`slap_streams`](https://hexdocs.pm/slap_streams/)) below a base path. A
-consumer rebuilds its state from the current snapshot and the entries after it,
-follows the log to stay current, and publishes snapshots of what it has
-applied; publishing a snapshot trims the entries it covers.
+`slap_snapshot_log` provides an append-only log of changes that can be
+condensed into snapshots. A consumer rebuilds its state from the latest
+snapshot and all subsequent entries, and follows the log to stay current. The
+log is stored in [Durable Streams](https://durablestreams.com), using
+[`slap_streams`](https://hexdocs.pm/slap_streams/), under a base path of your
+choosing.
 
-[`slap_yjs`](https://hexdocs.pm/slap_yjs/) stores Yjs documents this way.
-
-Use `slap_snapshot_log` when an application's state comes from an ordered log of
-changes, but replaying every change from the beginning would become too slow.
-For example, a counter can append one increment per entry and periodically store
+Use `slap_snapshot_log` when an application's state comes from an ordered log
+of changes, but replaying every change from the beginning is too slow. For
+example, a counter can append one increment per entry and periodically store
 its total as a snapshot. A new reader loads that total, then applies only later
 entries. The package stores and trims the log; your application defines the
-entry format, how entries change state, and how to encode a snapshot. Use
-`slap_streams` directly if you need to retain and replay every entry or do not
-need snapshots: publishing a snapshot here trims the entries it covers.
+entry format, how entries change state, and how to encode a snapshot. If you
+need to keep every entry, or don't need snapshots, use `slap_streams` directly.
 
 <!-- slap-preamble -->
 > #### About Slap {: .info}
