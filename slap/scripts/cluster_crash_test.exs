@@ -62,7 +62,9 @@ config = %{
 defmodule Cluster do
   def port(c, i), do: c.base_port + i
 
-  defp names(c), do: Enum.map_join(1..c.nodes, ",", &"n#{&1}@127.0.0.1")
+  # The nodes of a scripts/cluster.sh cluster, n1, n2, ..., can still be
+  # running; see its stop command.
+  defp names(c), do: Enum.map_join(1..c.nodes, ",", &"c#{&1}@127.0.0.1")
 
   def start_node(c, i, store) do
     pid_file = Path.join(c.tmp, "n#{i}.pid")
@@ -79,7 +81,7 @@ defmodule Cluster do
 
     args =
       vm ++
-        ~w(--name n#{i}@127.0.0.1 --cookie slap-crash -S mix slap.server --streams --port #{port(c, i)}
+        ~w(--name c#{i}@127.0.0.1 --cookie slap-crash -S mix slap.server --streams --port #{port(c, i)}
          --store #{store} --streams-shards #{c.shards} --streams-flush-interval 10ms) ++
         placement ++ ~w(--peers #{names(c)} --pid-file #{pid_file})
 
