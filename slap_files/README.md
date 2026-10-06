@@ -1,42 +1,25 @@
 # slap_files
 
-`slap_files` stores files with metadata, conditional replacement, and
-crash-safe cleanup. A file lives at a ref, `{partition, id}`. It has one record
-in [`slap_kv`](https://hexdocs.pm/slap_kv/), which exists exactly while the
-file does, and a body stored in that record (inline) or as an object, through
-`Slap.SlateDB.ObjectStore` from
-[`slap_slatedb`](https://hexdocs.pm/slap_slatedb/).
+`slap_files` is a service for storing files in object storage.
 
-Files can be replaced with conditional writes on their version; bodies are
-never overwritten. Uploads and deletes record intents, which name objects that
-may need to be deleted, so that cleanup can finish an interrupted operation
-without deleting a body that a file still points to.
+A file has a ref, `{partition, id}`, such as `{document_id, attachment_id}`; a
+body (its contents); and a content type, size, checksum, and your own metadata.
+You can list the files in a partition, such as a document's attachments, and
+make a replacement conditional on the file not having changed since you read
+it. When a file is replaced or deleted, its old body is deleted for you, and so
+are objects left behind by an interrupted upload or delete.
 
-## When to use it
+Each file is one record in [`slap_kv`](https://hexdocs.pm/slap_kv/). With the
+default `storage: :auto`, a body up to 16 KiB is stored in the record, and a
+larger one is uploaded as a separate object (with the record holding the
+object's key). SlateDB batches `slap_kv` writes into shared PUTs, so storing
+many small files takes fewer PUTs than storing each one as its own object.
 
-Use `slap_files` when your application needs to manage files by a stable ref,
-such as `{document_id, attachment_id}`. The file's KV record holds its inline
-body or current object key, plus its content type, size, checksum, and
-application metadata. You can list a document's attachments, replace one only
-if its version has not changed, and read the current body through the same ref.
-After a replacement or delete, the library cleans up the old object body. It
-also cleans up objects left by interrupted uploads and writes.
-
-With the default `storage: :auto`, bodies up to 16 KiB are kept in KV. SlateDB
-batches KV writes to object storage, so writing many small files can require
-fewer PUTs than uploading each body as a separate object. This can lower
-request charges; actual cost also depends on KV reads, writes, compaction, and
-object-store pricing. Larger bodies are uploaded as objects.
-
-Use object storage directly if object keys are enough for your application and
-you already manage file metadata, references, concurrent replacements, and
-deletion. `slap_files` requires a `Slap.KV.Cluster`, adds KV writes around
-object uploads, and runs background cleanup. It does not provide an HTTP file
-server or access control. Its file record is not part of a transaction with
-data your application keeps elsewhere: if another database stores a reference
-to a file, create the file before adding that reference and remove the
-reference before deleting the file. Old object bodies are retained briefly
-for readers, not as a version history.
+Use `slap_files` when files are replaced or deleted while other processes or
+nodes may be reading them, and you want their metadata, listing, conditional
+replacement, and cleanup handled for you. If object keys are enough for your
+application and you already handle those, use object storage directly instead
+of `slap_files`.
 
 <!-- slap-preamble -->
 > #### About Slap {: .info}
@@ -155,7 +138,7 @@ lists the partitions it knows.
 
 ## Storage
 
-The default instance uses the `"default"` namespace in KV partitions and
+The default instance uses the `"default"` namespace in `slap_kv` partitions and
 object keys. Named instances require an explicit, stable `namespace:`.
 
 - `storage: :auto` stores a body inline up to `inline_max_bytes` (default
@@ -222,12 +205,26 @@ A write or delete that fails part-way leaves an intent, and the sweep
 finishes the cleanup. Reconciliation deletes anything an upload wrote too
 late.
 
+## Limits
+
+- **Needs a running `Slap.KV.Cluster`.** Each upload adds `slap_kv` writes
+  (an intent, a registration, and the record), and each node runs background
+  sweeps and reconciliation.
+- **Old bodies are kept only for `retention_ms`**, for reads in progress. There
+  is no version history.
+- **No HTTP file server or access control.**
+- **No transactions with other databases.** If another database refers to a
+  file, create the file before adding the reference, and remove the reference
+  before deleting the file.
+
 ## Benchmarks
 
 `bench/inline.exs` compares inline and object bodies on RustFS. Inline writes
-need one durable KV write; object writes also upload the body and manage an
-intent. Inline bodies increase record size and make listings read more data.
-Measure with representative file sizes before changing `inline_max_bytes`.
+need one durable `slap_kv` write; object writes also upload the body and manage
+an intent. Inline bodies save object-store PUTs, but they increase record size
+and make listings read more data. The total cost also depends on `slap_kv`
+reads, writes, and compaction, and on your object store's pricing. Measure with
+representative file sizes before changing `inline_max_bytes`.
 
 ## Tests
 
@@ -236,8 +233,7 @@ mix test          # SLAP_FILES_PROP_RUNS=500 for more model sequences
 ```
 
 The model test covers writes, deletes, reads, sweeps, and clock changes.
-`test/sweeper_test.exs` checks interrupted uploads and cleanup. Set
-`SLAP_FILES_PROP_RUNS` to run more model sequences.
+`test/sweeper_test.exs` checks interrupted uploads and cleanup.
 
 ## License
 
