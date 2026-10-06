@@ -5,13 +5,9 @@ defmodule Slap.Files.Body do
   # (it may be a request body), and buffered only as far as the choice
   # between inline and object needs.
 
+  alias Slap.Files.Body.InvalidChunkError
   alias Slap.Files.Config
   alias Slap.SlateDB.ObjectStore
-
-  defmodule InvalidChunkError do
-    @moduledoc false
-    defexception message: "body chunks must be binaries"
-  end
 
   @type prepared :: {:inline, binary()} | {:object, Enumerable.t()}
 
