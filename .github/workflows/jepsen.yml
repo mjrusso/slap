@@ -1,0 +1,104 @@
+name: jepsen
+
+on:
+  push:
+    paths:
+      - "jepsen/**"
+      - "slap/**"
+      - "slap_yjs/**"
+      - "slap_streams/**"
+      - "slap_snapshot_log/**"
+      - "slap_kv/**"
+      - "slap_files/**"
+      - "slap_cluster/**"
+      - "slap_slatedb/**"
+      - ".github/workflows/jepsen.yml"
+      - "flake.nix"
+      - "flake.lock"
+      - ".dockerignore"
+  pull_request:
+    paths:
+      - "jepsen/**"
+      - "slap/**"
+      - "slap_yjs/**"
+      - "slap_streams/**"
+      - "slap_snapshot_log/**"
+      - "slap_kv/**"
+      - "slap_files/**"
+      - "slap_cluster/**"
+      - "slap_slatedb/**"
+      - ".github/workflows/jepsen.yml"
+      - "flake.nix"
+      - "flake.lock"
+      - ".dockerignore"
+  workflow_dispatch:
+    inputs:
+      time-limit:
+        description: Seconds of operations per workload
+        default: "120"
+      trials:
+        description: Trials per workload, placement and fault
+        default: "2"
+
+jobs:
+  image:
+    name: Build Node Image
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -f jepsen/docker/Dockerfile -t slap-jepsen-node .
+      - run: docker build --target test --output type=cacheonly -f jepsen/docker/Dockerfile .
+      - run: docker save slap-jepsen-node | gzip -1 > jepsen-node.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jepsen-node-image
+          path: jepsen-node.tar.gz
+          compression-level: 0
+
+  controller-tests:
+    name: Controller Tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v31.11.1
+      - uses: DeterminateSystems/magic-nix-cache-action@v15
+      - run: nix develop .#ci -c bash -c "cd jepsen && lein test"
+
+  jepsen:
+    name: Workload (${{ matrix.workload }}, ${{ matrix.placement }}, ${{ matrix.fault }})
+    needs: [image, controller-tests]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        workload: [append, yjs, kv, files, snapshot-log]
+        placement: [object-lease, distributed]
+        fault: [partition, kill, pause, object-store]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: jepsen-node-image
+      - run: gunzip -c jepsen-node.tar.gz | docker load
+      - uses: cachix/install-nix-action@v31.11.1
+      - uses: DeterminateSystems/magic-nix-cache-action@v15
+      - name: Start the nodes and RustFS
+        run: docker compose -f jepsen/docker/compose.yml up -d
+      - name: Run the test
+        run: |
+          nix develop .#ci -c bash -c "cd jepsen && lein run test \
+            --workload ${{ matrix.workload }} --placement ${{ matrix.placement }} \
+            --nemesis ${{ matrix.fault }} \
+            --time-limit ${{ inputs.time-limit || '120' }} \
+            --test-count ${{ inputs.trials || '2' }}"
+      # Jepsen's directory names have colons, which artifacts cannot.
+      - name: Archive the results
+        if: always()
+        run: tar czf jepsen-store.tgz -C jepsen store || true
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jepsen-${{ matrix.workload }}-${{ matrix.placement }}-${{ matrix.fault }}
+          path: jepsen-store.tgz
+          if-no-files-found: ignore

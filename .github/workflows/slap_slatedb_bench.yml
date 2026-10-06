@@ -1,0 +1,199 @@
+# Benchmarks for slap_slatedb: Benchee micro benchmarks on the in-memory store,
+# and end-to-end scenarios and sweeps (flush interval, number of databases)
+# against RustFS (S3), both on loopback and through Toxiproxy with 20 ms
+# added to each response.
+#
+# On main, results are pushed to the gh-pages branch by
+# github-action-benchmark, which draws charts of every run at
+# https://<owner>.github.io/<repo>/dev/bench/ (turn on GitHub Pages for the
+# gh-pages branch) and comments on the commit if a result gets 50% worse.
+# On other branches, results are compared with the branch's previous run,
+# kept in the Actions cache, and shown in the job summary. Every run uploads
+# the Benchee HTML report and the raw results as an artifact.
+#
+# Shared runners are noisy: expect 10-20% run-to-run variation, so alerts do
+# not fail the job.
+name: slap_slatedb Benchmarks
+
+on:
+  push:
+    paths:
+      - "slap_slatedb/**"
+      - ".github/workflows/slap_slatedb_bench.yml"
+  workflow_dispatch:
+
+permissions:
+  # To push results to gh-pages and comment on commits, on main.
+  contents: write
+
+concurrency:
+  group: slap_slatedb-bench-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: slap_slatedb
+
+env:
+  MIX_ENV: bench
+  SLAP_SLATEDB_BUILD: "1"
+  CARGO_TERM_COLOR: always
+  SLAP_BENCH_S3_BUCKET: slatedb-bench
+
+jobs:
+  bench:
+    name: Binding and Storage
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      # The same pinned RustFS as the tests. Toxiproxy listens on 9200 and
+      # forwards to RustFS on 9000, adding latency to each response.
+      - name: Start RustFS 1.0.0 and Toxiproxy 2.12.0
+        working-directory: .
+        run: |
+          docker run -d --name rustfs -p 9000:9000 \
+            -e RUSTFS_ACCESS_KEY=rustfsadmin -e RUSTFS_SECRET_KEY=rustfsadmin \
+            rustfs/rustfs@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
+          docker run -d --name toxiproxy --network host ghcr.io/shopify/toxiproxy:2.12.0
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://127.0.0.1:9000/ && curl -s -o /dev/null http://127.0.0.1:8474/version && break
+            sleep 1
+          done
+          curl -sf -X POST http://127.0.0.1:8474/proxies \
+            -d '{"name":"s3","listen":"127.0.0.1:9200","upstream":"127.0.0.1:9000"}'
+          curl -sf -X POST http://127.0.0.1:8474/proxies/s3/toxics \
+            -d '{"type":"latency","stream":"downstream","attributes":{"latency":20,"jitter":0}}'
+          curl -s --aws-sigv4 "aws:amz:us-east-1:s3" --user rustfsadmin:rustfsadmin \
+            -X PUT http://127.0.0.1:9000/$SLAP_BENCH_S3_BUCKET
+          # Check the proxy adds the latency.
+          curl -s -o /dev/null -w "direct %{time_total}s\n" http://127.0.0.1:9000/
+          curl -s -o /dev/null -w "proxied %{time_total}s\n" http://127.0.0.1:9200/
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          elixir-version: "1.20"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: slap_slatedb/native/slatedb_nif
+      - run: mix deps.get
+      - run: mix compile
+      - name: Micro benchmarks (in-memory store)
+        run: mix run bench/micro.exs
+      - name: Scenarios, S3 on loopback
+        run: mix run bench/scenarios.exs
+        env:
+          SLAP_BENCH_STORE: s3
+          SLAP_BENCH_LABEL: s3
+          SLAP_BENCH_S3_ENDPOINT: http://127.0.0.1:9000
+      - name: Scenarios, S3 with 20 ms latency
+        run: mix run bench/scenarios.exs
+        env:
+          SLAP_BENCH_STORE: s3
+          SLAP_BENCH_LABEL: s3 +20ms
+          SLAP_BENCH_S3_ENDPOINT: http://127.0.0.1:9200
+      # A flush_interval sweep (5, 10, 20, 100 ms) and 8, 16 and 64
+      # databases writing at once. See bench/sweeps.exs.
+      - name: Sweeps, S3 on loopback
+        run: mix run bench/sweeps.exs
+        env:
+          SLAP_BENCH_STORE: s3
+          SLAP_BENCH_LABEL: s3
+          SLAP_BENCH_S3_ENDPOINT: http://127.0.0.1:9000
+      - name: Sweeps, S3 with 20 ms latency
+        run: mix run bench/sweeps.exs
+        env:
+          SLAP_BENCH_STORE: s3
+          SLAP_BENCH_LABEL: s3 +20ms
+          SLAP_BENCH_S3_ENDPOINT: http://127.0.0.1:9200
+      - name: Summary
+        run: |
+          mix run --no-start bench/summary.exs >> "$GITHUB_STEP_SUMMARY"
+          jq -s add bench/results/*-smaller.json > bench/results/smaller.json
+          jq -s add bench/results/*-bigger.json > bench/results/bigger.json
+      - uses: actions/upload-artifact@v5
+        with:
+          name: slap_slatedb-bench-${{ github.sha }}
+          path: slap_slatedb/bench/results
+
+      # Main: results go to gh-pages. github-action-benchmark needs the
+      # branch to exist, so create it (empty) on the first run.
+      - name: Create the gh-pages branch
+        if: github.ref == 'refs/heads/main'
+        working-directory: .
+        run: |
+          if ! git ls-remote --exit-code --heads origin gh-pages > /dev/null; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git switch --orphan gh-pages
+            git commit --allow-empty -m "Start gh-pages for benchmark results"
+            git push origin gh-pages
+            git switch -
+          fi
+      - name: Store results (lower is better)
+        if: github.ref == 'refs/heads/main'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: slap_slatedb (lower is better)
+          tool: customSmallerIsBetter
+          output-file-path: slap_slatedb/bench/results/smaller.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: "150%"
+          comment-on-alert: true
+          fail-on-alert: false
+          summary-always: true
+      - name: Store results (higher is better)
+        if: github.ref == 'refs/heads/main'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: slap_slatedb (higher is better)
+          tool: customBiggerIsBetter
+          output-file-path: slap_slatedb/bench/results/bigger.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: "150%"
+          comment-on-alert: true
+          fail-on-alert: false
+          summary-always: true
+
+      # Other branches: compare with this branch's previous run, from the
+      # Actions cache. Nothing is pushed.
+      - name: Restore previous results
+        if: github.ref != 'refs/heads/main'
+        uses: actions/cache/restore@v5
+        with:
+          path: bench-data
+          key: slap_slatedb-bench-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: slap_slatedb-bench-${{ github.ref_name }}-
+      - if: github.ref != 'refs/heads/main'
+        working-directory: .
+        run: mkdir -p bench-data
+      - name: Compare (lower is better)
+        if: github.ref != 'refs/heads/main'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: slap_slatedb (lower is better)
+          tool: customSmallerIsBetter
+          output-file-path: slap_slatedb/bench/results/smaller.json
+          external-data-json-path: bench-data/benchmark-data.json
+          alert-threshold: "150%"
+          fail-on-alert: false
+          summary-always: true
+      - name: Compare (higher is better)
+        if: github.ref != 'refs/heads/main'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: slap_slatedb (higher is better)
+          tool: customBiggerIsBetter
+          output-file-path: slap_slatedb/bench/results/bigger.json
+          external-data-json-path: bench-data/benchmark-data.json
+          alert-threshold: "150%"
+          fail-on-alert: false
+          summary-always: true
+      - name: Save results
+        if: github.ref != 'refs/heads/main'
+        uses: actions/cache/save@v5
+        with:
+          path: bench-data
+          key: slap_slatedb-bench-${{ github.ref_name }}-${{ github.run_id }}
