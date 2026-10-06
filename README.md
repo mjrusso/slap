@@ -242,18 +242,18 @@ in front.
 
 ## Benchmarks
 
-CI runs two benchmark workflows:
+To run the benchmarks in GitHub Actions, start one of these workflows from the
+Actions tab:
 
-- [SlateDB benchmarks](.github/workflows/slap_slatedb_bench.yml), when
-  `slap_slatedb/` changes. They measure in-memory binding overhead and durable
-  operations against RustFS, with and without added network latency.
-- [Durable Streams benchmarks](.github/workflows/slap_streams_bench.yml), when
-  `slap/`, `slap_streams/`, `slap_cluster/` or `slap_slatedb/` changes. They
-  run the official Durable Streams benchmarks against Slap and the official
-  Caddy server on the same runner. Run them locally with `just streams-bench`;
+- [SlateDB benchmarks](.github/workflows/slap_slatedb_bench.yml) measure
+  in-memory binding overhead and durable operations against RustFS, with and
+  without added network latency.
+- [Durable Streams benchmarks](.github/workflows/slap_streams_bench.yml) run
+  the official Durable Streams benchmarks against Slap and the official Caddy
+  server on the same runner. Run them locally with `just streams-bench`;
   see the [server README](slap/README.md#durable-streams-conformance-and-benchmarks).
 
-Results appear in each run's job summary; on `main`, they are also pushed to
+Results appear in each run's job summary; a run on `main` also pushes them to
 the `gh-pages` branch. Shared runners are noisy, so compare runs over time
 rather than reading one result.
 
@@ -293,10 +293,10 @@ The [Jepsen suite](jepsen/README.md) runs concurrent operations against five
 Slap nodes that share a RustFS store, while it injects network partitions,
 process kills, pauses, and object-store faults. It checks Streams, KV, Files,
 snapshot logs, and Yjs for lost or duplicated acknowledged writes and for
-consistency violations. On pushes and pull requests that touch the packages or
-the suite, CI runs every combination of the five workloads, two placement
-strategies (object leases and distributed), and four faults: 40 jobs, each
-running two 120-second trials.
+consistency violations. To run it in GitHub Actions, start the [Jepsen
+workflow](.github/workflows/jepsen.yml) from the Actions tab. It runs every
+combination of the five workloads, two placement strategies (object leases and
+distributed), and four faults: 40 jobs, each running two 120-second trials.
 
 With object leases, the checkers require every read to see each write that was
 acknowledged before the read started. With distributed placement, a node can

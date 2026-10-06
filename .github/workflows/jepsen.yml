@@ -1,36 +1,7 @@
 name: jepsen
 
+# Manual only: running the full matrix on every push hits rate limits.
 on:
-  push:
-    paths:
-      - "jepsen/**"
-      - "slap/**"
-      - "slap_yjs/**"
-      - "slap_streams/**"
-      - "slap_snapshot_log/**"
-      - "slap_kv/**"
-      - "slap_files/**"
-      - "slap_cluster/**"
-      - "slap_slatedb/**"
-      - ".github/workflows/jepsen.yml"
-      - "flake.nix"
-      - "flake.lock"
-      - ".dockerignore"
-  pull_request:
-    paths:
-      - "jepsen/**"
-      - "slap/**"
-      - "slap_yjs/**"
-      - "slap_streams/**"
-      - "slap_snapshot_log/**"
-      - "slap_kv/**"
-      - "slap_files/**"
-      - "slap_cluster/**"
-      - "slap_slatedb/**"
-      - ".github/workflows/jepsen.yml"
-      - "flake.nix"
-      - "flake.lock"
-      - ".dockerignore"
   workflow_dispatch:
     inputs:
       time-limit:

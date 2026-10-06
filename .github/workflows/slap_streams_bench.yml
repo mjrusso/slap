@@ -5,14 +5,8 @@
 # alerts do not fail the job.
 name: slap_streams Benchmarks
 
+# Manual only: too slow and costly to run on every push.
 on:
-  push:
-    paths:
-      - "slap/**"
-      - "slap_streams/**"
-      - "slap_cluster/**"
-      - "slap_slatedb/**"
-      - ".github/workflows/slap_streams_bench.yml"
   workflow_dispatch:
 
 permissions:

@@ -194,9 +194,11 @@ unhandled exceptions; those sit beside the workload's correctness checker.
   access to the shared store during the fault. Store transitions are at least
   twice `--nemesis-interval` apart to give writes time to resume.
 
-Clock faults are not available: containers share the host's clock. CI runs
-separate trials for partition, kill, pause, and object-store for every workload
-and placement strategy, with two trials of each combination.
+Clock faults are not available: containers share the host's clock. When
+started from the Actions tab, the CI workflow
+([`jepsen.yml`](../.github/workflows/jepsen.yml)) runs separate trials for
+partition, kill, pause, and object-store for every workload and placement
+strategy, with two trials of each combination.
 
 The [`fault-checker`](src/jepsen/slap.clj) requires at least one completed
 occurrence of each requested fault followed by a completed recovery event. If

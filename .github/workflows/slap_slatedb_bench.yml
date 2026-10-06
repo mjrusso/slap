@@ -15,11 +15,8 @@
 # not fail the job.
 name: slap_slatedb Benchmarks
 
+# Manual only: too slow and costly to run on every push.
 on:
-  push:
-    paths:
-      - "slap_slatedb/**"
-      - ".github/workflows/slap_slatedb_bench.yml"
   workflow_dispatch:
 
 permissions:
