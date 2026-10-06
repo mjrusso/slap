@@ -195,7 +195,8 @@ defmodule Slap.Files do
         sha256: :crypto.hash(:sha256, bytes)
       })
 
-    with :ok <- verify(record, opts), do: commit(ref, record, condition, nil, @retries, config)
+    with :ok <- verify(record, opts),
+         do: commit(ref, record, condition, nil, retries(condition), config)
   end
 
   defp write(ref, {:object, chunks}, meta, condition, opts, config) do
@@ -213,7 +214,7 @@ defmodule Slap.Files do
              Body.upload(config.objects, key, chunks, Config.object_opts(config)),
            record = Map.merge(meta, %{body: {:object, key}, size: size, sha256: sha}),
            :ok <- verify(record, opts) do
-        commit(ref, record, condition, intent, @retries, config)
+        commit(ref, record, condition, intent, retries(condition), config)
       else
         {:error, %Error{} = error} ->
           discard(intent, config)
@@ -253,7 +254,7 @@ defmodule Slap.Files do
           done(intent, old_key)
           {:ok, Record.to_file(ref, version, record)}
 
-        {:error, {:conflict, _}} when condition == :any and retries > 0 ->
+        {:error, {:conflict, _}} when retries > 0 ->
           commit(ref, record, condition, intent, retries - 1, config)
 
         {:error, {:conflict, version}} ->
@@ -325,7 +326,7 @@ defmodule Slap.Files do
 
     with :ok <- validate_ref(ref),
          {:ok, condition} <- condition(opts, false) do
-      delete(ref, condition, @retries, config)
+      delete(ref, condition, retries(condition), config)
     end
   end
 
@@ -347,7 +348,7 @@ defmodule Slap.Files do
   defp remove(ref, condition, {version, record}, retries, config) do
     with {:ok, intent} <- cover(nil, ref, List.wrap(Record.object_key(record)), config) do
       case Record.delete(ref, version, due(intent), config) do
-        {:error, {:conflict, _}} when condition == :any and retries > 0 ->
+        {:error, {:conflict, _}} when retries > 0 ->
           delete(ref, condition, retries - 1, config)
 
         other ->
@@ -575,6 +576,9 @@ defmodule Slap.Files do
   defp holds?(nil, :absent), do: true
   defp holds?({version, _}, {:version, version}), do: true
   defp holds?(_current, _condition), do: false
+
+  defp retries(:any), do: @retries
+  defp retries(_condition), do: 0
 
   defp version_of(nil), do: nil
   defp version_of({version, _}), do: version
