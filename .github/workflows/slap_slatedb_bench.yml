@@ -42,7 +42,7 @@ jobs:
     name: Binding and Storage
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       # The same pinned RustFS as the tests. Toxiproxy listens on 9200 and
       # forwards to RustFS on 9000, adding latency to each response.
       - name: Start RustFS 1.0.0 and Toxiproxy 2.12.0
@@ -65,12 +65,12 @@ jobs:
           # Check the proxy adds the latency.
           curl -s -o /dev/null -w "direct %{time_total}s\n" http://127.0.0.1:9000/
           curl -s -o /dev/null -w "proxied %{time_total}s\n" http://127.0.0.1:9200/
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           otp-version: "29"
           elixir-version: "1.20"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: slap_slatedb/native/slatedb_nif
       - run: mix deps.get
@@ -108,7 +108,7 @@ jobs:
           mix run --no-start bench/summary.exs >> "$GITHUB_STEP_SUMMARY"
           jq -s add bench/results/*-smaller.json > bench/results/smaller.json
           jq -s add bench/results/*-bigger.json > bench/results/bigger.json
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: slap_slatedb-bench-${{ github.sha }}
           path: slap_slatedb/bench/results
@@ -129,7 +129,7 @@ jobs:
           fi
       - name: Store results (lower is better)
         if: github.ref == 'refs/heads/main'
-        uses: benchmark-action/github-action-benchmark@v1
+        uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
         with:
           name: slap_slatedb (lower is better)
           tool: customSmallerIsBetter
@@ -142,7 +142,7 @@ jobs:
           summary-always: true
       - name: Store results (higher is better)
         if: github.ref == 'refs/heads/main'
-        uses: benchmark-action/github-action-benchmark@v1
+        uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
         with:
           name: slap_slatedb (higher is better)
           tool: customBiggerIsBetter
@@ -158,7 +158,7 @@ jobs:
       # Actions cache. Nothing is pushed.
       - name: Restore previous results
         if: github.ref != 'refs/heads/main'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: bench-data
           key: slap_slatedb-bench-${{ github.ref_name }}-${{ github.run_id }}
@@ -168,7 +168,7 @@ jobs:
         run: mkdir -p bench-data
       - name: Compare (lower is better)
         if: github.ref != 'refs/heads/main'
-        uses: benchmark-action/github-action-benchmark@v1
+        uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
         with:
           name: slap_slatedb (lower is better)
           tool: customSmallerIsBetter
@@ -179,7 +179,7 @@ jobs:
           summary-always: true
       - name: Compare (higher is better)
         if: github.ref != 'refs/heads/main'
-        uses: benchmark-action/github-action-benchmark@v1
+        uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
         with:
           name: slap_slatedb (higher is better)
           tool: customBiggerIsBetter
@@ -190,7 +190,7 @@ jobs:
           summary-always: true
       - name: Save results
         if: github.ref != 'refs/heads/main'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: bench-data
           key: slap_slatedb-bench-${{ github.ref_name }}-${{ github.run_id }}

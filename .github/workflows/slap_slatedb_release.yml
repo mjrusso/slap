@@ -31,17 +31,17 @@ jobs:
           - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04, use-cross: true }
           - { target: x86_64-unknown-linux-musl, os: ubuntu-24.04, use-cross: true }
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Read the version from the tag
         shell: bash
         run: echo "PROJECT_VERSION=${GITHUB_REF_NAME#slap_slatedb-v}" >> "$GITHUB_ENV"
       - name: Check that the tag matches mix.exs
         shell: bash
         run: grep -q "@version \"${PROJECT_VERSION}\"" slap_slatedb/mix.exs
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
           targets: ${{ matrix.job.target }}
-      - uses: philss/rustler-precompiled-action@v1.1.4
+      - uses: philss/rustler-precompiled-action@853ac56183f29a080304df3ff8a194b5bbdc24cc # v1.1.4
         id: build-crate
         with:
           project-name: slatedb_nif
@@ -50,10 +50,10 @@ jobs:
           target: ${{ matrix.job.target }}
           nif-version: ${{ matrix.nif }}
           use-cross: ${{ matrix.job.use-cross }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ steps.build-crate.outputs.file-name }}
           path: ${{ steps.build-crate.outputs.file-path }}
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: ${{ steps.build-crate.outputs.file-path }}

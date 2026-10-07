@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Start RustFS 1.0.0
         working-directory: .
         run: |
@@ -48,15 +48,15 @@ jobs:
             s3 -X PUT || true; s3 -I && break; sleep 1
           done
           s3 -I
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           otp-version: "29"
           elixir-version: "1.20"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: slap_slatedb/native/slatedb_nif
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "22"
       - run: corepack enable
@@ -73,7 +73,7 @@ jobs:
       - name: Summary
         working-directory: slap/durable_streams
         run: node summary.js ../bench/results >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         if: always()
         with:
           name: slap_streams-bench-${{ github.sha }}
@@ -95,7 +95,7 @@ jobs:
           fi
       - name: Store results (lower is better)
         if: github.ref == 'refs/heads/main'
-        uses: benchmark-action/github-action-benchmark@v1
+        uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
         with:
           name: Durable Streams (lower is better)
           tool: customSmallerIsBetter
@@ -109,7 +109,7 @@ jobs:
           summary-always: true
       - name: Store results (higher is better)
         if: github.ref == 'refs/heads/main'
-        uses: benchmark-action/github-action-benchmark@v1
+        uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
         with:
           name: Durable Streams (higher is better)
           tool: customBiggerIsBetter
@@ -126,7 +126,7 @@ jobs:
       # Actions cache. Nothing is pushed.
       - name: Restore previous results
         if: github.ref != 'refs/heads/main'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: bench-data
           key: slap_streams-bench-${{ github.ref_name }}-${{ github.run_id }}
@@ -136,7 +136,7 @@ jobs:
         run: mkdir -p bench-data
       - name: Compare (lower is better)
         if: github.ref != 'refs/heads/main'
-        uses: benchmark-action/github-action-benchmark@v1
+        uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
         with:
           name: Durable Streams (lower is better)
           tool: customSmallerIsBetter
@@ -147,7 +147,7 @@ jobs:
           summary-always: true
       - name: Compare (higher is better)
         if: github.ref != 'refs/heads/main'
-        uses: benchmark-action/github-action-benchmark@v1
+        uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
         with:
           name: Durable Streams (higher is better)
           tool: customBiggerIsBetter
@@ -158,7 +158,7 @@ jobs:
           summary-always: true
       - name: Save results
         if: github.ref != 'refs/heads/main'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: bench-data
           key: slap_streams-bench-${{ github.ref_name }}-${{ github.run_id }}

@@ -28,11 +28,11 @@ jobs:
       run:
         working-directory: slap_slatedb/native/slatedb_nif
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: slap_slatedb/native/slatedb_nif
       - run: cargo fmt --check
@@ -44,20 +44,20 @@ jobs:
     name: SlateDB Checks
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
-      - uses: erlef/setup-beam@v1
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           otp-version: "29"
           elixir-version: "1.20"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: slap_slatedb/native/slatedb_nif
       - run: mix deps.get
       # Dialyzer's PLTs take minutes to build; they depend on the runtime
       # and the dependencies.
       - name: Cache Dialyzer PLTs
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             slap_slatedb/_build/test/*.plt
@@ -80,13 +80,13 @@ jobs:
           - { os: ubuntu-24.04, otp: "29", elixir: "1.20" }
           - { os: macos-14, otp: "29", elixir: "1.20" }
     steps:
-      - uses: actions/checkout@v5
-      - uses: erlef/setup-beam@v1
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           otp-version: ${{ matrix.otp }}
           elixir-version: ${{ matrix.elixir }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: slap_slatedb/native/slatedb_nif
       - run: mix deps.get
@@ -103,7 +103,7 @@ jobs:
       SLAP_TEST_S3_ENDPOINT: http://127.0.0.1:9000
       SLAP_TEST_AZURITE: "1"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       # Pinned images. RustFS must answer 412 to conflicting conditional
       # PUTs, or fencing does not work; the next step checks that.
       - name: Start RustFS 1.0.0 and Azurite 3.37.0
@@ -130,12 +130,12 @@ jobs:
           status=$(s3 -X PUT -H 'If-Match: "wrong-etag"' --data y http://127.0.0.1:9000/slatedb-test/conditional-check)
           test "$status" = 412 || { echo "RustFS answered $status to If-Match, not 412"; exit 1; }
           python3 scripts/azurite_container.py slatedb
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           otp-version: "29"
           elixir-version: "1.20"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: slap_slatedb/native/slatedb_nif
       - run: mix deps.get

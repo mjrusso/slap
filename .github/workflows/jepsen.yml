@@ -16,11 +16,11 @@ jobs:
     name: Build Node Image
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - run: docker build -f jepsen/docker/Dockerfile -t slap-jepsen-node .
       - run: docker build --target test --output type=cacheonly -f jepsen/docker/Dockerfile .
       - run: docker save slap-jepsen-node | gzip -1 > jepsen-node.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: jepsen-node-image
           path: jepsen-node.tar.gz
@@ -30,9 +30,9 @@ jobs:
     name: Controller Tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
-      - uses: cachix/install-nix-action@v31.11.1
-      - uses: DeterminateSystems/magic-nix-cache-action@v15
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
       - run: nix develop .#ci -c bash -c "cd jepsen && lein test"
 
   jepsen:
@@ -46,13 +46,13 @@ jobs:
         placement: [object-lease, distributed]
         fault: [partition, kill, pause, object-store]
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: jepsen-node-image
       - run: gunzip -c jepsen-node.tar.gz | docker load
-      - uses: cachix/install-nix-action@v31.11.1
-      - uses: DeterminateSystems/magic-nix-cache-action@v15
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
       - name: Start the nodes and RustFS
         run: docker compose -f jepsen/docker/compose.yml up -d
       - name: Run the test
@@ -68,7 +68,7 @@ jobs:
         run: tar czf jepsen-store.tgz -C jepsen store || true
       - name: Upload the results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: jepsen-${{ matrix.workload }}-${{ matrix.placement }}-${{ matrix.fault }}
           path: jepsen-store.tgz
