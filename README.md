@@ -243,8 +243,9 @@ in front.
 
 ## Benchmarks
 
-To run the benchmarks in GitHub Actions, start one of these workflows from the
-Actions tab:
+These workflows run the benchmarks in GitHub Actions weekly and on each push
+to `main` that changes the code they measure; start them from the Actions tab
+to run them on another branch:
 
 - [SlateDB benchmarks](.github/workflows/slap_slatedb_bench.yml) measure
   in-memory binding overhead and durable operations against RustFS, with and
@@ -255,8 +256,13 @@ Actions tab:
   see the [server README](slap/README.md#durable-streams-conformance-and-benchmarks).
 
 Results appear in each run's job summary; a run on `main` also pushes them to
-the `gh-pages` branch. Shared runners are noisy, so compare runs over time
-rather than reading one result.
+the `gh-pages` branch, which GitHub Pages serves as charts of every run on
+`main`:
+
+- SlateDB: <https://mjrusso.github.io/slap/dev/bench/>
+- Durable Streams: <https://mjrusso.github.io/slap/dev/streams-bench/>
+
+Shared runners are noisy, so expect non-trivial variance between runs.
 
 To measure HTTP append throughput and latency on this checkout, use two
 terminals with `SLAP_LOCAL_DEPS=1` set (the Nix shell sets it). In the first,

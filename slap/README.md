@@ -221,9 +221,8 @@ which `caddy-memory` does not. The memory store keeps the objects SlateDB writes
 in RAM, about twice the bytes appended, and deleting the streams does not free
 it within minutes. The 1 MB benchmark appends a fixed time's worth of data, 1.5
 GB in a typical run, so `slap-memory` needs about 4 GB of free memory, more on a
-faster machine. When started from the Actions tab, the `slap_streams_bench.yml`
-workflow runs `slap-local`, `slap-s3` (on RustFS) and `caddy-file`; a run on
-main also charts the results.
+faster machine. The `slap_streams_bench.yml` workflow runs `slap-local`,
+`slap-s3` (on RustFS) and `caddy-file`; a run on main also charts the results.
 
 ### Crash test
 
