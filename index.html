@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Slap</title>
+    <meta name="description" content="Elixir bindings for SlateDB, and services built on them." />
+    <style>
+      :root {
+        --bg: #f8f0e0;
+        --text: #1f1f1f;
+        --muted: #55524b;
+        --link: #2547b3;
+        --rule: #e2d8c3;
+      }
+      html {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        font-size: 17px;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+      }
+      main {
+        max-width: 46rem;
+        margin: 0 auto;
+        padding: 1.5rem 16px 3rem;
+      }
+      img.logo {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      h1 {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+      }
+      h2 {
+        font-size: 1.15rem;
+        margin: 2.5rem 0 0.75rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid var(--rule);
+      }
+      h3 {
+        font-size: 1rem;
+        margin: 1.25rem 0 0.25rem;
+      }
+      ul {
+        padding-left: 1.25rem;
+        margin: 0.25rem 0;
+      }
+      li {
+        margin: 0.3rem 0;
+      }
+      a {
+        color: var(--link);
+      }
+      a:hover {
+        color: var(--text);
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.9em;
+      }
+      .note {
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img class="logo" src="assets/slap.png" width="1600" height="533" alt="Slap logo" />
+      <h1>Slap</h1>
+
+      <p>
+        Slap provides Elixir bindings for <a href="https://slatedb.io">SlateDB</a> (an embedded
+        key-value engine optimized for storing data in object storage), as well as services built on
+        top of these bindings. The services run inside your application, on one node or several.
+        The source is on <a href="https://github.com/mjrusso/slap">GitHub</a>.
+      </p>
+
+      <h3>Services</h3>
+      <ul>
+        <li>
+          <a href="https://hexdocs.pm/slap_streams/">slap_streams</a>: a
+          <a href="https://durablestreams.com">Durable Streams</a> server, with HTTP, long polling,
+          and SSE
+        </li>
+        <li>
+          <a href="https://hexdocs.pm/slap_kv/">slap_kv</a>: partitioned key-value storage with
+          conditional writes, ordered scans, and an HTTP API
+        </li>
+        <li>
+          <a href="https://hexdocs.pm/slap_files/">slap_files</a>: file storage with metadata and
+          conditional replacement; small files are kept in <code>slap_kv</code> records, which saves
+          object-store PUTs
+        </li>
+        <li>
+          <a href="https://hexdocs.pm/slap_yjs/">slap_yjs</a>: <a href="https://yjs.dev">Yjs</a>
+          documents for collaborative editing, with replication and presence across nodes
+        </li>
+      </ul>
+
+      <h3>Building blocks</h3>
+      <ul>
+        <li><a href="https://hexdocs.pm/slap_slatedb/">slap_slatedb</a>: the SlateDB bindings</li>
+        <li>
+          <a href="https://hexdocs.pm/slap_cluster/">slap_cluster</a>: SlateDB databases run as
+          shards across nodes, with placement, routing, and failover
+        </li>
+        <li>
+          <a href="https://hexdocs.pm/slap_snapshot_log/">slap_snapshot_log</a>: an append-only log
+          of changes that can be condensed into snapshots
+        </li>
+      </ul>
+
+      <h3>Standalone server</h3>
+      <ul>
+        <li>
+          <a href="https://hexdocs.pm/slap/">slap</a>: an HTTP server for evaluating and benchmarking
+          <code>slap_streams</code> and <code>slap_kv</code>
+        </li>
+      </ul>
+
+      <h2>Benchmarks</h2>
+      <p>Charts of every benchmark run on <code>main</code>:</p>
+      <ul>
+        <li>
+          <a href="dev/bench/">SlateDB</a>: in-memory binding overhead and durable operations against
+          RustFS, with and without added network latency
+        </li>
+        <li>
+          <a href="dev/streams-bench/">Durable Streams</a>: the official Durable Streams benchmarks
+          against Slap and the official Caddy server, on the same runner
+        </li>
+      </ul>
+      <p class="note">
+        The benchmarks run on GitHub's shared runners, which are noisy, so expect non-trivial
+        variance between runs. See
+        <a href="https://github.com/mjrusso/slap#benchmarks">Benchmarks</a> in the README to run
+        them yourself.
+      </p>
+    </main>
+  </body>
+</html>
