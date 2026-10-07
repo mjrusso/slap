@@ -5,8 +5,18 @@
 # alerts do not fail the job.
 name: slap_streams Benchmarks
 
-# Manual only: too slow and costly to run on every push.
 on:
+  push:
+    branches: [main]
+    paths:
+      - "slap/**"
+      - "slap_streams/**"
+      - "slap_cluster/**"
+      - "slap_slatedb/**"
+      - ".github/workflows/slap_streams_bench.yml"
+  # Mondays at 06:00 UTC. Runs on the default branch (main).
+  schedule:
+    - cron: "0 6 * * 1"
   workflow_dispatch:
 
 permissions:

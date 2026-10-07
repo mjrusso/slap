@@ -15,8 +15,15 @@
 # not fail the job.
 name: slap_slatedb Benchmarks
 
-# Manual only: too slow and costly to run on every push.
 on:
+  push:
+    branches: [main]
+    paths:
+      - "slap_slatedb/**"
+      - ".github/workflows/slap_slatedb_bench.yml"
+  # Mondays at 06:00 UTC. Runs on the default branch (main).
+  schedule:
+    - cron: "0 6 * * 1"
   workflow_dispatch:
 
 permissions:
