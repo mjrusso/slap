@@ -129,6 +129,15 @@ defmodule Slap.Yjs.SharingTest do
              awareness_message(update)
   end
 
+  test "join sets the server's initial assigns when it starts it" do
+    doc_id = doc_id()
+    {:ok, pid} = Yjs.Docs.join(Server, doc_id, assigns: %{limit: 8})
+    assert GenServer.call(pid, {:assign, :limit}) == 8
+
+    {:ok, ^pid} = Yjs.Docs.join(Server, doc_id, assigns: %{limit: 9})
+    assert GenServer.call(pid, {:assign, :limit}) == 8
+  end
+
   test "a server stops after its last subscriber leaves, and compacts" do
     doc_id = doc_id()
     {:ok, pid} = Yjs.Docs.join(Server, doc_id, idle_timeout: 50)

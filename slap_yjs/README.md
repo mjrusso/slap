@@ -114,7 +114,9 @@ send it to the client. `sync/2` waits for local updates to be stored and
 for the server to catch up with other nodes.
 
 To read or edit a document from server code, get its `Yex.Doc` with
-`Slap.Yjs.DocServer.doc/2` and use y_ex's functions on it.
+`Slap.Yjs.DocServer.doc/2` and use y_ex's functions on it. To pass settings
+to your document server module, use the `:assigns` option of
+`Slap.Yjs.Docs.join/3`.
 
 ## Client behavior
 

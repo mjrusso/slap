@@ -102,7 +102,7 @@ defmodule Slap.Yjs.DocServer do
 
   ## Options
 
-  Besides `Yex.DocServer`'s:
+  Besides `Yex.DocServer`'s options, such as `:assigns`:
 
     * `:doc_id` (required) - the `Slap.Yjs.Store` document, `{service, name}`.
     * `:flush_after` - milliseconds to buffer an update (default 10).
@@ -190,6 +190,7 @@ defmodule Slap.Yjs.DocServer do
     )
 
     validate_option!(opts, :compact_on_stop, &is_boolean/1, "boolean")
+    validate_option!(opts, :assigns, &is_map/1, "a map")
     if Keyword.has_key?(opts, :compaction), do: validate_compaction!(opts[:compaction])
   end
 

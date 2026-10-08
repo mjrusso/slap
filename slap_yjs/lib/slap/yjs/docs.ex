@@ -72,16 +72,17 @@ defmodule Slap.Yjs.Docs do
   @doc """
   Subscribes the caller to the document's server on this node, starting it
   with `opts` (`Slap.Yjs.DocServer` options; `:idle_timeout` defaults to 30 s)
-  if it is not running. Server options take effect when the document server
-  first starts. The caller then gets the messages described in
-  `Slap.Yjs.DocServer`, and should monitor the returned pid: if the server
-  stops, join again and resynchronise. `{:error, :deleted}` if the document
-  was deleted (`delete/2`). `:docs` selects a named Docs instance;
-  `:timeout` bounds loading and subscribing (default 5 s).
+  if it is not running. Server options, and `:assigns` (a map of the
+  server's initial assigns), apply only when the server starts. The caller
+  then gets the messages described in `Slap.Yjs.DocServer`, and should
+  monitor the returned pid: if the server stops, join again and
+  resynchronise. `{:error, :deleted}` if the document was deleted
+  (`delete/2`). `:docs` selects a named Docs instance; `:timeout` bounds
+  loading and subscribing (default 5 s).
   """
   @spec join(module(), Yjs.Store.doc(), keyword()) :: {:ok, pid()} | {:error, term()}
   def join(module, doc_id, opts \\ []) do
-    validate_options!(opts, [:docs, :timeout] ++ Yjs.DocServer.option_keys())
+    validate_options!(opts, [:docs, :timeout, :assigns] ++ Yjs.DocServer.option_keys())
     validate_control_opts!(opts)
     Yjs.DocServer.validate_options!(opts)
     unless is_atom(module) and module != nil, do: raise(ArgumentError, "module must be a module")
