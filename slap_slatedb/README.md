@@ -72,6 +72,10 @@ other platforms, build the NIF from source: install Rust 1.91 or later, add
 `{:rustler, "~> 0.38"}` to your dependencies, and set `SLAP_SLATEDB_BUILD=1`
 when you compile.
 
+The prebuilt NIF is downloaded from GitHub when the package compiles. A
+build without network access, such as a Nix sandbox build, must build the
+NIF from source with `SLAP_SLATEDB_BUILD=1`.
+
 ## Example
 
 Run this in `iex -S mix` with a fresh local directory.
@@ -225,6 +229,8 @@ The `:store` option of `open/2` selects where the database lives:
 # In memory, lost when the VM exits.
 Slap.SlateDB.open("my-db", store: :memory)
 
+# A local directory, for development: old manifest files are never deleted
+# from it, so its size only grows.
 Slap.SlateDB.open("my-db", store: {:local, "/var/lib/slatedb"})
 
 # Amazon S3, configured from AWS_REGION, AWS_ACCESS_KEY_ID and
