@@ -40,6 +40,11 @@ defmodule Mix.Tasks.Slap.Server do
   Use `iex -S mix slap.server ...` to keep an interactive prompt while the
   listener runs.
 
+  Without a Mix project, use `Mix.install`:
+
+      elixir -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- \\
+        --streams --store memory
+
   With a placement other than `local`, the node is one of a cluster: start
   it with a name and a shared cookie, for example `elixir --name
   a@127.0.0.1 --cookie slap -S mix slap.server --streams --store
@@ -91,7 +96,7 @@ defmodule Mix.Tasks.Slap.Server do
     validate_placement!(opts)
     validate_port!(opts)
     store = store(opts[:store])
-    Mix.Task.run("app.start")
+    start_applications(Mix.Project.get())
     SlateDB.set_log_level(:warning)
 
     config =
@@ -121,6 +126,10 @@ defmodule Mix.Tasks.Slap.Server do
 
     if !IEx.started?(), do: Process.sleep(:infinity)
   end
+
+  # Mix.install has no project and has started the applications.
+  defp start_applications(nil), do: :ok
+  defp start_applications(_project), do: Mix.Task.run("app.start")
 
   defp start_error({:shutdown, {:failed_to_start_child, _id, reason}}),
     do: start_error(reason)

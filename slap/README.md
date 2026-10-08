@@ -54,16 +54,21 @@ application](#embed-a-service-in-your-application).
 
 ## Try the standalone server
 
-You need Elixir 1.18 or later. Clone the
-[repository](https://github.com/mjrusso/slap), then, from its `slap/`
-directory, fetch the dependencies and start the server:
+You need Elixir 1.18 or later. This command installs `slap` from Hex with
+`Mix.install` and starts the server:
 
 ```sh
-mix deps.get
-mix slap.server --streams --kv --store memory
+elixir -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- \
+  --streams --kv --store memory
 ```
 
-`--streams` and `--kv` select the services; pass one or both.
+`--streams` and `--kv` select the services; pass one or both. In a Mix project
+that depends on `slap`, run `mix slap.server` with the same arguments; the
+examples below use that form.
+
+The SlateDB NIF is precompiled for macOS and Linux (glibc and musl) on x86_64
+and arm64. The first run downloads it and compiles the dependencies; later
+runs reuse them.
 
 The server listens on `http://127.0.0.1:4437`. It serves Streams under
 `/v1/stream/` and KV under `/v1/kv/`, and `GET /health` answers 200 once it is
@@ -223,6 +228,11 @@ it within minutes. The 1 MB benchmark appends a fixed time's worth of data, 1.5
 GB in a typical run, so `slap-memory` needs about 4 GB of free memory, more on a
 faster machine. The `slap_streams_bench.yml` workflow runs `slap-local`,
 `slap-s3` (on RustFS) and `caddy-file`; a run on main also charts the results.
+
+### Without a Mix project
+
+`scripts/mix_install_test.sh` runs the [`Mix.install`
+command](#try-the-standalone-server) against this checkout. CI runs it.
 
 ### Crash test
 
