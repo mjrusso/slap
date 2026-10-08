@@ -103,7 +103,8 @@ iex> {:ok, %{messages: messages, up_to_date: true}} = Slap.Streams.read("/chat/1
 The functions return protocol results, not HTTP responses; `Slap.Streams`
 documents the HTTP status for each result. The next offset is 12 because the
 JSON element occupies eight bytes and each message adds four bytes of
-overhead.
+overhead. Offsets in `Slap.Streams` are these integers; over HTTP they use
+the official wire format, and `Slap.Streams.Offset` converts between the two.
 
 ## Embedding
 
@@ -117,11 +118,10 @@ children = [
 ]
 ```
 
-This serves `/v1/stream/` directly. An application can instead mount the
-router with `Plug.Router.forward/2`. A stream's name is its full HTTP request
-path, so the stream at `/v1/stream/chat/1` is
-`Slap.Streams.head("/v1/stream/chat/1")` in-process. With a forwarded mount,
-the mount path is part of the name.
+Bandit serves the router at `/v1/stream/`. A `{:local, dir}` store is for
+development, because it never deletes old manifests (see
+[Storage after deletes](#storage-after-deletes)); [Using S3](#using-s3)
+describes the alternative.
 
 To use an application-owned cluster module:
 
@@ -138,6 +138,37 @@ Pass `cluster: MyApp.StreamsCluster` to the router and to any `Slap.Yjs.Docs`
 instance using it. Run one Streams cluster per VM: metrics and the HTTP
 request-body budget are shared across the VM. A KV cluster can run on the
 same VM.
+
+### Mounting the router in an application
+
+A stream's name is its full request path, including any path the router is
+mounted under. Served at the root, the stream at `/v1/stream/chat/1` is
+`Slap.Streams.head("/v1/stream/chat/1")` in-process. Mounted under
+`/streams`, the same stream is at `/streams/v1/stream/chat/1`, and that is
+its name.
+
+The router reads the request body itself, so it must run before
+`Plug.Parsers`. After it, a request whose content type `Plug.Parsers` parses
+reaches the router with its body already read. With Phoenix's default parsers
+(JSON, URL-encoded and multipart), an append to a JSON stream then gets 400
+("empty body not allowed"). A Phoenix router runs after the endpoint's
+`Plug.Parsers`, so mount the Streams router in the endpoint, with a function
+plug placed before `plug Plug.Parsers`:
+
+```elixir
+# In MyAppWeb.Endpoint, before `plug Plug.Parsers`:
+plug :streams
+
+@streams Slap.Streams.HTTP.Router.init([])
+
+defp streams(%Plug.Conn{path_info: ["streams" | rest]} = conn, _opts),
+  do: conn |> Plug.forward(rest, Slap.Streams.HTTP.Router, @streams) |> halt()
+
+defp streams(conn, _opts), do: conn
+```
+
+In a `Plug.Router` that has no `Plug.Parsers` before it,
+`forward "/streams", to: Slap.Streams.HTTP.Router` does the same.
 
 ## Using S3
 
@@ -371,9 +402,9 @@ Without leases, reads are not linearizable. A node that was paused, or that
 disagrees with others about which nodes are connected, may serve reads from
 its old state until it finds that SlateDB has fenced it (about a second).
 Its writes fail with 503, because SlateDB rejects writes from a fenced
-writer. Before it
-reports a producer sequence gap, it confirms its ownership with a write, so
-that reply also gets 503. The Jepsen suite checks both kinds of placement.
+writer. Before it reports a producer sequence gap, it confirms its ownership
+with a write, so that reply also gets 503. The Jepsen suite checks both kinds
+of placement.
 
 ## Storage
 
