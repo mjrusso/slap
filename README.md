@@ -67,6 +67,33 @@ owner. SlateDB's fencing protects against nodes disagreeing about ownership.
 KV keeps each **partition**'s rows on one shard; Streams keeps paths in the
 same **placement group** on one shard.
 
+## Packages
+
+Slap is eight Mix packages, each published separately to Hex. Most
+applications depend on one of the services:
+
+| Package                         | Provides                                                                                                      | Hex                                                                                                                                                                                        |
+|---------------------------------|---------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [`slap_streams`](slap_streams/) | A [Durable Streams](https://durablestreams.com) server, with HTTP, long polling, and SSE.                     | [![Hex](https://img.shields.io/hexpm/v/slap_streams.svg)](https://hex.pm/packages/slap_streams) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_streams) |
+| [`slap_kv`](slap_kv/)           | Partitioned key-value storage with conditional writes, ordered scans, and an HTTP API.                        | [![Hex](https://img.shields.io/hexpm/v/slap_kv.svg)](https://hex.pm/packages/slap_kv) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_kv)                |
+| [`slap_files`](slap_files/)     | File storage. Small bodies go in KV records, which saves object-store PUTs; larger ones go in object storage. | [![Hex](https://img.shields.io/hexpm/v/slap_files.svg)](https://hex.pm/packages/slap_files) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_files)       |
+| [`slap_yjs`](slap_yjs/)         | [Yjs](https://yjs.dev) documents, with replication and presence across nodes.                                 | [![Hex](https://img.shields.io/hexpm/v/slap_yjs.svg)](https://hex.pm/packages/slap_yjs) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_yjs)             |
+
+The services are built on these packages, which you can also use directly:
+
+| Package                                   | Provides                                                                                               | Hex                                                                                                                                                                                                       |
+|-------------------------------------------|--------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [`slap_slatedb`](slap_slatedb/)           | Elixir bindings for SlateDB: reads, writes, transactions, durability subscriptions, and object access. | [![Hex](https://img.shields.io/hexpm/v/slap_slatedb.svg)](https://hex.pm/packages/slap_slatedb) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_slatedb)                |
+| [`slap_cluster`](slap_cluster/)           | Placement, routing, and failover for SlateDB shards across nodes.                                      | [![Hex](https://img.shields.io/hexpm/v/slap_cluster.svg)](https://hex.pm/packages/slap_cluster) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_cluster)                |
+| [`slap_snapshot_log`](slap_snapshot_log/) | An append-only log with snapshots that replace its prefix. Each `slap_yjs` document is a snapshot log. | [![Hex](https://img.shields.io/hexpm/v/slap_snapshot_log.svg)](https://hex.pm/packages/slap_snapshot_log) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_snapshot_log) |
+
+For evaluating, testing, and benchmarking Streams and KV, there is a standalone
+server. You generally don't want to depend on it in your application:
+
+| Package                                            | Provides                                                         | Hex                                                                                                                                                                |
+|----------------------------------------------------|------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [`slap`](slap/README.md#try-the-standalone-server) | A standalone HTTP server (`mix slap.server`) for Streams and KV. | [![Hex](https://img.shields.io/hexpm/v/slap.svg)](https://hex.pm/packages/slap) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap) |
+
 ## Usage Examples
 
 With Elixir 1.18 or later installed, from the root of this repository:
@@ -199,32 +226,6 @@ iex> {:ok, %{rows: rows, cursor: nil}} =
 ...>   Slap.KV.scan("people", gte: "a", lt: "c"); rows
 [{"a", "Ada"}, {"b", "Grace"}]
 ```
-
-## Packages
-
-Slap is eight Mix packages, each published separately to Hex. Most
-applications depend on one of the services:
-
-| Package                         | Provides                                                                                                      | Hex                                                                                                                                                                                        |
-|---------------------------------|---------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [`slap_streams`](slap_streams/) | A [Durable Streams](https://durablestreams.com) server, with HTTP, long polling, and SSE.                     | [![Hex](https://img.shields.io/hexpm/v/slap_streams.svg)](https://hex.pm/packages/slap_streams) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_streams) |
-| [`slap_kv`](slap_kv/)           | Partitioned key-value storage with conditional writes, ordered scans, and an HTTP API.                        | [![Hex](https://img.shields.io/hexpm/v/slap_kv.svg)](https://hex.pm/packages/slap_kv) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_kv)                |
-| [`slap_files`](slap_files/)     | File storage. Small bodies go in KV records, which saves object-store PUTs; larger ones go in object storage. | [![Hex](https://img.shields.io/hexpm/v/slap_files.svg)](https://hex.pm/packages/slap_files) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_files)       |
-| [`slap_yjs`](slap_yjs/)         | [Yjs](https://yjs.dev) documents, with replication and presence across nodes.                                 | [![Hex](https://img.shields.io/hexpm/v/slap_yjs.svg)](https://hex.pm/packages/slap_yjs) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_yjs)             |
-
-The services are built on these packages, which you can also use directly:
-
-| Package                                   | Provides                                                                                               | Hex                                                                                                                                                                                                       |
-|-------------------------------------------|--------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [`slap_slatedb`](slap_slatedb/)           | Elixir bindings for SlateDB: reads, writes, transactions, durability subscriptions, and object access. | [![Hex](https://img.shields.io/hexpm/v/slap_slatedb.svg)](https://hex.pm/packages/slap_slatedb) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_slatedb)                |
-| [`slap_cluster`](slap_cluster/)           | Placement, routing, and failover for SlateDB shards across nodes.                                      | [![Hex](https://img.shields.io/hexpm/v/slap_cluster.svg)](https://hex.pm/packages/slap_cluster) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_cluster)                |
-| [`slap_snapshot_log`](slap_snapshot_log/) | An append-only log with snapshots that replace its prefix. Each `slap_yjs` document is a snapshot log. | [![Hex](https://img.shields.io/hexpm/v/slap_snapshot_log.svg)](https://hex.pm/packages/slap_snapshot_log) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_snapshot_log) |
-
-[`slap`](slap/README.md#try-the-standalone-server) is a standalone HTTP server
-for evaluating, testing, and benchmarking Streams and KV. You generally don't
-want to depend on it in your application.
-
-[![Hex](https://img.shields.io/hexpm/v/slap.svg)](https://hex.pm/packages/slap) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap)
 
 ### Embedding
 
