@@ -4,14 +4,13 @@
 #
 #     mix run bench/storage_soak.exs
 #
-# Deleted rows are only dropped when compaction merges their tombstones
-# with them, so the compactor is set to merge runs of very different sizes
-# (a size threshold of 1000), and the garbage collector to run every second. SlateDB 0.16 keeps the
-# files a compaction replaces for 15 minutes (each compaction writes a
-# checkpoint with that lifetime), so each round then waits SOAK_SETTLE_S
-# (default 1080) seconds. Meanwhile it appends to one other stream and
-# flushes an L0 each second, as ongoing traffic would: the garbage collector
-# also keeps files newer than the newest compacted L0.
+# Deleted rows take up space until a compaction merges them with their
+# tombstones. The garbage collector deletes the files that compaction
+# replaced once its checkpoint expires, 15 minutes later by default
+# (`checkpoint_lifetime`). The settings below let the compactor merge runs
+# of very different sizes and run the garbage collector every second. Each
+# round waits SOAK_SETTLE_S seconds (default 1080) before it measures the
+# store.
 #
 # SOAK_MIB (default 64) sets how much to write, SOAK_ROUNDS (default 2) how
 # many times to write and delete it. By default the store is a temporary
