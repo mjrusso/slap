@@ -33,7 +33,9 @@ benchmarking.
 
 # Slap
 
-## SlateDB
+## Introduction
+
+### SlateDB
 
 SlateDB is an embedded [log-structured merge-tree key-value
 engine](https://slatedb.io/docs/design/overview/). It stores its write-ahead
@@ -58,7 +60,7 @@ log position. Any later write from the previous process fails. (The object
 store must honor conditional writes.) See [SlateDB's writer
 protocol](https://slatedb.io/rfcs/0001-manifest/#writer-protocol).
 
-## Sharding
+### Sharding
 
 Slap uses multiple SlateDB databases as **shards**, each with its own writer.
 Writes to different shards can run in parallel, increasing throughput. Slap
