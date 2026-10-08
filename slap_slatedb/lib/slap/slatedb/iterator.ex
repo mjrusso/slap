@@ -64,7 +64,8 @@ defmodule Slap.SlateDB.Iterator do
   Moves the iterator forward to the first key that is at least `key`.
 
   The key must be inside the iterator's range and not before its current
-  position.
+  position. An iterator with `order: :desc` cannot seek; it returns an
+  `:invalid` error.
   """
   @spec seek(t(), binary(), keyword()) :: :ok | {:error, SlateDB.Error.t()}
   def seek(%__MODULE__{resource: iter}, key, opts \\ []) when is_binary(key) do

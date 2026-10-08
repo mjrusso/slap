@@ -71,7 +71,9 @@ fn reader_open<'a>(
         builder = match cache {
             CacheChoice::Default => builder,
             CacheChoice::Disabled => builder.with_db_cache_disabled(),
-            CacheChoice::Shared(cache) => builder.with_db_cache(cache.cache.clone()),
+            CacheChoice::Shared(cache) => {
+                builder.with_db_cache(cache.cache.clone(), cache.new_id())
+            }
         };
         if let Some(op) = merge_operator {
             builder = builder.with_merge_operator(op.operator());

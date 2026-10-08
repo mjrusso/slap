@@ -85,9 +85,9 @@ pub(crate) fn validate_key(key: &[u8]) -> NifOutcome<()> {
     if key.is_empty() {
         return Err(NifError::invalid("key cannot be empty"));
     }
-    // SlateDB also panics on keys longer than u16::MAX bytes.
-    if key.len() > usize::from(u16::MAX) {
-        return Err(NifError::invalid("key is longer than 65535 bytes"));
+    // SlateDB also panics on keys longer than u32::MAX bytes.
+    if u32::try_from(key.len()).is_err() {
+        return Err(NifError::invalid("key is too large"));
     }
     Ok(())
 }

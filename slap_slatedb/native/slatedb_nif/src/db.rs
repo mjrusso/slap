@@ -73,6 +73,15 @@ impl Resource for SnapshotResource {}
 /// A block and metadata cache that several databases can share.
 pub(crate) struct CacheResource {
     pub(crate) cache: Arc<dyn DbCache>,
+    next_id: AtomicU64,
+}
+
+impl CacheResource {
+    /// A `db_cache_id` no other open of this cache has used. SlateDB requires
+    /// a distinct one for each database that shares a cache.
+    pub(crate) fn new_id(&self) -> u64 {
+        self.next_id.fetch_add(1, Ordering::Relaxed)
+    }
 }
 
 #[rustler::resource_impl]
@@ -102,7 +111,9 @@ fn db_open<'a>(
         builder = match cache {
             CacheChoice::Default => builder,
             CacheChoice::Disabled => builder.with_db_cache_disabled(),
-            CacheChoice::Shared(cache) => builder.with_db_cache(cache.cache.clone()),
+            CacheChoice::Shared(cache) => {
+                builder.with_db_cache(cache.cache.clone(), cache.new_id())
+            }
         };
         if let Some(op) = merge_operator {
             builder = builder.with_merge_operator(op.operator());
@@ -211,6 +222,7 @@ fn cache_new(env: Env<'_>, capacity_bytes: u64) -> Term<'_> {
     });
     ResourceArc::new(CacheResource {
         cache: Arc::new(cache),
+        next_id: AtomicU64::new(0),
     })
     .encode(env)
 }

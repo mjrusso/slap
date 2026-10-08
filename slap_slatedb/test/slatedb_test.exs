@@ -157,6 +157,12 @@ defmodule Slap.SlateDBTest do
       assert {:ok, []} = SlateDB.Iterator.next_batch(iter)
     end
 
+    test "seeking a descending iterator is rejected", %{db: db} do
+      {:ok, iter} = SlateDB.iterator(db, prefix: "key:", order: :desc)
+
+      assert {:error, %SlateDB.Error{kind: :invalid}} = SlateDB.Iterator.seek(iter, "key:18")
+    end
+
     test "iterator fixes row shape and takes batch size per fetch", %{db: db} do
       assert_raise ArgumentError, ~r/:batch_size belongs to scan\/2/, fn ->
         SlateDB.iterator(db, batch_size: 2)

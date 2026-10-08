@@ -19,8 +19,8 @@ rustler = "0.38"
 # `foyer` (SlateDB's default cache, with a disk tier) is left out to keep
 # build times down; moka covers the in-memory cache.
 # SlateDB is pinned to an exact version: upgrade one minor version at a time
-# and run the crash test (see "Upgrading SlateDB" in the README) each time.
-slatedb = { version = "=0.16.0", default-features = false, features = [
+# and run the crash test (see "Upgrading SlateDB" in RELEASING.md) each time.
+slatedb = { version = "=0.17.0", default-features = false, features = [
     # Object stores for `s3://`, `az://` (and `abfs://`, `azure://`) and `gs://`.
     "aws",
     "azure",
@@ -38,7 +38,7 @@ slatedb = { version = "=0.16.0", default-features = false, features = [
     "lz4",
     "zstd",
 ] }
-slatedb-common = "=0.16.0"
+slatedb-common = "=0.17.0"
 async-trait = "0.1"
 futures = "0.3"
 uuid = "1"

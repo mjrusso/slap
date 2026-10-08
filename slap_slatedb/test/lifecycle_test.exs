@@ -305,23 +305,10 @@ defmodule Slap.SlateDB.LifecycleTest do
       assert {:ok, ^big} = SlateDB.get(db, "b1")
     end
 
-    test "keys up to 65535 bytes work, longer ones are rejected", %{db: db} do
-      key = :crypto.strong_rand_bytes(65_535)
+    test "keys longer than 65535 bytes round-trip", %{db: db} do
+      key = :crypto.strong_rand_bytes(100_000)
       {:ok, _} = SlateDB.put(db, key, "v")
       assert {:ok, "v"} = SlateDB.get(db, key)
-
-      # SlateDB panics on longer keys, so the binding must stop them first.
-      too_long = :crypto.strong_rand_bytes(65_536)
-      assert {:error, %SlateDB.Error{kind: :invalid}} = SlateDB.put(db, too_long, "v")
-
-      assert {:error, %SlateDB.Error{kind: :invalid}} =
-               SlateDB.write(db, [{:put, too_long, "v"}])
-
-      assert {:error, %SlateDB.Error{kind: :invalid}} = SlateDB.get(db, too_long)
-      {:ok, tx} = SlateDB.begin(db)
-
-      assert {:error, %SlateDB.Error{kind: :invalid}} =
-               SlateDB.Transaction.put(tx, too_long, "v")
     end
 
     test "a returned large value outlives the database", %{db: db} do

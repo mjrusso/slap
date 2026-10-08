@@ -1,6 +1,6 @@
 # slap_slatedb
 
-`slap_slatedb` provides Elixir bindings for [SlateDB](https://slatedb.io) 0.16,
+`slap_slatedb` provides Elixir bindings for [SlateDB](https://slatedb.io) 0.17,
 an embedded key-value engine that keeps its data in object storage, such as
 S3. Your application opens a database and calls it directly; there is no
 database server to run. SlateDB batches writes to limit object-store requests.
@@ -337,10 +337,9 @@ use before choosing the interval and shard count.
 
 ## Limits and caveats
 
-- SlateDB 0.16 enforces TTL during compaction, not on reads. An expired row
+- SlateDB 0.17 enforces TTL during compaction, not on reads. An expired row
   may still be returned; `get_key_value/3` includes its `expire_ts` for an
   exact cutoff.
-- Keys longer than 65,535 bytes are rejected with `:invalid`.
 - Numeric merge operators require an eight-byte base value and the same
   `:merge_operator` on every process that opens the database. An invalid base
   can fail reads and compaction. A batch cannot merge the same key with
