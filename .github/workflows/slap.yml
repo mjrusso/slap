@@ -57,6 +57,21 @@ jobs:
           restore-keys: plt-slap-${{ runner.os }}-otp29-elixir1.20-
       - run: mix check
 
+  mix-install:
+    name: Without a Mix project
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: "29"
+          elixir-version: "1.20"
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: slap_slatedb/native/slatedb_nif
+      - run: scripts/mix_install_test.sh
+
   # The official Durable Streams conformance suite against `mix slap.server`,
   # on the in-memory store and on RustFS.
   streams-conformance:
