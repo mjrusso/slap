@@ -11,12 +11,16 @@ defmodule Slap.Streams.Telemetry do
       Measurements: `:bytes`. Metadata: `:shard`, `:reason` (`:overloaded`).
     * `[:stream_server, :write_failed]` - a write failed; the server stopped
       and failed its in-flight requests. Metadata: `:shard`.
+    * `[:wait, :registered]` - a read with `:wait` (long poll or SSE) found
+      no data and is waiting. Any append after this event wakes it.
+      Metadata: `:shard`, `:path`, `:offset` (the offset it waits for).
     * `[:shard, :load]` - every `:load_interval`, per shard: the
       measurements of the shard's load. Metadata: `:shard`.
     * `[:http, :request]` - an HTTP response was sent. Measurements:
       `:duration`. Metadata: `:method`, `:status`.
 
-  The acknowledgement event is a point event without a matching `:start`.
+  The acknowledgement and wait events have no matching `:start` or `:stop`
+  events.
   """
 
   @doc false

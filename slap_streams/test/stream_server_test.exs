@@ -410,6 +410,29 @@ defmodule Slap.Streams.StreamServerTest do
       assert_receive {:read, {:ok, %{messages: [{0, "x"}], next_offset: 5}}}, 1_000
     end
 
+    test "a waiting read is reported when its stream server registers it" do
+      test = self()
+      handler = {__MODULE__, :wait_registered}
+
+      :telemetry.attach(
+        handler,
+        [:slap, :streams, :wait, :registered],
+        fn _event, measurements, metadata, _ ->
+          send(test, {:registered, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      {:ok, _} = Streams.append("/w", "x")
+      reader = Task.async(fn -> Streams.read("/w", 5, wait: 5_000) end)
+      assert_receive {:registered, %{}, %{path: "/w", offset: 5, shard: _}}, 1_000
+
+      {:ok, _} = Streams.append("/w", "y")
+      assert {:ok, %{messages: [{5, "y"}]}} = Task.await(reader)
+    end
+
     test "a read with :wait that times out reads again: empty, from the tail" do
       {:ok, _} = Streams.append("/w", "x")
 

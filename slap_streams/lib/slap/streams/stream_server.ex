@@ -241,6 +241,12 @@ defmodule Slap.Streams.StreamServer do
         ref = Process.monitor(pid)
         waiter = %{pid: pid, offset: offset, sid: state.durable.sid}
 
+        Streams.Telemetry.execute([:wait, :registered], %{}, %{
+          shard: state.ctx.n,
+          path: state.stream.path,
+          offset: offset
+        })
+
         {:reply, {:ok, {:waiting, ref, self()}},
          set_waiters(state, Map.put(state.waiters, ref, waiter))}
     end
