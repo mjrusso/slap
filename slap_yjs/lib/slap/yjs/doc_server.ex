@@ -61,6 +61,8 @@ defmodule Slap.Yjs.DocServer do
       client, on any node;
     * `{:slap_yjs_awareness, doc_id, update}` - an awareness (presence) update.
 
+  `encode_message/1` encodes these messages for the client.
+
   The server monitors its subscribers. When one goes down, the awareness
   states it set are removed. After `:idle_timeout` with no subscribers the
   server stops.
@@ -311,6 +313,26 @@ defmodule Slap.Yjs.DocServer do
   @doc "Unsubscribes `pid`, and removes the awareness states it set."
   @spec unsubscribe(GenServer.server(), pid(), timeout()) :: :ok | {:error, term()}
   def unsubscribe(server, pid, timeout), do: call(server, {:unsubscribe, pid}, timeout)
+
+  @doc """
+  Returns the server's `Yex.Doc`. y_ex functions called on it run in the
+  server. Edits are relayed and stored like a client's updates. The handle
+  is valid only while the server runs.
+  """
+  @spec doc(GenServer.server(), timeout()) :: {:ok, Yex.Doc.t()} | {:error, term()}
+  def doc(server, timeout), do: call(server, :doc, timeout)
+
+  @doc """
+  Encodes a `{:slap_yjs_update, _, _}` or `{:slap_yjs_awareness, _, _}`
+  message as the y-protocols v1 message to send to a client.
+  """
+  @spec encode_message({:slap_yjs_update | :slap_yjs_awareness, Yjs.Store.doc(), binary()}) ::
+          binary()
+  def encode_message({:slap_yjs_update, _doc_id, update}),
+    do: Yex.Sync.message_encode!({:sync, {:sync_update, update}})
+
+  def encode_message({:slap_yjs_awareness, _doc_id, update}),
+    do: Yex.Sync.message_encode!({:awareness, update})
 
   @doc """
   Waits until the server has appended everything it had buffered, has read
@@ -825,6 +847,11 @@ defmodule Slap.Yjs.DocServer do
     caller = %{from: from, monitor: Process.monitor(pid)}
     state = update_persistence(state, &start_append(%{&1 | sync: Sync.add(&1.sync, caller)}))
     {:noreply, synced(state)}
+  end
+
+  defp handle_request(:doc, from, %State{doc: doc} = state) do
+    reply(from, {:ok, doc})
+    {:noreply, state}
   end
 
   # To the alias of the caller's monitor (call/3).

@@ -106,10 +106,15 @@ iex> {:ok, snapshots} = Slap.Yjs.Store.snapshots({"my-service", "doc-1"}); is_li
 true
 ```
 
-Pass each Yjs sync or awareness message received from the client to
-`MyApp.DocServer.process_message_v1(server, message, self())`.
-`sync/2` waits for local updates to be stored and for the server to catch up
-with other nodes.
+Pass each Yjs sync or awareness message from the client to
+`MyApp.DocServer.process_message_v1(server, message, self())`. Encode each
+`{:slap_yjs_update, _, _}` and `{:slap_yjs_awareness, _, _}` message the
+client process receives with `Slap.Yjs.DocServer.encode_message/1`, and
+send it to the client. `sync/2` waits for local updates to be stored and
+for the server to catch up with other nodes.
+
+To read or edit a document from server code, get its `Yex.Doc` with
+`Slap.Yjs.DocServer.doc/2` and use y_ex's functions on it.
 
 ## Client behavior
 

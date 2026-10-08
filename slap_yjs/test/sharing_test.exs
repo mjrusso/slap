@@ -106,6 +106,29 @@ defmodule Slap.Yjs.SharingTest do
     forward(test)
   end
 
+  test "server code edits the document through doc/2; the edit is relayed and stored" do
+    doc_id = doc_id()
+    {:ok, a} = Yjs.Docs.join(Server, doc_id)
+
+    {:ok, doc} = Yjs.DocServer.doc(a, 5_000)
+    Yex.Text.insert(Yex.Doc.get_text(doc, "text"), 0, "hello")
+    assert_receive {:slap_yjs_update, ^doc_id, _}
+
+    :ok = Yjs.DocServer.sync(a, 5_000)
+    assert text(start(doc_id, :b)) == "hello"
+  end
+
+  test "encode_message/1 makes the y-protocols message for what a subscriber receives" do
+    doc_id = doc_id()
+    {update, _id} = awareness_update(%{"name" => "a"})
+
+    assert Yjs.DocServer.encode_message({:slap_yjs_update, doc_id, "update"}) ==
+             update_message("update")
+
+    assert Yjs.DocServer.encode_message({:slap_yjs_awareness, doc_id, update}) ==
+             awareness_message(update)
+  end
+
   test "a server stops after its last subscriber leaves, and compacts" do
     doc_id = doc_id()
     {:ok, pid} = Yjs.Docs.join(Server, doc_id, idle_timeout: 50)
