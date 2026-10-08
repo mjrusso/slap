@@ -138,7 +138,8 @@ defmodule Slap.Yjs.Docs do
   Deletes the document for good (`Slap.Yjs.Store.delete_doc/1`), then stops
   its servers on every node with `{:shutdown, :deleted}`, waiting up to
   `:timeout` ms (default 5 s) for them. `:docs` selects a named instance.
-  Joins return `{:error, :deleted}` from then on. A
+  Joins return `{:error, :deleted}` from then on, so a deleted document's
+  id cannot be reused. A
   server that does not stop in time (on a node that cannot be reached)
   stops once its follower finds the document deleted, and cannot store
   anything meanwhile.

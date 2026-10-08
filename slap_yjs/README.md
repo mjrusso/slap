@@ -118,11 +118,16 @@ with other nodes.
   `{:slap_yjs_awareness, doc_id, update}` from any node. The server stops
   after 30 s without subscribers. If the client's monitor of the server
   reports `:DOWN`, the client joins again and resyncs.
+- A server relays a client's update to its other clients before storing
+  it, which takes up to 10 ms (`:flush_after`) plus one append. If the
+  server stops first, the update is lost unless a client that has it
+  resyncs. Clients on other nodes receive only stored updates.
 - Awareness (presence) is not stored. A client's awareness state is removed
   when the client exits, and a server's when the server or its node stops.
 - An append that fails for a reason other than a transient error
   stops the server with `{:slap_yjs_append_failed, reason}`. Clients join
   again and resend their state.
+- A deleted document's id cannot be reused.
 
 ## How it works
 

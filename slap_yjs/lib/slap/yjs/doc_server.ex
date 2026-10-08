@@ -29,6 +29,11 @@ defmodule Slap.Yjs.DocServer do
   `:overloaded`, as when the document's shard moves) is retried; any other
   failure stops the server with `{:slap_yjs_append_failed, reason}`.
 
+  The server relays a client's update to its other subscribers before
+  storing it. If the server stops first, the update is lost unless a client
+  that has it resynchronises. Servers on other nodes receive only stored
+  updates.
+
   A server started through `Slap.Yjs.Docs` begins loading after `init/2`
   returns. Overrides of `init/2` cannot assume stored updates are present.
   `Slap.Yjs.Docs.join/3` and `subscribe/3` wait for loading to finish.
