@@ -198,6 +198,11 @@ supervised application, put `Slap.Streams.Cluster` in the supervision tree as
 shown above. The example uses the default local placement on one node; see
 [Several nodes](#several-nodes) to run on several nodes.
 
+A failed store probe normally prevents the cluster and its supervising
+application from starting. With `probe: :background`, the cluster starts
+without shards and retries the probe. Operations return
+`{:error, :unavailable}` until the shards open.
+
 ## How it works
 
 - **Placement.** A stream lives on shard `xxh64(key) mod N`, where `key` is its

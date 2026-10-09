@@ -52,6 +52,14 @@ defmodule Slap.Streams.StreamServerTest do
     assert :ok = Streams.cancel_wait("/control-wait", pending)
   end
 
+  test "background probing starts the cluster before the probe passes" do
+    start_supervised!(
+      {OtherCluster, store: :memory_ignoring_preconditions, shards: 1, probe: :background}
+    )
+
+    assert {:error, :unavailable} = Streams.head("/x", cluster: OtherCluster)
+  end
+
   test "invalid shard options fail before the cluster starts" do
     assert_raise ArgumentError, ~r/:idle_tiemout/, fn ->
       OtherCluster.start_link(

@@ -23,7 +23,7 @@ defmodule Slap.Streams.Metrics do
   | `slap_streams_block_cache_hits_total`, `slap_streams_block_cache_misses_total` | counter | `shard` |
   | `slap_streams_durability_lag` | gauge | `shard` (seqs written, not durable) |
   | `slap_streams_shard_events_total` | counter | `event` (`start`, `stop`, `fenced`) |
-  | `slap_streams_store_probe_ok` | gauge | 1 if the startup probe passed |
+  | `slap_streams_store_probe_ok` | gauge | 1 if the most recent store probe passed |
   | `slap_streams_http_requests_total` | counter | `method`, `status` |
   | `slap_streams_http_request_duration_seconds` | histogram | `method` |
 
@@ -59,7 +59,7 @@ defmodule Slap.Streams.Metrics do
     "slap_streams_block_cache_misses_total" => {:counter, "Block cache misses."},
     "slap_streams_durability_lag" => {:gauge, "Sequence numbers written but not durable."},
     "slap_streams_shard_events_total" => {:counter, "Shard starts, stops and fences."},
-    "slap_streams_store_probe_ok" => {:gauge, "1 if the store's startup probe passed."},
+    "slap_streams_store_probe_ok" => {:gauge, "1 if the most recent store probe passed."},
     "slap_streams_http_requests_total" => {:counter, "HTTP responses."},
     "slap_streams_http_request_duration_seconds" => {:histogram, "HTTP request duration."}
   }
