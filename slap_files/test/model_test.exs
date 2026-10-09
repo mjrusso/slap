@@ -2,9 +2,9 @@ defmodule Slap.Files.ModelTest do
   # Random command sequences against Slap.Files and a model (a map of files):
   # puts of inline and object bodies (by size and by :storage), with and
   # without conditions and as retries of the current content, deletes,
-  # gets and reads, sweeps, reconciliations, and the clock moving past
-  # retention and upload deadlines and the max_clock_skew_ms the sweeper
-  # waits after them. Every result must match. After each sequence every
+  # gets, reads, ranged and conditional streams, sweeps, reconciliations,
+  # and the clock moving past retention and upload deadlines and the
+  # max_clock_skew_ms the sweeper waits after them. Every result must match. After each sequence every
   # file is deleted and the clock moved past every deadline: a sweep must
   # then leave no object, no intent and no registration.
   #
@@ -133,7 +133,15 @@ defmodule Slap.Files.ModelTest do
         invalid_command(id)
 
       n when n <= 88 ->
-        Enum.random([{:get, id}, {:get, id}, {:read, id}, {:read, id}, {:list}])
+        Enum.random([
+          {:get, id},
+          {:get, id},
+          {:read, id},
+          {:read, id},
+          {:list},
+          {:stream, id, range(), read_condition(model, id)},
+          {:stream, id, range(), read_condition(model, id)}
+        ])
 
       n when n <= 94 ->
         {:advance, Enum.random([100, 1_000, 20_000])}
@@ -168,6 +176,26 @@ defmodule Slap.Files.ModelTest do
       {_, 1} -> :absent
       {%{version: v}, 2} -> v
       {%{version: v}, 3} -> v + 1
+      _ -> nil
+    end
+  end
+
+  # Offsets near the body sizes that body/2 chooses.
+  defp range do
+    first = Enum.random([0, 0, 1, 5, 16, 17, 39, 69, 70, 75])
+
+    case :rand.uniform(4) do
+      1 -> {first, :eof}
+      2 -> {:last, Enum.random([0, 1, 5, 17, 80])}
+      _ -> {first, first + Enum.random([0, 1, 10, 100])}
+    end
+  end
+
+  defp read_condition(model, id) do
+    case {model[id], :rand.uniform(3)} do
+      {%{version: v}, 1} -> v
+      {%{version: v}, 2} -> v + 1
+      {nil, 1} -> 0
       _ -> nil
     end
   end
@@ -218,6 +246,18 @@ defmodule Slap.Files.ModelTest do
   end
 
   defp execute({:read, id}, partition), do: Files.read({partition, id})
+
+  defp execute({:stream, id, range, condition}, partition) do
+    opts = [range: range] ++ if(condition, do: [if_version: condition], else: [])
+
+    case Files.stream({partition, id}, opts) do
+      {:ok, {_file, resolved, chunks}} ->
+        {:ok, {resolved, IO.iodata_to_binary(Enum.to_list(chunks))}}
+
+      other ->
+        other
+    end
+  end
 
   defp execute({:advance, ms}, _partition), do: advance(ms)
   defp execute({:sweep}, _partition), do: sweep()
@@ -276,6 +316,17 @@ defmodule Slap.Files.ModelTest do
   end
 
   defp expect(model, {:read, id}, _actual), do: {{:ok, model[id] && model[id].body}, model}
+
+  defp expect(model, {:stream, id, range, condition}, _actual) do
+    current = model[id]
+
+    cond do
+      not holds?(current, condition) -> {{:error, {:conflict, current && current.version}}, model}
+      current == nil -> {{:ok, nil}, model}
+      true -> {slice(current.body, range), model}
+    end
+  end
+
   defp expect(model, {:advance, _}, _actual), do: {:ok, model}
   defp expect(model, {:sweep}, _actual), do: {:ok, model}
   defp expect(model, {:reconcile}, _actual), do: {:ok, model}
@@ -288,6 +339,21 @@ defmodule Slap.Files.ModelTest do
 
   defp written(model, _id, body, stored, _actual),
     do: {{:ok, {:a_new_version, stored, byte_size(body)}}, model}
+
+  defp slice(body, range) do
+    size = byte_size(body)
+
+    {first, last} =
+      case range do
+        {:last, n} -> {max(size - n, 0), if(n == 0, do: -1, else: size - 1)}
+        {first, :eof} -> {first, size - 1}
+        {first, last} -> {first, min(last, size - 1)}
+      end
+
+    if first <= last,
+      do: {:ok, {{first, last}, binary_part(body, first, last - first + 1)}},
+      else: {:error, {:range_not_satisfiable, size}}
+  end
 
   defp holds?(_current, nil), do: true
   defp holds?(nil, :absent), do: true

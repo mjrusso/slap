@@ -6,8 +6,9 @@ A file has a ref, `{partition, id}`, such as `{document_id, attachment_id}`; a
 body (its contents); and a content type, size, checksum, and your own metadata.
 You can list the files in a partition, such as a document's attachments, and
 make a replacement conditional on the file not having changed since you read
-it. When a file is replaced or deleted, its old body is deleted for you, and so
-are objects left behind by an interrupted upload or delete.
+it. A read can return a byte range of a file, for HTTP `Range` requests. When
+a file is replaced or deleted, its old body is deleted for you, and so are
+objects left behind by an interrupted upload or delete.
 
 Each file is one record in [`slap_kv`](https://hexdocs.pm/slap_kv/). With the
 default `storage: :auto`, a body up to 16 KiB is stored in the record, and a
@@ -126,7 +127,21 @@ order. `Slap.Files.stream/1` returns the metadata and a lazy body stream.
   With `if_version:`, the version is checked even when the content is
   identical.
 - `get(ref)`, `read(ref)`, `stream(ref)`: metadata, the whole body, or the
-  body as a lazy stream.
+  body as a lazy stream. `read` and `stream` take `if_version:`, the version
+  the file must have.
+- Ranged reads: `read(ref, range:)` and `stream(ref, range:)` return only
+  part of the body. A range is `{first, last}` (inclusive, as in an HTTP
+  `Range` header), `{first, :eof}`, or `{:last, n}`. For a body stored as an
+  object, only the requested bytes are downloaded. `stream` returns
+  `{file, {first, last}, chunks}`: the range clamped to the file's size, which
+  is what a `Content-Range` header reports. A range that contains no byte of
+  the file returns `{:error, {:range_not_satisfiable, size}}`.
+
+  A client that reads a file in several range requests should get every
+  range from the same version. Return the file's version to the client (as
+  an `ETag`, for example), and pass the version the client sends back (in
+  `If-Range` or `If-Match`) as `if_version:`. If the file has changed since,
+  the read returns `{:error, {:conflict, version}}`.
 - `list(partition, prefix:, gte:, lt:, limit:, cursor:)`: a partition's
   files in id order, with their versions.
 - `delete(ref, if_version:)`.
@@ -231,6 +246,11 @@ representative file sizes before changing `inline_max_bytes`.
 ```sh
 mix test          # SLAP_FILES_PROP_RUNS=500 for more model sequences
 ```
+
+`test/s3_test.exs` reads byte ranges of object bodies from an S3-compatible
+server such as RustFS. It runs when `SLAP_TEST_S3_ENDPOINT` is set;
+`SLAP_TEST_S3_BUCKET` names the bucket (default `slatedb-test`). CI runs it
+against RustFS.
 
 The model test covers writes, deletes, reads, sweeps, and clock changes.
 `test/sweeper_test.exs` checks interrupted uploads and cleanup.

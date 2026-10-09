@@ -24,7 +24,8 @@ defmodule Slap.FilesTest do
           [:slap, :files, :put, :start],
           [:slap, :files, :put, :stop],
           [:slap, :files, :put, :exception],
-          [:slap, :files, :get, :stop]
+          [:slap, :files, :get, :stop],
+          [:slap, :files, :stream, :stop]
         ],
         &__MODULE__.send_telemetry/4,
         parent
@@ -41,6 +42,9 @@ defmodule Slap.FilesTest do
                     %{outcome: :ok, telemetry_span_context: ^context, files: Files}}
 
     assert duration >= 0
+
+    assert {:ok, {_file, {1, 2}, _chunks}} = Files.stream({"telemetry", "file"}, range: {1, 2})
+    assert_receive {[:slap, :files, :stream, :stop], _, %{outcome: :ok, range: {1, 2}}}
 
     assert {:error, {:bad_request, :invalid_ref}} = Files.get({"", "file"})
     assert_receive {[:slap, :files, :get, :stop], _, %{outcome: :error, files: Files}}
@@ -320,6 +324,31 @@ defmodule Slap.FilesTest do
       assert {:ok, nil} = Files.get({"doc", "c"})
       sweep()
       assert objects() == []
+    end
+  end
+
+  describe "ranged reads" do
+    test "invalid ranges" do
+      assert {:ok, _} = Files.put({"ranges", "f"}, "body")
+
+      for range <- [{-1, 0}, {3, 2}, {:last, -1}, {0, :end}, {0.0, 1}, "0-1"] do
+        assert Files.read({"ranges", "f"}, range: range) ==
+                 {:error, {:bad_request, :invalid_range}}
+      end
+    end
+
+    test "if_version reads only that version, so several ranges read one body" do
+      ref = {"ranges", "versioned"}
+      body = :crypto.strong_rand_bytes(100)
+      assert {:ok, %FileInfo{version: v1}} = Files.put(ref, body)
+      assert Files.read(ref, range: {0, 49}, if_version: v1) == {:ok, binary_part(body, 0, 50)}
+      assert {:ok, {_file, chunks}} = Files.stream(ref, if_version: v1)
+      assert IO.iodata_to_binary(Enum.to_list(chunks)) == body
+
+      assert {:ok, %FileInfo{version: v2}} = Files.put(ref, :crypto.strong_rand_bytes(100))
+      assert Files.read(ref, range: {50, 99}, if_version: v1) == {:error, {:conflict, v2}}
+
+      assert Files.read(ref, if_version: :absent) == {:error, {:bad_request, :invalid_version}}
     end
   end
 

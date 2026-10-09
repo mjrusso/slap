@@ -3,7 +3,9 @@ defmodule Slap.Files.Test.FilesCase do
   # Starts Slap.KV.Cluster and Slap.Files on a fresh local directory for each
   # test, with a clock the test moves (`advance/1`) and no timed sweeps or
   # reconciliations: the test runs them (`sweep/0`, `reconcile/0`). Tests
-  # are not async: both are named processes.
+  # are not async: both are named processes. Tests tagged `:s3` store file
+  # bodies on an S3-compatible server instead (SLAP_TEST_S3_ENDPOINT,
+  # SLAP_TEST_S3_BUCKET); Slap.KV stays local.
 
   use ExUnit.CaseTemplate
 
@@ -36,7 +38,7 @@ defmodule Slap.Files.Test.FilesCase do
 
     opts =
       [
-        store: {:local, dir},
+        store: if(context[:s3], do: s3_store(), else: {:local, dir}),
         inline_max_bytes: 16,
         inline_limit: 64,
         retention_ms: 1_000,
@@ -50,6 +52,20 @@ defmodule Slap.Files.Test.FilesCase do
 
     start_supervised!({Slap.Files, opts})
     {:ok, files_dir: dir}
+  end
+
+  defp s3_store do
+    endpoint = System.fetch_env!("SLAP_TEST_S3_ENDPOINT")
+    bucket = System.get_env("SLAP_TEST_S3_BUCKET", "slatedb-test")
+
+    # The bucket keeps data between test runs, and System.unique_integer/1
+    # repeats across VMs, so the prefix is random.
+    {:url, "s3://#{bucket}/files/test-#{Slap.Files.new_id()}",
+     aws_endpoint: endpoint,
+     aws_allow_http: "true",
+     aws_region: "us-east-1",
+     aws_access_key_id: System.get_env("SLAP_TEST_S3_KEY", "rustfsadmin"),
+     aws_secret_access_key: System.get_env("SLAP_TEST_S3_SECRET", "rustfsadmin")}
   end
 
   @doc "Moves the clock on by `ms`."

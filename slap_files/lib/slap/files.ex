@@ -47,14 +47,16 @@ defmodule Slap.Files do
 
   ## Errors
 
-  Invalid file data (`ref`, body, metadata, content type, expected SHA-256 and
-  `:if_version`) returns an error tuple. Invalid control options (`:storage`,
+  Invalid file data (`ref`, body, metadata, content type, expected SHA-256,
+  `:if_version` and `:range`) returns an error tuple. Invalid control options (`:storage`,
   `:files`, `:timeout`) and unknown option names raise `ArgumentError`.
 
     * `{:error, {:conflict, version}}` - an `if_version:` condition does not
       hold; `version` is the file's current one, or nil.
     * `{:error, :expired}` - an upload took longer than
       `upload_timeout_ms`; its object is deleted.
+    * `{:error, {:range_not_satisfiable, size}}` - a read's `:range`
+      contains no byte of the file; `size` is the file's size.
     * `{:error, :checksum_mismatch}`, `{:error, :too_large_for_inline}`,
       `{:error, {:bad_request, reason}}`.
     * `{:error, :unavailable | :timeout}` - from `Slap.KV` or the store. A
@@ -65,7 +67,8 @@ defmodule Slap.Files do
   `put/3`, `delete/2`, `get/2`, `read/2`, `stream/2`, and `list/2` emit
   Telemetry spans under `[:slap, :files, operation]`, with `:start`, `:stop`,
   and `:exception` events. Metadata includes `:files`, the instance name;
-  a stop event also has `:outcome` (`:ok` or `:error`). The `stream/2` span
+  a stop event also has `:outcome` (`:ok` or `:error`). A read or stream
+  with a `:range` has it in its metadata. The `stream/2` span
   measures opening the body stream; consuming it happens after that span ends.
   """
 
@@ -81,6 +84,14 @@ defmodule Slap.Files do
           | :checksum_mismatch
           | :expired
           | :too_large_for_inline
+          | {:range_not_satisfiable, non_neg_integer()}
+
+  @typedoc """
+  The bytes a read returns: `{first, last}` (inclusive, as in HTTP),
+  `{first, :eof}`, or `{:last, n}` (the last `n` bytes).
+  """
+  @type range ::
+          {non_neg_integer(), non_neg_integer() | :eof} | {:last, non_neg_integer()}
 
   @retries 3
   @start_options [
@@ -338,9 +349,8 @@ defmodule Slap.Files do
   defp delete(_ref, :any, nil, _retries, _config), do: :ok
 
   defp delete(ref, condition, current, retries, config) do
-    if holds?(current, condition),
-      do: remove(ref, condition, current, retries, config),
-      else: {:error, {:conflict, version_of(current)}}
+    with :ok <- check(current, condition),
+         do: remove(ref, condition, current, retries, config)
   end
 
   # The intent comes first: the body is deleted once the retention period
@@ -375,14 +385,17 @@ defmodule Slap.Files do
     end
   end
 
-  @doc "The file's body, or `{:ok, nil}`. See `stream/1` for large bodies."
+  @doc """
+  The file's body, or `{:ok, nil}`. See `stream/2` for large bodies, and
+  for the `:range` and `:if_version` options.
+  """
   @spec read(ref(), keyword()) :: {:ok, binary() | nil} | {:error, error()}
   def read(ref, opts \\ []), do: span(:read, opts, fn -> do_read(ref, opts) end)
 
   defp do_read(ref, opts) do
     case do_stream(ref, opts) do
       {:ok, nil} -> {:ok, nil}
-      {:ok, {_file, chunks}} -> read_chunks(chunks)
+      {:ok, {_file, _range, chunks}} -> read_chunks(chunks)
       error -> error
     end
   end
@@ -399,31 +412,100 @@ defmodule Slap.Files do
   or deleted. A store failure while reading the returned stream raises
   `Slap.SlateDB.Error`; failure to open the download returns
   `{:error, :unavailable | :timeout}`.
+
+  Options:
+
+    * `:range` - read only part of the body (see `t:range/0`). Returns
+      `{:ok, {file, {first, last}, chunks}}`, where `{first, last}` is the
+      range clamped to the file's size, as HTTP clamps it: a `last` past the
+      end becomes the last byte. A range that starts past the end,
+      `{:last, 0}`, and every range of an empty file return `{:error,
+      {:range_not_satisfiable, size}}`. For an object body, only the
+      requested bytes are downloaded.
+    * `:if_version` - the version the file must have; otherwise the read
+      returns `{:error, {:conflict, version}}`. To read a file in several
+      ranges from the same body, pass the version from the first read to
+      the rest.
+    * `:files`, `:timeout` - as for `put/3`.
   """
   @spec stream(ref(), keyword()) ::
-          {:ok, {Slap.Files.File.t(), Enumerable.t()} | nil} | {:error, error()}
-  def stream(ref, opts \\ []), do: span(:stream, opts, fn -> do_stream(ref, opts) end)
+          {:ok,
+           {Slap.Files.File.t(), Enumerable.t()}
+           | {Slap.Files.File.t(), {non_neg_integer(), non_neg_integer()}, Enumerable.t()}
+           | nil}
+          | {:error, error()}
+  def stream(ref, opts \\ []) do
+    span(:stream, opts, fn ->
+      case do_stream(ref, opts) do
+        {:ok, {file, nil, chunks}} -> {:ok, {file, chunks}}
+        other -> other
+      end
+    end)
+  end
 
   defp do_stream(ref, opts) do
-    validate_options!(opts, [:files, :timeout])
+    validate_options!(opts, [:range, :if_version, :files, :timeout])
     validate_request_opts!(opts)
     config = request_config(opts)
 
     with :ok <- validate_ref(ref),
-         {:ok, current} <- Record.get(ref, Config.route_opts(config), config) do
-      body(ref, current, config)
+         {:ok, condition} <- condition(opts, false),
+         {:ok, range} <- range(Keyword.get(opts, :range)),
+         {:ok, current} <- Record.get(ref, Config.route_opts(config), config),
+         :ok <- check(current, condition),
+         {:ok, resolved} <- resolve(range, current) do
+      body(ref, current, resolved, config)
     end
   end
 
-  defp body(_ref, nil, _config), do: {:ok, nil}
+  defp check(current, condition) do
+    if holds?(current, condition),
+      do: :ok,
+      else: {:error, {:conflict, version_of(current)}}
+  end
 
-  defp body(ref, {version, %{body: {:inline, bytes}} = record}, _config),
-    do: {:ok, {Record.to_file(ref, version, record), [bytes]}}
+  defp range(nil), do: {:ok, nil}
+  defp range({:last, n} = range) when is_integer(n) and n >= 0, do: {:ok, range}
+  defp range({first, :eof} = range) when is_integer(first) and first >= 0, do: {:ok, range}
 
-  defp body(ref, {version, %{body: {:object, key}} = record}, config) do
-    case ObjectStore.download(config.objects, key, Config.object_opts(config)) do
+  defp range({first, last} = range)
+       when is_integer(first) and is_integer(last) and first >= 0 and last >= first,
+       do: {:ok, range}
+
+  defp range(_range), do: {:error, {:bad_request, :invalid_range}}
+
+  defp resolve(nil, _current), do: {:ok, nil}
+  defp resolve(_range, nil), do: {:ok, nil}
+  defp resolve(range, {_version, record}), do: bytes(range, record.size)
+
+  # Resolves a range within a body of `size` bytes as HTTP does (RFC 9110,
+  # section 14.1.2).
+  defp bytes({:last, n}, size) when n > 0 and size > 0, do: {:ok, {max(size - n, 0), size - 1}}
+  defp bytes({first, :eof}, size) when first < size, do: {:ok, {first, size - 1}}
+
+  defp bytes({first, last}, size) when is_integer(first) and is_integer(last) and first < size,
+    do: {:ok, {first, min(last, size - 1)}}
+
+  defp bytes(_range, size), do: {:error, {:range_not_satisfiable, size}}
+
+  defp body(_ref, nil, _range, _config), do: {:ok, nil}
+
+  defp body(ref, {version, %{body: {:inline, bytes}} = record}, range, _config) do
+    bytes =
+      case range do
+        nil -> bytes
+        {first, last} -> binary_part(bytes, first, last - first + 1)
+      end
+
+    {:ok, {Record.to_file(ref, version, record), range, [bytes]}}
+  end
+
+  defp body(ref, {version, %{body: {:object, key}} = record}, range, config) do
+    opts = Config.object_opts(config) ++ if(range, do: [range: range], else: [])
+
+    case ObjectStore.download(config.objects, key, opts) do
       {:ok, {chunks, _size, _object_version}} ->
-        {:ok, {Record.to_file(ref, version, record), chunks}}
+        {:ok, {Record.to_file(ref, version, record), range, chunks}}
 
       # Gone: the file was replaced or deleted too long ago.
       {:ok, nil} ->
@@ -468,12 +550,10 @@ defmodule Slap.Files do
   end
 
   defp span(operation, opts, fun) do
-    files =
-      if is_list(opts) and Keyword.keyword?(opts),
-        do: Keyword.get(opts, :files, __MODULE__),
-        else: __MODULE__
+    opts = if is_list(opts) and Keyword.keyword?(opts), do: opts, else: []
 
-    metadata = %{files: files}
+    metadata =
+      Map.new([files: Keyword.get(opts, :files, __MODULE__)] ++ Keyword.take(opts, [:range]))
 
     :telemetry.span([:slap, :files, operation], metadata, fn ->
       result = fun.()
