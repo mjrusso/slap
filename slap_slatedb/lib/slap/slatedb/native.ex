@@ -155,7 +155,7 @@ defmodule Slap.SlateDB.Native do
   def objstore_upload_write(_upload, _chunk, _ref), do: err()
   def objstore_upload_finish(_upload, _ref), do: err()
   def objstore_upload_abort(_upload, _ref), do: err()
-  def objstore_download_open(_res, _key, _ref), do: err()
+  def objstore_download_open(_res, _key, _range, _ref), do: err()
   def objstore_download_next(_download, _ref), do: err()
 
   def log_init(_pid, _level), do: err()

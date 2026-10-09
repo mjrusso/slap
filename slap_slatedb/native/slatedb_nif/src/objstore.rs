@@ -11,8 +11,8 @@ use rustler::{Binary, Encoder, Env, NifTaggedEnum, Resource, ResourceArc, Term};
 use slatedb::bytes::Bytes;
 use slatedb::object_store::path::Path as StorePath;
 use slatedb::object_store::{
-    Error as StoreError, ObjectStore, ObjectStoreExt, PutMode, PutPayload, UpdateVersion,
-    WriteMultipart,
+    Error as StoreError, GetOptions, GetRange, ObjectStore, ObjectStoreExt, PutMode, PutPayload,
+    UpdateVersion, WriteMultipart,
 };
 use tokio::sync::Mutex;
 
@@ -291,17 +291,23 @@ pub(crate) struct DownloadResource {
 #[rustler::resource_impl]
 impl Resource for DownloadResource {}
 
-/// Replies `{:ok, {download, size, version}}`, or `{:ok, nil}` when there is
-/// no object.
+/// `range` is nil (the whole object) or `{first, last}`, inclusive, with
+/// `first <= last` and `first` within the object. Replies `{:ok, {download,
+/// size, version}}`, where `size` is the whole object's, or `{:ok, nil}` when
+/// there is no object.
 #[rustler::nif]
 fn objstore_download_open<'a>(
     env: Env<'a>,
     res: ResourceArc<ObjectStoreResource>,
     key: String,
+    range: Option<(u64, u64)>,
     reply_ref: Term<'a>,
 ) -> Term<'a> {
+    let options = GetOptions::default()
+        .with_range(range.map(|(first, last)| GetRange::Bounded(first..last.saturating_add(1))));
+
     spawn_reply(env, reply_ref, async move {
-        match res.store.get(&res.path(&key)).await {
+        match res.store.get_opts(&res.path(&key), options).await {
             Ok(result) => {
                 let size = result.meta.size;
                 let version: Version = (result.meta.e_tag.clone(), result.meta.version.clone());

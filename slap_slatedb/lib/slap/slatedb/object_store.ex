@@ -24,6 +24,9 @@ defmodule Slap.SlateDB.ObjectStore do
   alias Slap.SlateDB
   alias Slap.SlateDB.{Native, Options}
 
+  # The NIF takes offsets as u64.
+  @max_offset 0xFFFF_FFFF_FFFF_FFFF
+
   @enforce_keys [:resource]
   defstruct [:resource]
 
@@ -180,21 +183,38 @@ defmodule Slap.SlateDB.ObjectStore do
   @doc """
   Opens the object at `key` for reading. Returns `{:ok, {chunks, size,
   version}}`, where `chunks` is a lazy stream of binaries (reading it
-  raises `Slap.SlateDB.Error` if the store fails), or `{:ok, nil}` if there
-  is no object.
+  raises `Slap.SlateDB.Error` if the store fails) and `size` is the size of
+  the whole object, or `{:ok, nil}` if there is no object.
+
+  `range: {first, last}` reads only the bytes from `first` to `last`,
+  inclusive, as an HTTP range does. A `last` past the end of the object
+  reads to its end. A range that starts past the end returns an error whose
+  form depends on the store, so check the range against the object's size
+  first.
   """
   @spec download(t(), String.t(), keyword()) ::
           {:ok, {Enumerable.t(), non_neg_integer(), version()} | nil}
           | {:error, SlateDB.Error.t()}
   def download(%__MODULE__{resource: res}, key, opts \\ []) when is_binary(key) do
-    Keyword.validate!(opts, [:timeout])
+    Keyword.validate!(opts, [:timeout, :range])
     timeout = Native.timeout(opts)
+    range = download_range(Keyword.get(opts, :range))
 
-    case Native.call(&Native.objstore_download_open(res, key, &1), timeout) do
+    case Native.call(&Native.objstore_download_open(res, key, range, &1), timeout) do
       {:ok, {download, size, version}} -> {:ok, {chunks(download, timeout), size, version}}
       other -> other
     end
   end
+
+  defp download_range(nil), do: nil
+
+  defp download_range({first, last} = range)
+       when is_integer(first) and is_integer(last) and first >= 0 and last >= first and
+              last <= @max_offset,
+       do: range
+
+  defp download_range(other),
+    do: raise(ArgumentError, "invalid :range, got: #{inspect(other)}")
 
   defp chunks(download, timeout) do
     Stream.unfold(download, fn download ->

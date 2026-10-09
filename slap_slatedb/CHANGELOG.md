@@ -9,6 +9,9 @@
 - SlateDB 0.17's new settings can be passed in `:settings`, among them
   `compactor_options.checkpoint_lifetime` and
   `compactor_options.scheduler_options.sorted_run_consolidation_threshold`.
+- Ranged downloads: `Slap.SlateDB.ObjectStore.download/3` takes
+  `range: {first, last}` (inclusive) and downloads only those bytes of the
+  object.
 
 ## 0.1.0
 

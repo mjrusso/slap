@@ -62,8 +62,21 @@ defmodule Slap.SlateDB.ObjectStoreTest do
     end
 
     assert {:ok, {_chunks, ^size, ^version}} = ObjectStore.download(store, key)
+    exercise_ranges(store, key, big, version)
     assert {:ok, keys} = ObjectStore.list(store, "bodies/")
     assert Enum.sort(keys) == Enum.sort([key, key <> "-empty"])
+  end
+
+  defp exercise_ranges(store, key, big, version) do
+    size = byte_size(big)
+
+    for {first, last} <- [{0, 99}, {1, size - 2}, {size - 1, size - 1}, {size - 100, size + 100}] do
+      assert {:ok, {chunks, ^size, ^version}} =
+               ObjectStore.download(store, key, range: {first, last})
+
+      expected = binary_part(big, first, min(last, size - 1) - first + 1)
+      assert IO.iodata_to_binary(Enum.to_list(chunks)) == expected
+    end
   end
 
   defp chunks(binary, size) do
@@ -125,8 +138,14 @@ defmodule Slap.SlateDB.ObjectStoreTest do
     exercise_streams(store)
   end
 
-  test "invalid modes" do
+  test "invalid modes and ranges" do
     {:ok, store} = ObjectStore.open("", store: :memory)
     assert_raise ArgumentError, fn -> ObjectStore.put(store, "k", "v", mode: :bogus) end
+
+    for range <- [{-1, 0}, {2, 1}, {0, 0x1_0000_0000_0000_0000}, {0.0, 1}, 5] do
+      assert_raise ArgumentError, ~r/invalid :range/, fn ->
+        ObjectStore.download(store, "k", range: range)
+      end
+    end
   end
 end
