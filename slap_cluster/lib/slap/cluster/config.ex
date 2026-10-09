@@ -37,7 +37,7 @@ defmodule Slap.Cluster.Config do
     unless Enum.all?([opts, defaults, env], &Keyword.keyword?/1),
       do: raise(ArgumentError, "cluster options must be keyword lists")
 
-    opts = defaults |> Keyword.merge(env) |> Keyword.merge(opts)
+    opts = defaults |> merge(env) |> merge(opts) |> normalize_settings()
 
     case Keyword.keys(opts) -- @keys do
       [] ->
@@ -54,6 +54,24 @@ defmodule Slap.Cluster.Config do
     config = struct!(__MODULE__, [cluster: cluster] ++ opts)
     check(config)
   end
+
+  defp merge(base, overrides) do
+    Keyword.merge(base, overrides, fn
+      :settings, %{} = base, %{} = override -> Map.merge(string_keys(base), string_keys(override))
+      _key, _base, override -> override
+    end)
+  end
+
+  defp normalize_settings(opts) do
+    case opts[:settings] do
+      %{} = settings -> Keyword.put(opts, :settings, string_keys(settings))
+      _ -> opts
+    end
+  end
+
+  # JSON object keys are strings. Normalize before merging so atom and string
+  # forms of a setting follow configuration precedence.
+  defp string_keys(settings), do: Map.new(settings, fn {k, v} -> {to_string(k), v} end)
 
   @checked [
     :shards,

@@ -127,6 +127,28 @@ defmodule Slap.ClusterTest do
       end
     end
 
+    test "settings merge by key across defaults, environment, and options" do
+      Application.put_env(:slap_cluster, Cluster,
+        settings: %{"flush_interval" => "5ms", "l0_sst_size_bytes" => 1024}
+      )
+
+      on_exit(fn -> Application.delete_env(:slap_cluster, Cluster) end)
+
+      config =
+        Config.load(
+          Cluster,
+          :slap_cluster,
+          [store: :memory, shards: 1, settings: %{flush_interval: "2ms"}],
+          settings: %{flush_interval: "10ms", manifest_poll_interval: "100ms"}
+        )
+
+      assert config.settings == %{
+               "flush_interval" => "2ms",
+               "l0_sst_size_bytes" => 1024,
+               "manifest_poll_interval" => "100ms"
+             }
+    end
+
     test "shard paths are fixed-width" do
       config = %Slap.Cluster.Config{cluster: Cluster, store: :memory, shards: 64}
       assert Config.shard_path(config, 7) == "shard-007"

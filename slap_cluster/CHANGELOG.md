@@ -5,6 +5,9 @@
 - `probe: :background` starts the cluster before the store passes its probe.
   It retries after 1 s, backs off to at most 30 s, and opens shards only after
   a successful probe.
+- `:settings` maps from a cluster module's `:defaults`, the application
+  environment, and `start_link/1` are merged by key. Later sources override
+  only the settings they contain.
 - A strategy start failure is now reported under the `Slap.Cluster.Probe`
   child id instead of `:strategy`; the reason is unchanged.
 

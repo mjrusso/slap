@@ -9,7 +9,9 @@ defmodule Slap.Cluster do
   Define one module per cluster. `use` takes `:otp_app` and optionally
   `:defaults`, options that the application environment and `start_link/1`
   can override (for example `shard_children` in a library that builds on
-  this one):
+  this one). `:settings` maps are merged by key, in this order: defaults,
+  application environment, then `start_link/1` options. Each source
+  overrides only the settings it contains.
 
       defmodule MyApp.Cluster do
         use Slap.Cluster, otp_app: :my_app
@@ -37,7 +39,9 @@ defmodule Slap.Cluster do
     * `:shards` - required. The number of shards. Fixed for the life of the
       data: `shard_for/1` depends on it.
     * `:path` - the path of the shards in the store (default `""`).
-    * `:settings` - SlateDB settings for every shard, as for `Slap.SlateDB.open/2`.
+    * `:settings` - SlateDB settings for every shard, as for
+      `Slap.SlateDB.open/2`. SlateDB's `flush_interval` defaults to 100 ms,
+      which can add up to 100 ms before a durable write's WAL flush begins.
     * `:cache` - `[capacity_bytes: n]` for one block cache shared by this
       node's shards, `:disabled`, or `nil` (default) for SlateDB's own cache
       per shard.
