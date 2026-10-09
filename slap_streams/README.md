@@ -203,6 +203,20 @@ application from starting. With `probe: :background`, the cluster starts
 without shards and retries the probe. Operations return
 `{:error, :unavailable}` until the shards open.
 
+## Flush interval
+
+A durable append waits for SlateDB to flush its write-ahead log (WAL) to
+object storage. `Slap.Streams.Cluster` sets `flush_interval` to 10 ms;
+SlateDB's default is 100 ms. Pass `settings: %{flush_interval: "50ms"}` to
+change it. Other settings leave the 10 ms default intact.
+
+Lower intervals reduce the wait for acknowledgements but increase
+object-store PUTs. Each shard with pending writes can issue up to one WAL PUT
+per interval; idle shards issue none. Choose the interval for the expected
+write rate, shard count, and store pricing. For `:memory` and `{:local, dir}`
+tests, `settings: %{flush_interval: "2ms"}` reduces the wait without request
+charges.
+
 ## How it works
 
 - **Placement.** A stream lives on shard `xxh64(key) mod N`, where `key` is its

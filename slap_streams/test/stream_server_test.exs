@@ -52,6 +52,15 @@ defmodule Slap.Streams.StreamServerTest do
     assert :ok = Streams.cancel_wait("/control-wait", pending)
   end
 
+  test "other settings preserve the default flush interval" do
+    start_supervised!(
+      {OtherCluster, store: :memory, shards: 1, settings: %{manifest_poll_interval: "100ms"}}
+    )
+
+    assert %{"flush_interval" => "10ms", "manifest_poll_interval" => "100ms"} =
+             Config.get(OtherCluster).settings
+  end
+
   test "background probing starts the cluster before the probe passes" do
     start_supervised!(
       {OtherCluster, store: :memory_ignoring_preconditions, shards: 1, probe: :background}

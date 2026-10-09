@@ -17,11 +17,12 @@ defmodule Slap.Streams.Cluster do
 
       config :slap_streams, Slap.Streams.Cluster,
         store: {:url, "s3://streams/db", aws_endpoint: "https://rustfs:9000"},
-        shards: 8,
-        settings: %{flush_interval: "10ms"}
+        shards: 8
 
-  The Durable Streams design uses `flush_interval` 10 ms on RustFS: acks wait
-  for durability, so it is the floor of append latency.
+  Durable appends wait for SlateDB's next WAL flush. This cluster sets
+  `flush_interval` to 10 ms, the value used by the Durable Streams design;
+  SlateDB's default is 100 ms. Other settings leave the 10 ms default intact.
+  The README describes the latency and object-store request trade-off.
 
   Service settings go in `child_options:` at start. See
   `child_option_keys/0` for the accepted keys. Values are positive integers
@@ -30,9 +31,14 @@ defmodule Slap.Streams.Cluster do
   may also be zero.
   """
 
+  @default_settings %{flush_interval: "10ms"}
+
   use Slap.Cluster,
     otp_app: :slap_streams,
-    defaults: [shard_children: {Slap.Streams.ShardChildren, :child_specs, []}]
+    defaults: [
+      shard_children: {Slap.Streams.ShardChildren, :child_specs, []},
+      settings: @default_settings
+    ]
 
   @doc false
   def __slap_streams_cluster__, do: true
@@ -63,10 +69,15 @@ defmodule Slap.Streams.Cluster do
     Keyword.validate!(opts, [:otp_app])
     otp_app = Keyword.fetch!(opts, :otp_app)
 
+    settings = Macro.escape(@default_settings)
+
     quote do
       use Slap.Cluster,
         otp_app: unquote(otp_app),
-        defaults: [shard_children: {Slap.Streams.ShardChildren, :child_specs, []}]
+        defaults: [
+          shard_children: {Slap.Streams.ShardChildren, :child_specs, []},
+          settings: unquote(settings)
+        ]
 
       @doc false
       def __slap_streams_cluster__, do: true
