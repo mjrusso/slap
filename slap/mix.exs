@@ -38,7 +38,7 @@ defmodule Slap.MixProject do
       slap_dep(:slap_streams, "~> 0.1.0"),
       slap_dep(:slap_kv, "~> 0.1.0"),
       slap_dep(:slap_cluster, "~> 0.1.0"),
-      slap_dep(:slap_slatedb, "~> 0.1.0"),
+      slap_dep(:slap_slatedb, "~> 0.2.0"),
       {:bandit, "~> 1.12"},
       {:rustler, "~> 0.38", optional: true, runtime: false},
       {:credo, "~> 1.7.19", only: [:dev, :test], runtime: false},

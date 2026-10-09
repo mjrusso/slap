@@ -46,7 +46,7 @@ defmodule Slap.Files.MixProject do
     [
       slap_dep(:slap_kv, "~> 0.1.0"),
       slap_dep(:slap_cluster, "~> 0.1.0"),
-      slap_dep(:slap_slatedb, "~> 0.1.0"),
+      slap_dep(:slap_slatedb, "~> 0.2.0"),
       {:telemetry, "~> 1.0"},
       {:rustler, "~> 0.38", optional: true, runtime: false},
       {:stream_data, "~> 1.4", only: [:dev, :test]},

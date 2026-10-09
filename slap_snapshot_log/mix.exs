@@ -42,7 +42,7 @@ defmodule Slap.SnapshotLog.MixProject do
     [
       slap_dep(:slap_streams, "~> 0.1.0"),
       slap_dep(:slap_cluster, "~> 0.1.0"),
-      slap_dep(:slap_slatedb, "~> 0.1.0"),
+      slap_dep(:slap_slatedb, "~> 0.2.0"),
       {:rustler, "~> 0.38", optional: true, runtime: false},
       {:credo, "~> 1.7.19", only: [:dev, :test], runtime: false},
       {:ex_slop, "~> 0.4.5", only: [:dev, :test], runtime: false},

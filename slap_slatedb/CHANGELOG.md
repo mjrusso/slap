@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - Upgrade SlateDB to 0.17. Databases written by 0.16 open unchanged.
 - Keys can be up to 4 GiB long; the previous limit was 65,535 bytes.

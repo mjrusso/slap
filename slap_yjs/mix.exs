@@ -57,7 +57,7 @@ defmodule Slap.Yjs.MixProject do
       slap_dep(:slap_snapshot_log, "~> 0.1.0"),
       slap_dep(:slap_streams, "~> 0.1.0"),
       slap_dep(:slap_cluster, "~> 0.1.0"),
-      slap_dep(:slap_slatedb, "~> 0.1.0"),
+      slap_dep(:slap_slatedb, "~> 0.2.0"),
       {:y_ex, "~> 0.12"},
       {:telemetry, "~> 1.0"},
       {:rustler, "~> 0.38", optional: true, runtime: false},

@@ -60,7 +60,7 @@ defmodule Slap.Cluster.MixProject do
 
   defp deps do
     [
-      slap_dep(:slap_slatedb, "~> 0.1.0"),
+      slap_dep(:slap_slatedb, "~> 0.2.0"),
       {:telemetry, "~> 1.0"},
       {:rustler, "~> 0.38", optional: true, runtime: false},
       {:credo, "~> 1.7.19", only: [:dev, :test], runtime: false},
