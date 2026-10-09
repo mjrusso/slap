@@ -171,6 +171,18 @@ defmodule Slap.ServerTest do
     assert kv_opts[:child_options] == [partition_writers: 3]
   end
 
+  test "rejects invalid service settings" do
+    Process.flag(:trap_exit, true)
+
+    assert {:error,
+            {:shutdown,
+             {:failed_to_start_child, Slap.Streams.Cluster,
+              {:EXIT, {%ArgumentError{message: message}, _stack}}}}} =
+             Slap.Server.start_link(store: :memory, streams: [settings: nil], port: 0)
+
+    assert message =~ ":settings must be a map"
+  end
+
   test "the standalone listener binds to loopback by default" do
     specs = Slap.Server.child_specs(store: :memory, kv: [])
     assert %{start: {Bandit, :start_link, [opts]}} = List.last(specs)

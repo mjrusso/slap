@@ -17,7 +17,8 @@ defmodule Slap.Server do
       `Slap.Streams.Cluster` for service options.
     * `:kv` - the same keys (default 8 shards). See `Slap.KV.Cluster` for
       its `child_options:`.
-      Each service's settings default to `%{flush_interval: "10ms"}`.
+      Settings merge with each cluster's defaults, which set
+      `flush_interval` to 10 ms.
     * `:port` (default 4437), `:ip` (default `:loopback`) - the listener.
     * `:strategy` - run as one node of a cluster: `{module, opts}`, a
       `Slap.Cluster.Strategy`, for both clusters. The nodes must be
@@ -80,9 +81,8 @@ defmodule Slap.Server do
       store: Keyword.fetch!(config, :store),
       path: Atom.to_string(service),
       shards: Keyword.get(opts, :shards, 8),
-      settings: Keyword.get(opts, :settings, %{flush_interval: "10ms"}),
       child_options: child_options
-    ] ++ optional(:strategy, config[:strategy])
+    ] ++ Keyword.take(opts, [:settings]) ++ optional(:strategy, config[:strategy])
   end
 
   defp listener(config) do

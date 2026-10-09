@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Service `:settings` now merge with the cluster defaults. `flush_interval`
+  remains 10 ms unless explicitly set.
+
 ## 0.2.0
 
 - `slap.server` runs without a Mix project, via `Mix.install`.
