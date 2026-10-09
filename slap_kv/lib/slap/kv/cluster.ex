@@ -21,27 +21,40 @@ defmodule Slap.KV.Cluster do
       config :slap_kv, Slap.KV.Cluster,
         store: {:url, "s3://bucket/prefix", aws_endpoint: "https://rustfs:9000"},
         path: "kv",
-        shards: 8,
-        settings: %{flush_interval: "10ms"}
+        shards: 8
 
-  Writes are acknowledged once durable, so `flush_interval` is the floor of
-  write latency. Give it its own `:path` when it shares a store with
-  another cluster.
+  Durable writes wait for SlateDB's next WAL flush. This cluster sets
+  `flush_interval` to 10 ms; SlateDB's default is 100 ms. Other settings
+  leave the 10 ms default intact. The README describes the latency and
+  object-store request trade-off.
+
+  Give the cluster its own `:path` when it shares a store with another
+  cluster.
   """
+
+  @default_settings %{flush_interval: "10ms"}
 
   use Slap.Cluster,
     otp_app: :slap_kv,
-    defaults: [shard_children: {Slap.KV.PartitionWriter, :child_specs, []}]
+    defaults: [
+      shard_children: {Slap.KV.PartitionWriter, :child_specs, []},
+      settings: @default_settings
+    ]
 
   @doc "Defines a KV cluster under the given `:otp_app`."
   defmacro __using__(opts) do
     Keyword.validate!(opts, [:otp_app])
     otp_app = Keyword.fetch!(opts, :otp_app)
 
+    settings = Macro.escape(@default_settings)
+
     quote do
       use Slap.Cluster,
         otp_app: unquote(otp_app),
-        defaults: [shard_children: {Slap.KV.PartitionWriter, :child_specs, []}]
+        defaults: [
+          shard_children: {Slap.KV.PartitionWriter, :child_specs, []},
+          settings: unquote(settings)
+        ]
     end
   end
 end

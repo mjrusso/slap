@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `Slap.KV.Cluster` now sets SlateDB's `flush_interval` to 10 ms instead of
+  using SlateDB's 100 ms default. Other settings leave this default intact;
+  pass `settings: %{flush_interval: "100ms"}` to restore the old interval.
+
 ## 0.2.0
 
 - Uses `slap_slatedb` 0.2.0, which upgrades SlateDB from 0.16 to 0.17.

@@ -5,6 +5,7 @@ end
 defmodule Slap.KVTest do
   use Slap.KV.Test.ClusterCase, async: false
 
+  alias Slap.Cluster.Config
   alias Slap.KV.Test.OtherCluster
 
   test "a durable write emits an acknowledgement event" do
@@ -29,6 +30,15 @@ defmodule Slap.KVTest do
 
   def send_telemetry(event, measurements, metadata, parent),
     do: send(parent, {event, measurements, metadata})
+
+  test "other settings preserve the default flush interval" do
+    start_supervised!(
+      {OtherCluster, store: :memory, shards: 1, settings: %{manifest_poll_interval: "100ms"}}
+    )
+
+    assert %{"flush_interval" => "10ms", "manifest_poll_interval" => "100ms"} =
+             Config.get(OtherCluster).settings
+  end
 
   test "background probing starts the cluster before the probe passes" do
     start_supervised!(
