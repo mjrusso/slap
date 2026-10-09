@@ -202,8 +202,11 @@ defmodule Slap.Cluster.DistributedTest do
     assert {:ok, {:error, :not_owner}} =
              :erpc.call(a, TestCluster, :call, [shard, {Counter, :return_not_owner, [self()]}])
 
-    assert_received :application_called
-    refute_received :application_called
+    # The callback runs on b and messages this process directly; the routed
+    # reply returns through a and may arrive first. Each retry would send
+    # another message before its reply.
+    assert_receive :application_called, 1_000
+    refute_receive :application_called, 200
   end
 
   test "kill -9 of a node under load", ctx do
