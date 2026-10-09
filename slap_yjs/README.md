@@ -58,7 +58,7 @@ Add `slap_yjs` to the dependencies in your application's `mix.exs`:
 ```elixir
 defp deps do
   [
-    {:slap_yjs, "~> 0.1.0"}
+    {:slap_yjs, "~> 0.2.0"}
   ]
 end
 ```

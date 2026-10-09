@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - `Slap.Yjs.DocServer.doc/2` returns the server's `Yex.Doc`, so server code
   can read and edit the document with y_ex's API. Its edits are relayed and
@@ -11,6 +11,8 @@
   `state.assigns` of the document server it starts. Callbacks in your
   document server module can read settings from it. If the server is
   already running, the option has no effect.
+- Uses `slap_slatedb` 0.2.0, which upgrades SlateDB from 0.16 to 0.17.
+  Databases written by 0.1.0 open unchanged.
 
 ## 0.1.0
 
