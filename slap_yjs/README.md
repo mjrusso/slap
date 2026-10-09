@@ -136,6 +136,54 @@ to your document server module, use the `:assigns` option of
   again and resend their state.
 - A deleted document's id cannot be reused.
 
+## Presence
+
+Document servers relay awareness messages without authorizing their client ids
+or state. An authenticated host should authorize each message before passing
+it to `process_message_v1/3`. Apply the check where each node receives
+messages from clients, so states relayed between document servers have
+already passed it.
+
+One awareness update can contain entries for several clients because
+y-websocket clients forward states they receive and removals for states that
+timed out. Filter each entry independently. For each connection, accept:
+
+- states that identify the authenticated user, using the first accepted
+  client id as the only allowed id for that connection;
+- removals for that client id.
+
+The following function returns `{message, client_id}`. `message` is `nil` if
+it accepts no entries, and `client_id` is `nil` until it accepts a state. This
+example expects states to identify their user as
+`%{"user" => %{"id" => user_id}}`.
+
+```elixir
+def authorize_awareness(<<1, framed::binary>>, user_id, client_id) do
+  with {:ok, [update]} <- Slap.Yjs.Frame.parse(framed),
+       {:ok, entries} <- Slap.Yjs.Awareness.decode(update) do
+    case Enum.flat_map_reduce(entries, client_id, &accept(&1, &2, user_id)) do
+      {[], client_id} -> {nil, client_id}
+      {kept, client_id} ->
+        {<<1>> <> Slap.Yjs.Frame.frame(Slap.Yjs.Awareness.encode(kept)), client_id}
+    end
+  else
+    _ -> {nil, client_id}
+  end
+end
+
+defp accept({id, _clock, %{"user" => %{"id" => user_id}}} = entry, client_id, user_id)
+     when client_id in [nil, id],
+     do: {[entry], id}
+
+defp accept({id, _clock, nil} = entry, id, _user_id), do: {[entry], id}
+defp accept(_entry, client_id, _user_id), do: {[], client_id}
+```
+
+Client ids are not authenticated. A connection can choose an id that another
+client uses if it is the connection's first accepted id. Its accepted state
+still identifies its authenticated user. While both clients are connected,
+their updates replace each other under the shared id.
+
 ## How it works
 
 - **Layout.** `Slap.Yjs.Store` keeps a document in the reference

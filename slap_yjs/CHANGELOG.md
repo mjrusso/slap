@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Add `Slap.Yjs.Awareness` for decoding and encoding y-protocols awareness
+  entries. Hosts can use it to authorize client messages before passing them
+  to a document server.
+
 ## 0.2.0
 
 - `Slap.Yjs.DocServer.doc/2` returns the server's `Yex.Doc`, so server code
