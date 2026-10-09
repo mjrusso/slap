@@ -28,13 +28,30 @@ env:
 
 jobs:
   test:
-    name: Files Checks
+    name: Files Checks (RustFS)
     runs-on: ubuntu-24.04
     env:
       # More model-based sequences than the local default.
       SLAP_FILES_PROP_RUNS: "500"
+      # The @tag :s3 tests run against RustFS.
+      SLAP_TEST_S3_ENDPOINT: http://127.0.0.1:9000
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      # The same pinned RustFS as slap_slatedb's tests.
+      - name: Start RustFS 1.0.0
+        working-directory: .
+        run: |
+          docker run -d --name rustfs -p 9000:9000 \
+            -e RUSTFS_ACCESS_KEY=rustfsadmin -e RUSTFS_SECRET_KEY=rustfsadmin \
+            rustfs/rustfs@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
+          # RustFS answers before it can create buckets: retry until the
+          # bucket exists.
+          s3() { curl -sf -o /dev/null --aws-sigv4 "aws:amz:us-east-1:s3" \
+            --user rustfsadmin:rustfsadmin "$@" http://127.0.0.1:9000/slatedb-test; }
+          for i in $(seq 1 30); do
+            s3 -X PUT || true; s3 -I && break; sleep 1
+          done
+          s3 -I
       - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           otp-version: "29"
