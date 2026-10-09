@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Presence rejects incompatible states in the caller before starting or
+  updating a process. An invalid update leaves the presence process running
+  with its previous state.
+- Add `Slap.Yjs.Presence`, which publishes and renews awareness for a
+  server-side participant. It rejoins after the document server stops, and
+  stopping the presence process removes its state. Transient rejoin failures
+  retry with backoff, preserving the client id and latest state.
 - Add `Slap.Yjs.Awareness` for decoding and encoding y-protocols awareness
   entries. Hosts can use it to authorize client messages before passing them
   to a document server.

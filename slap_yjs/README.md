@@ -184,6 +184,10 @@ client uses if it is the connection's first accepted id. Its accepted state
 still identifies its authenticated user. While both clients are connected,
 their updates replace each other under the shared id.
 
+Start `Slap.Yjs.Presence` for a server-side participant such as an agent. It
+subscribes to the document, publishes and renews its state, rejoins after the
+document server stops, and removes its state when the presence process stops.
+
 ## How it works
 
 - **Layout.** `Slap.Yjs.Store` keeps a document in the reference

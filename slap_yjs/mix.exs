@@ -33,7 +33,7 @@ defmodule Slap.Yjs.MixProject do
         main: "readme",
         extras: ["README.md", "CHANGELOG.md", "LICENSE"],
         groups_for_modules: [
-          Documents: [Slap.Yjs.Store, Slap.Yjs.Docs, Slap.Yjs.DocServer],
+          Documents: [Slap.Yjs.Store, Slap.Yjs.Docs, Slap.Yjs.DocServer, Slap.Yjs.Presence],
           "Wire format": [Slap.Yjs.Frame, Slap.Yjs.Awareness]
         ],
         source_url_pattern: "#{@source_url}/blob/slap_yjs-v#{@version}/slap_yjs/%{path}#L%{line}"
