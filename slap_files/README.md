@@ -112,6 +112,10 @@ iex> :ok = Slap.Files.delete(ref, if_version: v2)
 In an application, put both processes in its supervision tree in the same
 order. `Slap.Files.stream/1` returns the metadata and a lazy body stream.
 
+`Slap.Files` can start while its object store is unreachable. Its KV cluster
+needs `probe: :background` to start before its store is available. Operations
+return `{:error, :unavailable}` until the KV shards open.
+
 ## API
 
 - `put(ref, body, opts)` creates or replaces a file and returns it once it is

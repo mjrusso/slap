@@ -13,6 +13,29 @@ defmodule Slap.FilesTest do
     @moduledoc false
   end
 
+  test "starts with an unavailable KV cluster and object store" do
+    start_supervised!(
+      {OtherCluster, store: :memory_ignoring_preconditions, shards: 1, probe: :background}
+    )
+
+    store =
+      {:url, "s3://bucket/files",
+       aws_endpoint: "http://127.0.0.1:1",
+       aws_allow_http: "true",
+       aws_region: "us-east-1",
+       aws_access_key_id: "test",
+       aws_secret_access_key: "test"}
+
+    start_supervised!(%{
+      id: OtherFiles,
+      start:
+        {Files, :start_link,
+         [[name: OtherFiles, cluster: OtherCluster, namespace: "other", store: store]]}
+    })
+
+    assert {:error, :unavailable} = Files.get({"p", "f"}, files: OtherFiles)
+  end
+
   test "file operations emit spans with their outcomes" do
     id = {__MODULE__, make_ref()}
     parent = self()
