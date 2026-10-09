@@ -116,6 +116,11 @@ Supervise one KV cluster per VM. A Streams cluster can run on the same VM.
 Run one `Slap.Cluster.Peers` per VM; its connections to other nodes serve
 every cluster on that VM.
 
+A failed store probe normally prevents the cluster and its supervising
+application from starting. With `probe: :background`, the cluster starts
+without shards and retries the probe. Operations return
+`{:error, :unavailable}` until the shards open.
+
 ## Semantics
 
 - **Versions.** A row's version is the SlateDB sequence number of the

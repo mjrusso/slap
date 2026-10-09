@@ -30,6 +30,14 @@ defmodule Slap.KVTest do
   def send_telemetry(event, measurements, metadata, parent),
     do: send(parent, {event, measurements, metadata})
 
+  test "background probing starts the cluster before the probe passes" do
+    start_supervised!(
+      {OtherCluster, store: :memory_ignoring_preconditions, shards: 1, probe: :background}
+    )
+
+    assert {:error, :unavailable} = KV.get("p", "k", cluster: OtherCluster)
+  end
+
   test "invalid shard options fail before the cluster starts" do
     assert_raise ArgumentError, ~r/:partition_writers/, fn ->
       OtherCluster.start_link(
