@@ -11,6 +11,25 @@ defmodule Slap.Cluster.Test.ValidatingStrategy do
   end
 end
 
+defmodule Slap.Cluster.Test.ThreeTupleStrategy do
+  @moduledoc false
+  @behaviour Slap.Cluster.Strategy
+
+  @impl true
+  def child_spec(opts), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
+
+  def start_link(_opts) do
+    {:ok, pid} = Agent.start_link(fn -> nil end)
+    {:ok, pid, :started}
+  end
+
+  @impl true
+  def lookup(_cluster, _shard), do: {:error, :unassigned}
+
+  @impl true
+  def handle_shard_down(_cluster, _shard, _reason), do: :ok
+end
+
 defmodule Slap.ClusterTest do
   use ExUnit.Case, async: false
 
@@ -21,7 +40,7 @@ defmodule Slap.ClusterTest do
   @telemetry :telemetry
 
   alias Slap.Cluster.{Config, Hash, Host}
-  alias Slap.Cluster.Test.{Cluster, Counter, GatedChild}
+  alias Slap.Cluster.Test.{Cluster, Counter, GatedChild, ThreeTupleStrategy}
   alias Slap.SlateDB
 
   defp tmp_dir do
@@ -131,6 +150,14 @@ defmodule Slap.ClusterTest do
     test "can be turned off" do
       start_cluster(store: :memory_ignoring_preconditions, shards: 1, probe: false)
       assert Cluster.local_shards() == [0]
+    end
+
+    test "accepts a strategy that returns start information" do
+      start_supervised!(
+        {Cluster, store: :memory, shards: 1, strategy: ThreeTupleStrategy, probe: false}
+      )
+
+      assert Cluster.local_shards() == []
     end
   end
 
@@ -406,6 +433,45 @@ defmodule Slap.ClusterTest do
 
       on_exit(fn -> @telemetry.detach(id) end)
       %{dir: tmp_dir()}
+    end
+
+    test "background probing ignores old Static assignments until a probe succeeds",
+         %{dir: dir} do
+      old_owner = :"old@127.0.0.1"
+      new_owner = :"new@127.0.0.1"
+
+      start_cluster(
+        store: :memory,
+        shards: 2,
+        probe: false,
+        strategy: {Slap.Cluster.Strategy.Static, nodes: [old_owner]}
+      )
+
+      assert Cluster.lookup(0) == {:ok, {:remote, old_owner}}
+      stop_supervised!(Cluster)
+
+      # Block creation of the probe directory until the first attempt fails.
+      blocker = Path.join(dir, "_cluster")
+      File.mkdir_p!(dir)
+      File.write!(blocker, "")
+
+      start_cluster(
+        store: {:local, dir},
+        shards: 2,
+        probe: :background,
+        strategy: {Slap.Cluster.Strategy.Static, assignments: %{node() => [0], new_owner => [1]}}
+      )
+
+      assert_receive {:event, [:slap, :cluster, :probe], _, %{ok: false}}, 5_000
+      assert Cluster.local_shards() == []
+      assert Cluster.lookup(0) == {:error, :unassigned}
+      assert Cluster.call(1, {Counter, :get_local, ["x"]}, retries: 0) == {:error, :unassigned}
+
+      File.rm!(blocker)
+      assert_receive {:event, [:slap, :cluster, :probe], _, %{ok: true}}, 5_000
+      assert_receive {:event, [:slap, :cluster, :shard, :start], _, %{shard: 0}}, 5_000
+      assert {:ok, {:local, _}} = Cluster.lookup(0)
+      assert Cluster.lookup(1) == {:ok, {:remote, new_owner}}
     end
 
     test "reports the probe, shard starts, durability lag and fencing", %{dir: dir} do

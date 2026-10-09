@@ -124,8 +124,10 @@ telemetry.
 ## How it works
 
 The cluster probes the store's create-if-absent behavior before opening
-shards. `ObjectLease` also requires `If-Match` support. Each shard has one
-database handle and one durability subscription.
+shards. A failed probe normally prevents startup. With `probe: :background`,
+the cluster starts without shards and retries until the probe passes.
+`ObjectLease` also requires `If-Match` support. Each shard has one database
+handle and one durability subscription.
 Application shard children stop before the handle closes. A fenced or crashed
 database stops its shard; the placement strategy decides where to reopen it.
 Reopening without that decision could fence a new owner.

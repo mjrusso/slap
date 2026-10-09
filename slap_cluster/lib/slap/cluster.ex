@@ -27,7 +27,8 @@ defmodule Slap.Cluster do
   it checks that the store honours conditional writes (see
   `Slap.SlateDB.probe_store/3`), then the strategy opens the shards. With the
   default `Slap.Cluster.Strategy.Local`, every shard opens on this node
-  before `start_link/1` returns.
+  before `start_link/1` returns. With `probe: :background`, `start_link/1`
+  can return before any shard opens.
 
   ## Options
 
@@ -51,7 +52,11 @@ defmodule Slap.Cluster do
       `{module, function, args}`, the module may define
       `c:Slap.Cluster.ShardChildren.validate_child_options!/1` to reject invalid
       settings before startup.
-    * `:probe` - run the conditional write probe on start (default `true`).
+    * `:probe` - `true` (default) runs the conditional write probe before
+      startup completes and fails startup if the probe fails. `:background`
+      starts without shards and retries after 1 s, backing off to at most
+      30 s. Calls return `{:error, :unassigned}` until the probe passes and
+      the shards open. `false` skips the probe.
     * `:close_timeout` - ms to wait for a shard's database to close on stop
       (default 30,000).
     * `:lag_interval` - ms between durability lag telemetry samples per
@@ -420,6 +425,8 @@ defmodule Slap.Cluster do
   def registry(cluster), do: Module.concat(cluster, Registry)
   @doc false
   def host(cluster), do: Module.concat(cluster, Host)
+  @doc false
+  def strategy_supervisor(cluster), do: Module.concat(cluster, StrategySupervisor)
   @doc false
   def shard_supervisors(cluster), do: Module.concat(cluster, ShardSupervisors)
   @doc false

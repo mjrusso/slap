@@ -96,7 +96,7 @@ defmodule Slap.Cluster.Config do
 
   defp valid?(:path, value), do: is_binary(value)
   defp valid?(:settings, value), do: is_map(value)
-  defp valid?(:probe, value), do: is_boolean(value)
+  defp valid?(:probe, value), do: value in [true, false, :background]
   defp valid?(:cache, value) when value in [nil, :disabled], do: true
 
   defp valid?(:cache, opts) when is_list(opts),
@@ -116,7 +116,7 @@ defmodule Slap.Cluster.Config do
 
   defp expected(:path), do: "a string"
   defp expected(:settings), do: "a map"
-  defp expected(:probe), do: "a boolean"
+  defp expected(:probe), do: "true, false or :background"
   defp expected(:cache), do: "nil, :disabled or [capacity_bytes: n] with n > 0"
   defp expected(:strategy), do: "a module or {module, opts}"
   defp expected(:shard_children), do: "{mod, fun, args} or a 1-arity function"

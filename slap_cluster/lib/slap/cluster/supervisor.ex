@@ -4,10 +4,12 @@ defmodule Slap.Cluster.Supervisor do
   #
   #     <Cluster>.Supervisor (one_for_all)
   #     ├─ Registry            shard contexts and per-shard names
-  #     ├─ Probe               checks conditional writes during startup
   #     ├─ ShardSupervisors    DynamicSupervisor of shard supervisors
   #     ├─ Host                starts, stops and watches shards
-  #     └─ Strategy            decides which shards run here
+  #     ├─ StrategySupervisor  holds the strategy, which decides which shards
+  #     │                      run here
+  #     └─ Probe               checks conditional writes, then starts the
+  #                            strategy
   #
   # Shutdown runs bottom-up: the strategy stops placing shards, the host
   # marks them as stopping, then every shard stops (application children,
@@ -35,11 +37,9 @@ defmodule Slap.Cluster.Supervisor do
       end
 
     Config.put(%{config | db_cache: db_cache})
-    {strategy, strategy_opts} = config.strategy
 
     children = [
       {Registry, keys: :unique, name: Slap.Cluster.registry(cluster)},
-      %{id: Probe, start: {Probe, :run, [config]}},
       # A dynamic supervisor starts and stops its children one at a time, and
       # a shard's database opens (and closes) in its child: partitions by
       # shard let different shards open and close at once.
@@ -48,7 +48,11 @@ defmodule Slap.Cluster.Supervisor do
        name: Slap.Cluster.shard_supervisors(cluster),
        partitions: min(config.shards, 64)},
       %{id: Host, start: {Host, :start_link, [cluster]}},
-      strategy.child_spec(Keyword.put(strategy_opts, :cluster, cluster))
+      # A strategy exit must restart the one_for_all cluster tree. With no
+      # restarts allowed, its DynamicSupervisor exits too.
+      {DynamicSupervisor,
+       name: Slap.Cluster.strategy_supervisor(cluster), strategy: :one_for_one, max_restarts: 0},
+      {Probe, config}
     ]
 
     Supervisor.init(children, strategy: :one_for_all)

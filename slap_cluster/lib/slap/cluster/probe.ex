@@ -1,41 +1,93 @@
 defmodule Slap.Cluster.Probe do
   @moduledoc false
-  # Runs `Slap.SlateDB.probe_store/2` once when the cluster starts, before any
-  # shard opens. A failure stops the cluster from starting.
+  # The strategy can open writers, so start it only after the store passes
+  # the fencing probe, unless probing is disabled.
 
+  use GenServer
   require Logger
 
   alias Slap.Cluster.{Config, Telemetry}
   alias Slap.SlateDB
 
-  def run(%Config{probe: false}), do: :ignore
+  @retry_base 1_000
+  @retry_max 30_000
 
-  def run(config) do
-    path = Config.probe_path(config)
-    result = SlateDB.probe_store(config.store, path)
-    ok? = match?({:ok, _}, result)
-    Telemetry.execute([:probe], %{}, %{cluster: config.cluster, ok: ok?, result: result})
+  def start_link(config), do: GenServer.start_link(__MODULE__, config)
 
-    case result do
-      {:ok, steps} ->
-        Logger.debug("#{inspect(config.cluster)}: store probe passed: #{inspect(steps)}")
-        :ignore
+  @impl true
+  def init(%Config{probe: :background} = config),
+    do: {:ok, {config, @retry_base}, {:continue, :probe}}
+
+  def init(config) do
+    case probe(config) do
+      :ok ->
+        start_strategy(config)
 
       {:error, reason} ->
-        reason = probe_reason(reason)
-
         Logger.error(
           "#{inspect(config.cluster)}: the store at #{describe(config.store)} failed the " <>
             "conditional write probe, so writers could not be fenced safely. Not starting. " <>
             "Result: #{inspect(reason)}"
         )
 
-        {:error, {:probe_failed, reason}}
+        {:stop, {:probe_failed, reason}}
     end
   end
 
-  defp probe_reason({:probe_failed, steps}), do: steps
-  defp probe_reason(error), do: error
+  @impl true
+  def handle_continue(:probe, {config, delay}) do
+    case probe(config) do
+      :ok ->
+        case start_strategy(config) do
+          :ignore -> {:noreply, {config, delay}}
+          {:stop, reason} -> {:stop, reason, {config, delay}}
+        end
+
+      {:error, reason} ->
+        Logger.warning(
+          "#{inspect(config.cluster)}: the store at #{describe(config.store)} failed the " <>
+            "conditional write probe; no shards are open. Retrying in #{delay} ms. " <>
+            "Result: #{inspect(reason)}"
+        )
+
+        Process.send_after(self(), :retry, delay)
+        {:noreply, {config, min(delay * 2, @retry_max)}}
+    end
+  end
+
+  @impl true
+  def handle_info(:retry, state), do: {:noreply, state, {:continue, :probe}}
+
+  defp probe(%Config{probe: false}), do: :ok
+
+  defp probe(config) do
+    result = SlateDB.probe_store(config.store, Config.probe_path(config))
+    ok? = match?({:ok, _}, result)
+    Telemetry.execute([:probe], %{}, %{cluster: config.cluster, ok: ok?, result: result})
+
+    case result do
+      {:ok, steps} ->
+        Logger.debug("#{inspect(config.cluster)}: store probe passed: #{inspect(steps)}")
+        :ok
+
+      {:error, {:probe_failed, steps}} ->
+        {:error, steps}
+
+      error ->
+        error
+    end
+  end
+
+  defp start_strategy(%Config{cluster: cluster, strategy: {strategy, opts}}) do
+    spec = strategy.child_spec(Keyword.put(opts, :cluster, cluster))
+
+    case DynamicSupervisor.start_child(Slap.Cluster.strategy_supervisor(cluster), spec) do
+      {:ok, _pid} -> :ignore
+      {:ok, _pid, _info} -> :ignore
+      :ignore -> :ignore
+      {:error, reason} -> {:stop, reason}
+    end
+  end
 
   # The store without credentials.
   defp describe({:url, url, options}) do

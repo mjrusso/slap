@@ -49,9 +49,12 @@ defmodule Slap.Cluster.Strategy.Static do
 
   @impl true
   def lookup(cluster, n) do
-    case :persistent_term.get({__MODULE__, cluster}, %{}) do
-      %{^n => owner} when owner != node() -> {:ok, {:remote, owner}}
-      %{^n => _me} -> Local.lookup(cluster, n)
+    # The Local process starts after child_spec/1 replaces assignments that
+    # may belong to a previous cluster startup.
+    with pid when is_pid(pid) <- Process.whereis(Module.concat(cluster, Strategy)),
+         %{^n => owner} <- :persistent_term.get({__MODULE__, cluster}, %{}) do
+      if owner == node(), do: Local.lookup(cluster, n), else: {:ok, {:remote, owner}}
+    else
       _ -> {:error, :unassigned}
     end
   end

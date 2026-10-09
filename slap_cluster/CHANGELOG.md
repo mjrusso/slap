@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `probe: :background` starts the cluster before the store passes its probe.
+  It retries after 1 s, backs off to at most 30 s, and opens shards only after
+  a successful probe.
+- A strategy start failure is now reported under the `Slap.Cluster.Probe`
+  child id instead of `:strategy`; the reason is unchanged.
+
 ## 0.2.0
 
 - Uses `slap_slatedb` 0.2.0, which upgrades SlateDB from 0.16 to 0.17.

@@ -31,7 +31,8 @@ defmodule Slap.Cluster.ObjectLeaseTest do
     test "refuses a store without conditional updates", %{tmp_dir: dir} do
       Process.flag(:trap_exit, true)
 
-      assert {:error, {:shutdown, {:failed_to_start_child, :strategy, {:unsupported, reason}}}} =
+      assert {:error,
+              {:shutdown, {:failed_to_start_child, Slap.Cluster.Probe, {:unsupported, reason}}}} =
                TestCluster.start_link(
                  store: {:local, dir},
                  shards: 2,
