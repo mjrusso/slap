@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791424969996,
+  "lastUpdate": 1791512838503,
   "repoUrl": "https://github.com/mjrusso/slap",
   "entries": {
     "slap_slatedb (lower is better)": [
@@ -891,6 +891,452 @@ window.BENCHMARK_DATA = {
           {
             "name": "s3 +20ms: 64 shards: PUTs/s",
             "value": 884.8,
+            "unit": "requests/s"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "mjr@mjrusso.com",
+            "name": "Michael Russo",
+            "username": "mjrusso"
+          },
+          "committer": {
+            "email": "mjr@mjrusso.com",
+            "name": "Michael Russo",
+            "username": "mjrusso"
+          },
+          "distinct": true,
+          "id": "ebb5692be526532a00c728d08bb1ab201c2ce047",
+          "message": "chore(repo): prepare slap_slatedb 0.2.0",
+          "timestamp": "2026-10-08T22:15:38-04:00",
+          "tree_id": "fec69e28e0c17e00380f60d264426046182a8379",
+          "url": "https://github.com/mjrusso/slap/commit/ebb5692be526532a00c728d08bb1ab201c2ce047"
+        },
+        "date": 1791512838139,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory: durable_seq (no runtime hop)",
+            "value": 0.12,
+            "unit": "us",
+            "extra": "p99 0.19 us, 100000 samples"
+          },
+          {
+            "name": "memory: put 100 B",
+            "value": 36.56,
+            "unit": "us",
+            "extra": "p99 65.45 us, 100000 samples"
+          },
+          {
+            "name": "memory: get miss",
+            "value": 33.77,
+            "unit": "us",
+            "extra": "p99 72.09 us, 100000 samples"
+          },
+          {
+            "name": "memory: get hit",
+            "value": 69.68,
+            "unit": "us",
+            "extra": "p99 80.48 us, 74800 samples"
+          },
+          {
+            "name": "memory: write, 100 puts",
+            "value": 257.98,
+            "unit": "us",
+            "extra": "p99 774.83 us, 16509 samples"
+          },
+          {
+            "name": "memory: scan 1,000 rows",
+            "value": 6050.2,
+            "unit": "us",
+            "extra": "p99 8638.52 us, 801 samples"
+          },
+          {
+            "name": "memory: get 1 MiB",
+            "value": 36.99,
+            "unit": "us",
+            "extra": "p99 42.32 us, 1000 samples"
+          },
+          {
+            "name": "memory: put 1 MiB",
+            "value": 31.93,
+            "unit": "us",
+            "extra": "p99 811.91 us, 1000 samples"
+          },
+          {
+            "name": "memory: get 256 KiB",
+            "value": 33.01,
+            "unit": "us",
+            "extra": "p99 54.19 us, 1000 samples"
+          },
+          {
+            "name": "memory: put 256 KiB",
+            "value": 32.01,
+            "unit": "us",
+            "extra": "p99 1016.19 us, 1000 samples"
+          },
+          {
+            "name": "memory: get 4 KiB",
+            "value": 37.84,
+            "unit": "us",
+            "extra": "p99 47.1 us, 1000 samples"
+          },
+          {
+            "name": "memory: put 4 KiB",
+            "value": 43.84,
+            "unit": "us",
+            "extra": "p99 66.07 us, 1000 samples"
+          },
+          {
+            "name": "s3: durable put p50",
+            "value": 101.1,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: durable put p99",
+            "value": 102.1,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: durability lag p50",
+            "value": 54.1,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: durability lag p99",
+            "value": 104.1,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: object store requests per 1,000 writes",
+            "value": 0.2,
+            "unit": "requests"
+          },
+          {
+            "name": "s3: get, no cache, p50",
+            "value": 2506,
+            "unit": "us"
+          },
+          {
+            "name": "s3: get, no cache, p99",
+            "value": 3403,
+            "unit": "us"
+          },
+          {
+            "name": "s3: get, warm cache, p50",
+            "value": 106,
+            "unit": "us"
+          },
+          {
+            "name": "s3: get, warm cache, p99",
+            "value": 131,
+            "unit": "us"
+          },
+          {
+            "name": "s3: reader lag p50",
+            "value": 32.7,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: reader lag p99",
+            "value": 34,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: durable put p50",
+            "value": 101.1,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: durable put p99",
+            "value": 102.4,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: durability lag p50",
+            "value": 74.5,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: durability lag p99",
+            "value": 124.4,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: object store requests per 1,000 writes",
+            "value": 0.4,
+            "unit": "requests"
+          },
+          {
+            "name": "s3 +20ms: get, no cache, p50",
+            "value": 65051,
+            "unit": "us"
+          },
+          {
+            "name": "s3 +20ms: get, no cache, p99",
+            "value": 87602,
+            "unit": "us"
+          },
+          {
+            "name": "s3 +20ms: get, warm cache, p50",
+            "value": 73,
+            "unit": "us"
+          },
+          {
+            "name": "s3 +20ms: get, warm cache, p99",
+            "value": 131,
+            "unit": "us"
+          },
+          {
+            "name": "s3 +20ms: reader lag p50",
+            "value": 86.4,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: reader lag p99",
+            "value": 140.3,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: flush 5 ms: durable put p50",
+            "value": 5.8,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: flush 5 ms: durable put p99",
+            "value": 7,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: flush 5 ms: PUTs/s under load",
+            "value": 164.8,
+            "unit": "requests/s"
+          },
+          {
+            "name": "s3: flush 10 ms: durable put p50",
+            "value": 11,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: flush 10 ms: durable put p99",
+            "value": 12.1,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: flush 10 ms: PUTs/s under load",
+            "value": 90.2,
+            "unit": "requests/s"
+          },
+          {
+            "name": "s3: flush 20 ms: durable put p50",
+            "value": 21.1,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: flush 20 ms: durable put p99",
+            "value": 22.2,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: flush 20 ms: PUTs/s under load",
+            "value": 47.4,
+            "unit": "requests/s"
+          },
+          {
+            "name": "s3: flush 100 ms: durable put p50",
+            "value": 101,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: flush 100 ms: durable put p99",
+            "value": 102.2,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: flush 100 ms: PUTs/s under load",
+            "value": 9.9,
+            "unit": "requests/s"
+          },
+          {
+            "name": "s3: 8 shards: open all",
+            "value": 179.8,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: 8 shards: durable put p50",
+            "value": 11.1,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: 8 shards: durable put p99",
+            "value": 16.6,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: 8 shards: PUTs/s",
+            "value": 716.9,
+            "unit": "requests/s"
+          },
+          {
+            "name": "s3: 16 shards: open all",
+            "value": 304.3,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: 16 shards: durable put p50",
+            "value": 15.8,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: 16 shards: durable put p99",
+            "value": 32.2,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: 16 shards: PUTs/s",
+            "value": 988,
+            "unit": "requests/s"
+          },
+          {
+            "name": "s3: 64 shards: open all",
+            "value": 1328.8,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: 64 shards: durable put p50",
+            "value": 65.2,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: 64 shards: durable put p99",
+            "value": 136.6,
+            "unit": "ms"
+          },
+          {
+            "name": "s3: 64 shards: PUTs/s",
+            "value": 980,
+            "unit": "requests/s"
+          },
+          {
+            "name": "s3 +20ms: flush 5 ms: durable put p50",
+            "value": 24.7,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: flush 5 ms: durable put p99",
+            "value": 30.1,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: flush 5 ms: PUTs/s under load",
+            "value": 39.9,
+            "unit": "requests/s"
+          },
+          {
+            "name": "s3 +20ms: flush 10 ms: durable put p50",
+            "value": 24.8,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: flush 10 ms: durable put p99",
+            "value": 35,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: flush 10 ms: PUTs/s under load",
+            "value": 39.5,
+            "unit": "requests/s"
+          },
+          {
+            "name": "s3 +20ms: flush 20 ms: durable put p50",
+            "value": 24.8,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: flush 20 ms: durable put p99",
+            "value": 45.2,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: flush 20 ms: PUTs/s under load",
+            "value": 39,
+            "unit": "requests/s"
+          },
+          {
+            "name": "s3 +20ms: flush 100 ms: durable put p50",
+            "value": 101.2,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: flush 100 ms: durable put p99",
+            "value": 102.4,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: flush 100 ms: PUTs/s under load",
+            "value": 9.9,
+            "unit": "requests/s"
+          },
+          {
+            "name": "s3 +20ms: 8 shards: open all",
+            "value": 549.9,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: 8 shards: durable put p50",
+            "value": 25.3,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: 8 shards: durable put p99",
+            "value": 49.7,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: 8 shards: PUTs/s",
+            "value": 308.5,
+            "unit": "requests/s"
+          },
+          {
+            "name": "s3 +20ms: 16 shards: open all",
+            "value": 607.9,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: 16 shards: durable put p50",
+            "value": 27.3,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: 16 shards: durable put p99",
+            "value": 55,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: 16 shards: PUTs/s",
+            "value": 567.2,
+            "unit": "requests/s"
+          },
+          {
+            "name": "s3 +20ms: 64 shards: open all",
+            "value": 2448,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: 64 shards: durable put p50",
+            "value": 72,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: 64 shards: durable put p99",
+            "value": 158.8,
+            "unit": "ms"
+          },
+          {
+            "name": "s3 +20ms: 64 shards: PUTs/s",
+            "value": 894.3,
             "unit": "requests/s"
           }
         ]
