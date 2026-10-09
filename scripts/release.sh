@@ -46,6 +46,11 @@ on_hex() {
 
 has_changelog_entry() { grep -qx "## $(version "$1")" "$1/CHANGELOG.md"; }
 
+stale_install_snippets() {
+  sed -n "s/.*{:$1, \"\([^\"]*\)\"}.*/\1/p" "$1/README.md" |
+    { grep -vxF "~> $(version "$1")" || true; }
+}
+
 # Tags and publishing use HEAD, so the files checked here must be committed.
 require_clean() {
   [ -z "$(git status --porcelain)" ] ||
@@ -93,6 +98,10 @@ status() {
     stale_requirements "$p" | while read -r dep dep_version requirement; do
       echo "  requires $dep $requirement, but $dep is at $dep_version"
     done
+
+    stale_install_snippets "$p" | while read -r requirement; do
+      echo "  README installs $p \"$requirement\", not \"~> $v\""
+    done
   done
 }
 
@@ -119,6 +128,12 @@ tags() {
     while read -r dep dep_version requirement; do
       [ -n "$dep" ] || continue
       echo "$p: requires $dep $requirement, but $dep is at $dep_version" >&2
+      problems=1
+    done <<< "$stale"
+    stale=$(stale_install_snippets "$p")
+    while read -r requirement; do
+      [ -n "$requirement" ] || continue
+      echo "$p: $p/README.md installs \"$requirement\", not \"~> $(version "$p")\"" >&2
       problems=1
     done <<< "$stale"
   done

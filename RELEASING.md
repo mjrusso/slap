@@ -20,13 +20,15 @@ The `just` recipes below run in `nix develop`, from the repository root.
    ```
 
    For each package, this shows its `mix.exs` version, whether that version is
-   tagged and on Hex, whether its `CHANGELOG.md` has an entry for it, and the
-   commits since the package's latest tag that touch its directory. Read the
+   tagged and on Hex, whether its `CHANGELOG.md` has an entry for it, whether
+   its README's install snippet specifies a different version, and the commits
+   since the package's latest tag that touch its directory. Read the
    commits and decide which packages have changes worth releasing; a commit
    such as adding a lock file does not need one.
 
 2. **Prepare the versions.** For each package you are releasing, set `@version`
-   in its `mix.exs` and add a `## <version>` entry to its `CHANGELOG.md`. If a
+   in its `mix.exs` and add a `## <version>` entry to its `CHANGELOG.md`. If
+   its `README.md` has an install snippet, change it to `"~> <version>"`. If a
    new version no longer meets a requirement in another package (for example,
    `slap_cluster` 0.2.0 and `slap_kv`'s `~> 0.1.0`), `just release-status`
    reports it: update the requirement and release that package as well. Run
@@ -46,8 +48,9 @@ The `just` recipes below run in `nix develop`, from the repository root.
    `just release-tags` tags HEAD `<package>-v<version>` for each package whose
    `mix.exs` version has no tag yet. It lists the tags and asks you to confirm
    before creating them. It refuses to run with uncommitted changes, and
-   refuses a package whose `CHANGELOG.md` has no entry for its version or
-   whose requirements are not met by its dependencies' current versions.
+   refuses a package whose `CHANGELOG.md` has no entry for its version, whose
+   README's install snippet specifies a different version, or whose requirements
+   are not met by its dependencies' current versions.
    HexDocs links each module's source to its package's tag, so push the tags
    before publishing.
 
