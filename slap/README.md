@@ -1,19 +1,17 @@
 # slap
 
-`slap` is a standalone HTTP server for two Slap services: [Durable
+`slap` installs every Slap library.
+
+It also provides `mix slap.server`, a standalone HTTP server for [Durable
 Streams](https://durablestreams.com)
 ([`slap_streams`](https://hexdocs.pm/slap_streams/)) and partitioned key-value
 storage ([`slap_kv`](https://hexdocs.pm/slap_kv/)). It serves either or both
-from one listener, and it does not authenticate requests.
+from one listener, and it does not authenticate requests. Use it to evaluate,
+test, and benchmark those services without writing an application.
 
-Use `slap` (specifically, `mix slap.server`) to evaluate, test, and benchmark
-these services without writing an application; see [Try the standalone
-server](#try-the-standalone-server) for details.
-
-Applications should depend on a service package instead, such as `slap_streams`
-or `slap_kv`, so that they own their supervision tree, HTTP routing, and
-authentication; see [Embed a service in your
-application](#embed-a-service-in-your-application).
+Starting the `slap` application does not start a storage service or HTTP
+listener. See [Use Slap in an application](#use-slap-in-an-application) for
+the processes each service requires.
 
 <!-- slap-preamble -->
 > #### About Slap {: .info}
@@ -46,16 +44,130 @@ application](#embed-a-service-in-your-application).
 > - [slap_snapshot_log](https://hexdocs.pm/slap_snapshot_log/): an append-only
 >   log of changes that can be condensed into snapshots
 >
-> Standalone server:
+> Complete distribution:
 >
-> - [slap](https://hexdocs.pm/slap/): an HTTP server for evaluating and
->   benchmarking `slap_streams` and `slap_kv`
+> - [slap](https://hexdocs.pm/slap/): all Slap libraries and a standalone HTTP
+>   server for evaluating and benchmarking `slap_streams` and `slap_kv`
+>
+> Depend on `slap` to install every library. To keep the dependency set
+> smaller, depend directly on the individual packages the application uses.
 <!-- /slap-preamble -->
+
+## Try the libraries
+
+Start IEx with `slap` installed:
+
+```sh
+iex -e 'Mix.install([:slap])'
+```
+
+In this repository, run `iex -S mix` from `slap/` instead. The examples below
+run in order in one IEx session and use in-memory storage, which is discarded
+when the VM exits.
+
+### SlateDB
+
+Open a database, write a durable value, read it, and close the database:
+
+```elixir
+iex> {:ok, db} = Slap.SlateDB.open("example", store: :memory); :ok
+:ok
+iex> {:ok, _seq} = Slap.SlateDB.put(db, "user:1", "Ada", await_durable: true); :ok
+:ok
+iex> Slap.SlateDB.get(db, "user:1")
+{:ok, "Ada"}
+iex> Slap.SlateDB.close(db)
+:ok
+```
+
+### Streams and snapshot logs
+
+Start a Streams cluster, list its local shards through `Slap.Cluster`, then
+create, append to, and read a stream:
+
+```elixir
+iex> {:ok, _} = Slap.Streams.Cluster.start_link(store: :memory, path: "streams", shards: 1); :ok
+:ok
+iex> Slap.Cluster.local_shards(Slap.Streams.Cluster)
+[0]
+iex> {:ok, :created, _} = Slap.Streams.create("/events", content_type: "text/plain"); :ok
+:ok
+iex> {:ok, %{result: :appended}} = Slap.Streams.append("/events", "created"); :ok
+:ok
+iex> {:ok, %{messages: messages}} = Slap.Streams.read("/events", 0); messages
+[{0, "created"}]
+```
+
+Snapshot logs use the running Streams cluster:
+
+```elixir
+iex> base = "/v1/stream/examples/log"
+"/v1/stream/examples/log"
+iex> {:ok, _} = Slap.SnapshotLog.append(base, "one"); :ok
+:ok
+iex> {:ok, %{entries: ["one"], offset: offset}} = Slap.SnapshotLog.next(base, 0, wait: 0); :ok
+:ok
+iex> Slap.SnapshotLog.snapshot(base, offset, "state after one")
+:ok
+```
+
+### Yjs
+
+Start the document supervisor on the Streams cluster and edit a document with
+`y_ex`:
+
+```elixir
+iex> defmodule Example.DocServer do
+...>   use Slap.Yjs.DocServer
+...> end; :ok
+:ok
+iex> {:ok, _} = Slap.Yjs.Docs.start_link(); :ok
+:ok
+iex> {:ok, server} = Slap.Yjs.Docs.join(Example.DocServer, {"examples", "doc-1"}); :ok
+:ok
+iex> {:ok, doc} = Slap.Yjs.DocServer.doc(server, 5_000); :ok
+:ok
+iex> text = Yex.Doc.get_text(doc, "text"); Yex.Text.insert(text, 0, "hello")
+:ok
+iex> :ok = Slap.Yjs.DocServer.sync(server, 5_000)
+:ok
+iex> Yex.Text.to_string(text)
+"hello"
+```
+
+### KV and files
+
+Start a KV cluster, then write and read a row:
+
+```elixir
+iex> {:ok, _} = Slap.KV.Cluster.start_link(store: :memory, path: "kv", shards: 1); :ok
+:ok
+iex> {:ok, version} = Slap.KV.put("users", "42", "Ada", if_version: :absent); :ok
+:ok
+iex> {:ok, %{value: value, version: ^version}} = Slap.KV.get("users", "42"); value
+"Ada"
+```
+
+Files use the running KV cluster. Small bodies are stored in KV records:
+
+```elixir
+iex> {:ok, _} = Slap.Files.start_link(store: :memory, path: "files"); :ok
+:ok
+iex> ref = {"examples", "hello.txt"}
+{"examples", "hello.txt"}
+iex> {:ok, %{storage: :inline}} = Slap.Files.put(ref, "hello", if_version: :absent); :ok
+:ok
+iex> Slap.Files.read(ref)
+{:ok, "hello"}
+```
+
+For production configuration and supervision, follow the package links in
+[Use Slap in an application](#use-slap-in-an-application).
 
 ## Try the standalone server
 
-You need Elixir 1.18 or later. This command installs `slap` from Hex with
-`Mix.install` and starts the server:
+You need Elixir 1.18 and Erlang/OTP 26.2 or later. This command installs `slap`
+from Hex with `Mix.install` and starts the server:
 
 ```sh
 elixir -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- \
@@ -162,10 +274,11 @@ children = [
 ]
 ```
 
-## Embed a service in your application
+## Use Slap in an application
 
-To use a service in your application, depend on its package and add its
-processes to your supervision tree:
+`slap` makes every library below available. Applications that use only part
+of Slap can depend on those packages directly. In either case, add the
+required processes to the application's supervision tree:
 
 | Package | Integration |
 | --- | --- |

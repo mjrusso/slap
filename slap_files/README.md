@@ -53,15 +53,19 @@ of `slap_files`.
 > - [slap_snapshot_log](https://hexdocs.pm/slap_snapshot_log/): an append-only
 >   log of changes that can be condensed into snapshots
 >
-> Standalone server:
+> Complete distribution:
 >
-> - [slap](https://hexdocs.pm/slap/): an HTTP server for evaluating and
->   benchmarking `slap_streams` and `slap_kv`
+> - [slap](https://hexdocs.pm/slap/): all Slap libraries and a standalone HTTP
+>   server for evaluating and benchmarking `slap_streams` and `slap_kv`
+>
+> Depend on `slap` to install every library. To keep the dependency set
+> smaller, depend directly on the individual packages the application uses.
 <!-- /slap-preamble -->
 
 ## Installation
 
-Add `slap_files` to the dependencies in your application's `mix.exs`:
+To depend on `slap_files` directly, add it to the dependencies in your
+application's `mix.exs`:
 
 ```elixir
 defp deps do

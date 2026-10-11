@@ -16,8 +16,8 @@ services built on them:
 The services are designed to be embedded in your existing application. Each
 service can run across several nodes, with a choice of placement strategies and
 failover. These services acknowledge a write only once it is durable in the
-store. A standalone HTTP server is also provided for evaluation, testing, and
-benchmarking.
+store. The `slap` package installs every Slap library and provides a standalone
+Streams and KV server for evaluation, testing, and benchmarking.
 
 ---
 
@@ -71,8 +71,9 @@ same **placement group** on one shard.
 
 ## Packages
 
-Slap is eight Mix packages, each published separately to Hex. Most
-applications depend on one of the services:
+Slap is eight Mix packages, each published separately to Hex. The `slap`
+package depends on the other seven. Applications can instead depend only on
+the packages they use:
 
 | Package                         | Provides                                                                                                      | Hex                                                                                                                                                                                        |
 |---------------------------------|---------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -89,16 +90,19 @@ The services are built on these packages, which you can also use directly:
 | [`slap_cluster`](slap_cluster/)           | Placement, routing, and failover for SlateDB shards across nodes.                                      | [![Hex](https://img.shields.io/hexpm/v/slap_cluster.svg)](https://hex.pm/packages/slap_cluster) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_cluster)                |
 | [`slap_snapshot_log`](slap_snapshot_log/) | An append-only log with snapshots that replace its prefix. Each `slap_yjs` document is a snapshot log. | [![Hex](https://img.shields.io/hexpm/v/slap_snapshot_log.svg)](https://hex.pm/packages/slap_snapshot_log) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_snapshot_log) |
 
-For evaluating, testing, and benchmarking Streams and KV, there is a standalone
-server. You generally don't want to depend on it in your application:
+`slap` also provides the standalone Streams and KV server:
 
-| Package                                            | Provides                                                         | Hex                                                                                                                                                                |
-|----------------------------------------------------|------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [`slap`](slap/README.md#try-the-standalone-server) | A standalone HTTP server (`mix slap.server`) for Streams and KV. | [![Hex](https://img.shields.io/hexpm/v/slap.svg)](https://hex.pm/packages/slap) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap) |
+| Package                                            | Provides                                                                                 | Hex                                                                                                                                                                |
+|----------------------------------------------------|------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [`slap`](slap/README.md#try-the-standalone-server) | All Slap libraries and a standalone HTTP server (`mix slap.server`) for Streams and KV. | [![Hex](https://img.shields.io/hexpm/v/slap.svg)](https://hex.pm/packages/slap) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap) |
 
 ## Usage Examples
 
-With Elixir 1.18 or later installed, from the root of this repository:
+The [`slap` README](slap/README.md#try-the-libraries) has a single-session
+example for every library.
+
+With Elixir 1.18 and Erlang/OTP 26.2 or later installed, from the root of this
+repository:
 
 ```sh
 cd slap

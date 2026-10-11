@@ -14,7 +14,7 @@ defmodule Slap.MixProject do
       aliases: aliases(),
       dialyzer: [plt_add_apps: [:mix, :iex]],
       usage_rules: [file: "AGENTS.md", usage_rules: [:usage_rules]],
-      description: "An HTTP server for Durable Streams, KV, or both, on SlateDB.",
+      description: "All Slap libraries and a standalone Streams and KV server.",
       source_url: @source_url,
       package: [licenses: ["Apache-2.0"], links: %{"GitHub" => @source_url}],
       docs: [
@@ -36,7 +36,10 @@ defmodule Slap.MixProject do
   defp deps do
     [
       slap_dep(:slap_streams, "~> 0.2.0"),
+      slap_dep(:slap_snapshot_log, "~> 0.2.0"),
+      slap_dep(:slap_yjs, "~> 0.2.0"),
       slap_dep(:slap_kv, "~> 0.2.0"),
+      slap_dep(:slap_files, "~> 0.2.0"),
       slap_dep(:slap_cluster, "~> 0.2.0"),
       slap_dep(:slap_slatedb, "~> 0.2.0"),
       {:bandit, "~> 1.12"},

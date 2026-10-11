@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Adds `slap_snapshot_log`, `slap_yjs`, and `slap_files` as dependencies. The
+  standalone server continues to serve Streams and KV.
 - Service `:settings` now merge with the cluster defaults. `flush_interval`
   remains 10 ms unless explicitly set.
 

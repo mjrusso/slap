@@ -26,10 +26,10 @@ checks and CI workflow:
   depends on `slap_cluster` and `slap_slatedb` by path.
 - `slap_files/`: files with bodies inline in `slap_kv` records or as
   objects in a store; depends on `slap_kv` and what it depends on, by path.
-- `slap/`: the standalone server (`mix slap.server`) for streams and KV,
-  with the Durable Streams conformance suite and benchmarks and the crash
-  and cluster tests; depends on `slap_streams`, `slap_kv` and what they
-  depend on, by path.
+- `slap/`: depends on the other seven packages by path. It provides the
+  standalone server (`mix slap.server`) for streams and KV and holds the
+  Durable Streams conformance suite, benchmarks, crash tests, and cluster
+  tests.
 
 The path dependencies above are selected by `SLAP_LOCAL_DEPS=1`. With the
 variable unset or set to `0`, the packages use versioned Hex dependencies.

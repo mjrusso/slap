@@ -4,18 +4,12 @@ on:
   push:
     paths:
       - "slap/**"
-      - "slap_streams/**"
-      - "slap_kv/**"
-      - "slap_cluster/**"
-      - "slap_slatedb/**"
+      - "slap_*/**"
       - ".github/workflows/slap.yml"
   pull_request:
     paths:
       - "slap/**"
-      - "slap_streams/**"
-      - "slap_kv/**"
-      - "slap_cluster/**"
-      - "slap_slatedb/**"
+      - "slap_*/**"
       - ".github/workflows/slap.yml"
 
 defaults:
@@ -53,7 +47,7 @@ jobs:
             slap/_build/test/*.plt.hash
             ~/.mix/*.plt
             ~/.mix/*.plt.hash
-          key: plt-slap-${{ runner.os }}-otp29-elixir1.20-${{ hashFiles('slap/mix.exs', 'slap/mix.lock', 'slap_streams/mix.exs', 'slap_kv/mix.exs', 'slap_slatedb/mix.exs', 'slap_cluster/mix.exs') }}
+          key: plt-slap-${{ runner.os }}-otp29-elixir1.20-${{ hashFiles('slap/mix.exs', 'slap/mix.lock', 'slap_*/mix.exs') }}
           restore-keys: plt-slap-${{ runner.os }}-otp29-elixir1.20-
       - run: mix check
 
