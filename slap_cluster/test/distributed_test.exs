@@ -66,6 +66,52 @@ defmodule Slap.Cluster.DistributedTest do
     Failover.wait_until(fn -> TestCluster.local_shards() == [0, 1, 2, 3] end, 10_000)
   end
 
+  test "a killed strategy's routes stay unassigned until background probing passes", %{dir: dir} do
+    parent = self()
+    handler = {__MODULE__, make_ref()}
+
+    :ok =
+      :telemetry.attach_many(
+        handler,
+        [[:slap, :cluster, :probe], [:slap, :cluster, :distributed, :members]],
+        fn event, measurements, metadata, _ ->
+          send(parent, {:event, event, measurements, metadata})
+        end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+    {peer, _scope} = member_peer = start_member_peer()
+
+    start_supervised!(
+      {TestCluster,
+       store: {:local, dir},
+       shards: 4,
+       probe: :background,
+       strategy: {Distributed, settle: 60_000}}
+    )
+
+    assert_receive {:event, [:slap, :cluster, :distributed, :members], %{count: 1}, _}, 5_000
+    here = join_member(member_peer)
+    assert_receive {:event, [:slap, :cluster, :distributed, :members], %{count: 2}, _}, 5_000
+    [shard | _] = Enum.to_list(0..3) -- here
+    assert TestCluster.lookup(shard) == {:ok, {:remote, peer}}
+
+    blocker = Path.join(dir, "_cluster")
+    File.rename!(blocker, Path.join(dir, "_old_cluster"))
+    File.write!(blocker, "")
+    Process.exit(Process.whereis(TestCluster.Strategy), :kill)
+
+    assert_receive {:event, [:slap, :cluster, :probe], _, %{ok: false}}, 5_000
+
+    assert TestCluster.call(shard, {Counter, :get_local, ["x"]}, retries: 0) ==
+             {:error, :unassigned}
+
+    File.rm!(blocker)
+    assert_receive {:event, [:slap, :cluster, :distributed, :members], %{count: 2}, _}, 5_000
+    assert TestCluster.lookup(shard) == {:ok, {:remote, peer}}
+  end
+
   # A peer whose :pg scope the cluster's group syncs with, so a process
   # there can join as a member.
   defp start_member_peer(name \\ :"n-#{System.unique_integer([:positive])}") do

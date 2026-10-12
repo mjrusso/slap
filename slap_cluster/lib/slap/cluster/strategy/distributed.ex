@@ -73,8 +73,12 @@ defmodule Slap.Cluster.Strategy.Distributed do
 
   @impl Slap.Cluster.Strategy
   def lookup(cluster, n) do
-    case :persistent_term.get({__MODULE__, cluster}, %{}) do
-      %{^n => owner} when owner != node() -> {:ok, {:remote, owner}}
+    # A killed strategy leaves its placement behind. Routes must belong to
+    # the current process, including before its first placement round.
+    pid = Process.whereis(name(cluster))
+
+    case :persistent_term.get({__MODULE__, cluster}, nil) do
+      {^pid, %{^n => owner}} when owner != node() -> {:ok, {:remote, owner}}
       _ -> {:error, :unassigned}
     end
   end
@@ -218,7 +222,10 @@ defmodule Slap.Cluster.Strategy.Distributed do
 
     state =
       if nodes != state.nodes do
-        :persistent_term.put({__MODULE__, state.cluster}, placement(state.shards, nodes))
+        :persistent_term.put(
+          {__MODULE__, state.cluster},
+          {self(), placement(state.shards, nodes)}
+        )
 
         Telemetry.execute([:distributed, :members], %{count: length(nodes)}, %{
           cluster: state.cluster
@@ -230,7 +237,7 @@ defmodule Slap.Cluster.Strategy.Distributed do
       end
 
     t = now()
-    placement = :persistent_term.get({__MODULE__, state.cluster}, %{})
+    {_pid, placement} = :persistent_term.get({__MODULE__, state.cluster})
     mine = MapSet.new(for {n, owner} <- placement, owner == node(), do: n)
 
     # Close what is no longer ours, at once, including shards still

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Distributed routing ignores placements from a killed strategy while the
+  cluster retries its background store probe or awaits a new placement round.
 - `probe: :background` starts the cluster before the store passes its probe.
   It retries after 1 s, backs off to at most 30 s, and opens shards only after
   a successful probe.
