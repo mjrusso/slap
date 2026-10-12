@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791514377064,
+  "lastUpdate": 1791812908361,
   "repoUrl": "https://github.com/mjrusso/slap",
   "entries": {
     "Durable Streams (lower is better)": [
@@ -377,6 +377,58 @@ window.BENCHMARK_DATA = {
           {
             "name": "slap-s3: Latency - Total RTT p99",
             "value": 21.42043399999966,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Michael Russo",
+            "username": "mjrusso",
+            "email": "mjr@mjrusso.com"
+          },
+          "committer": {
+            "name": "Michael Russo",
+            "username": "mjrusso",
+            "email": "mjr@mjrusso.com"
+          },
+          "id": "9bd02e24a00c6a538c8eedc7d64261f2d2f30158",
+          "message": "chore(repo): prepare 0.2.0 of the remaining packages",
+          "timestamp": "2026-10-09T02:48:08Z",
+          "url": "https://github.com/mjrusso/slap/commit/9bd02e24a00c6a538c8eedc7d64261f2d2f30158"
+        },
+        "date": 1791812907337,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "caddy-file: Latency - Total RTT p50",
+            "value": 1.5062829999988026,
+            "unit": "ms"
+          },
+          {
+            "name": "slap-local: Latency - Total RTT p50",
+            "value": 11.249362999998993,
+            "unit": "ms"
+          },
+          {
+            "name": "slap-s3: Latency - Total RTT p50",
+            "value": 11.214735999999903,
+            "unit": "ms"
+          },
+          {
+            "name": "caddy-file: Latency - Total RTT p99",
+            "value": 4.519954999999754,
+            "unit": "ms"
+          },
+          {
+            "name": "slap-local: Latency - Total RTT p99",
+            "value": 12.405236999999033,
+            "unit": "ms"
+          },
+          {
+            "name": "slap-s3: Latency - Total RTT p99",
+            "value": 13.151221000000078,
             "unit": "ms"
           }
         ]
