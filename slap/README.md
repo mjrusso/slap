@@ -1,18 +1,5 @@
 # slap
 
-`slap` installs every Slap library.
-
-It also provides `mix slap.server`, a standalone HTTP server for [Durable
-Streams](https://durablestreams.com)
-([`slap_streams`](https://hexdocs.pm/slap_streams/)) and partitioned key-value
-storage ([`slap_kv`](https://hexdocs.pm/slap_kv/)). It serves either or both
-from one listener, and it does not authenticate requests. Use it to evaluate,
-test, and benchmark those services without writing an application.
-
-Starting the `slap` application does not start a storage service or HTTP
-listener. See [Use Slap in an application](#use-slap-in-an-application) for
-the processes each service requires.
-
 <!-- slap-preamble -->
 > #### About Slap {: .info}
 >
@@ -52,6 +39,17 @@ the processes each service requires.
 > The `slap` package pulls in all seven libraries. If you only need a
 > subset, add those packages directly.
 <!-- /slap-preamble -->
+
+The `slap` package includes all seven `slap_*` packages, so you can use
+every Slap library with a single dependency. If you only need a subset,
+add those packages directly to keep your dependency set smaller.
+
+The `slap` package also provides `mix slap.server`, a standalone HTTP server
+for [Durable Streams](https://durablestreams.com)
+([`slap_streams`](https://hexdocs.pm/slap_streams/)) and partitioned key-value
+storage ([`slap_kv`](https://hexdocs.pm/slap_kv/)). It serves either or both
+from one listener, and it does not authenticate requests. Use it to evaluate,
+test, and benchmark those services without writing an application.
 
 ## Try the libraries
 
