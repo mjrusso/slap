@@ -80,7 +80,7 @@ application's `mix.exs`:
 ```elixir
 defp deps do
   [
-    {:slap_streams, "~> 0.2.0"}
+    {:slap_streams, "~> 0.3.0"}
   ]
 end
 ```

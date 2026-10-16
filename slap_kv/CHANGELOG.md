@@ -1,10 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - `Slap.KV.Cluster` now sets SlateDB's `flush_interval` to 10 ms instead of
   using SlateDB's 100 ms default. Other settings leave this default intact;
   pass `settings: %{flush_interval: "100ms"}` to restore the old interval.
+- With `probe: :background`, the cluster starts before its store is available.
+  Operations return `{:error, :unavailable}` until its shards open.
 
 ## 0.2.0
 

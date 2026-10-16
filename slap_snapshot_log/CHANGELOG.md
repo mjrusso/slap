@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0
+
+- Uses `slap_streams` 0.3.0 and `slap_cluster` 0.3.0.
+
 ## 0.2.0
 
 - Uses `slap_slatedb` 0.2.0, which upgrades SlateDB from 0.16 to 0.17.

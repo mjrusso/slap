@@ -1,9 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
-- Adds `slap_snapshot_log`, `slap_yjs`, and `slap_files` as dependencies. The
-  standalone server continues to serve Streams and KV.
+- Adds `slap_snapshot_log`, `slap_yjs`, and `slap_files` as dependencies.
+  Installing `slap` now installs all seven library packages. The standalone
+  server continues to serve Streams and KV.
+- Because it now depends on `slap_yjs`, `slap` requires Erlang/OTP 26.2 or
+  later.
 - Service `:settings` now merge with the cluster defaults. `flush_interval`
   remains 10 ms unless explicitly set.
 

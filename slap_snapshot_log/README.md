@@ -65,7 +65,7 @@ application's `mix.exs`:
 ```elixir
 defp deps do
   [
-    {:slap_snapshot_log, "~> 0.2.0"}
+    {:slap_snapshot_log, "~> 0.3.0"}
   ]
 end
 ```

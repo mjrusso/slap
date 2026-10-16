@@ -75,7 +75,7 @@ application's `mix.exs`:
 ```elixir
 defp deps do
   [
-    {:slap_kv, "~> 0.2.0"}
+    {:slap_kv, "~> 0.3.0"}
   ]
 end
 ```

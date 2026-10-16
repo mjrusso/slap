@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - Presence rejects incompatible states in the caller before starting or
   updating a process. An invalid update leaves the presence process running

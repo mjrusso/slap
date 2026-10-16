@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0
+
+- Uses `slap_kv` 0.3.0 and `slap_cluster` 0.3.0.
+
 ## 0.2.0
 
 - Ranged reads: `Slap.Files.read/2` and `Slap.Files.stream/2` take a

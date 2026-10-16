@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - Distributed routing ignores placements from a killed strategy while the
   cluster retries its background store probe or awaits a new placement round.

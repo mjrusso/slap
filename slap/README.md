@@ -301,7 +301,7 @@ Add `slap` to the dependencies in your application's `mix.exs`:
 ```elixir
 defp deps do
   [
-    {:slap, "~> 0.2.0"}
+    {:slap, "~> 0.3.0"}
   ]
 end
 ```
