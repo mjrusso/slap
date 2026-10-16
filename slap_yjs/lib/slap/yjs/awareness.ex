@@ -7,7 +7,8 @@ defmodule Slap.Yjs.Awareness do
 
   A host can use `decode/1` to check the awareness messages its clients
   send, and `encode/1` to build an update from the entries it accepts. The
-  README's "Presence" section shows how.
+  README's "Authorizing client awareness" section shows how. To publish and
+  maintain awareness for a server-side participant, use `Slap.Yjs.Presence`.
   """
 
   alias Slap.Yjs.Frame

@@ -4,6 +4,9 @@ defmodule Slap.Yjs.Presence do
   agent or tool. The process subscribes to a document and keeps one client id
   for its lifetime.
 
+  Awareness is Yjs's term for ephemeral participant state. To inspect and
+  authorize client awareness messages, use the `Slap.Yjs.Awareness` codec.
+
       {:ok, presence} =
         Slap.Yjs.Presence.start_link(
           module: MyApp.DocServer,

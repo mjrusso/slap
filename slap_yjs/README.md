@@ -136,7 +136,19 @@ to your document server module, use the `:assigns` option of
   again and resend their state.
 - A deleted document's id cannot be reused.
 
-## Presence
+## Awareness and presence
+
+Yjs refers to ephemeral participant state as **awareness**, such as a
+participant's name, cursor position, or selection. Awareness is not stored
+as document content.
+
+- Use `Slap.Yjs.Awareness` to decode client awareness messages, inspect and
+  filter their entries, and encode the accepted entries for forwarding.
+
+- Use `Slap.Yjs.Presence` to publish awareness for a server-side participant.
+  It handles renewal, reconnection, and removal.
+
+### Authorizing client awareness
 
 Document servers relay awareness messages without authorizing their client ids
 or state. An authenticated host should authorize each message before passing
@@ -184,9 +196,34 @@ client uses if it is the connection's first accepted id. Its accepted state
 still identifies its authenticated user. While both clients are connected,
 their updates replace each other under the shared id.
 
+### Server-side presence
+
 Start `Slap.Yjs.Presence` for a server-side participant such as an agent. It
 subscribes to the document, publishes and renews its state, rejoins after the
 document server stops, and removes its state when the presence process stops.
+
+With the supervision tree and `MyApp.DocServer` from the example above:
+
+```elixir
+{:ok, presence} =
+  Slap.Yjs.Presence.start_link(
+    module: MyApp.DocServer,
+    doc_id: {"my-service", "doc-1"},
+    state: %{"user" => %{"name" => "Assistant"}, "busy" => false}
+  )
+
+:ok =
+  Slap.Yjs.Presence.update(presence, %{
+    "user" => %{"name" => "Assistant"},
+    "busy" => true
+  })
+```
+
+`update/2` replaces the participant's whole state. Browser clients receive
+this state through the same Yjs awareness protocol used for other participants.
+Your client UI decides how to display fields such as `"user"` and `"busy"`.
+The state is renewed every 15 seconds by default; see `Slap.Yjs.Presence`
+for configuration options.
 
 ## How it works
 
