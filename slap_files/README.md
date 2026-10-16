@@ -64,6 +64,8 @@ of `slap_files`.
 
 ## Installation
 
+Requires Elixir 1.18 or later.
+
 To depend on `slap_files` directly, add it to the dependencies in your
 application's `mix.exs`:
 
@@ -242,14 +244,27 @@ late.
 
 ## Benchmarks
 
-`bench/inline.exs` compares inline and object bodies on RustFS. Inline writes
-need one durable `slap_kv` write; object writes also upload the body and manage
-an intent. Inline bodies save object-store PUTs, but they increase record size
-and make listings read more data. The total cost also depends on `slap_kv`
-reads, writes, and compaction, and on your object store's pricing. Measure with
-representative file sizes before changing `inline_max_bytes`.
+Follow the repository's
+[development setup](https://github.com/mjrusso/slap#development), then run
+from `slap_files/`:
+
+```sh
+mix run bench/inline.exs --store memory
+```
+
+`bench/inline.exs` compares inline and object bodies. Pass
+`--store s3:s3://bucket/prefix` to measure an object store such as RustFS,
+with its endpoint and credentials configured through `AWS_*` variables.
+Inline writes need one durable `slap_kv` write; object writes also upload
+the body and manage an intent. Inline bodies save object-store PUTs, but they
+increase record size and make listings read more data. The total cost also
+depends on `slap_kv` reads, writes, and compaction, and on your object store's
+pricing. Measure with representative file sizes before changing
+`inline_max_bytes`.
 
 ## Tests
+
+Run from `slap_files/` after the development setup above:
 
 ```sh
 mix test          # SLAP_FILES_PROP_RUNS=500 for more model sequences

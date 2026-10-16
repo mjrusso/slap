@@ -15,9 +15,7 @@ services built on them:
 
 The services are designed to be embedded in your existing application. Each
 service can run across several nodes, with a choice of placement strategies and
-failover. These services acknowledge a write only once it is durable in the
-store. The `slap` package installs every Slap library and provides a standalone
-Streams and KV server for evaluation, testing, and benchmarking.
+failover.
 
 ---
 
@@ -98,20 +96,15 @@ The services are built on these packages, which you can also use directly:
 
 ## Usage Examples
 
-The [`slap` README](slap/README.md#try-the-libraries) has a single-session
-example for every library.
+Requires Elixir 1.18 or later and Erlang/OTP 26.2 or later.
 
-With Elixir 1.18 and Erlang/OTP 26.2 or later installed, from the root of this
-repository:
+Start IEx and install the published `slap` package:
 
 ```sh
-cd slap
-SLAP_LOCAL_DEPS=0 mix deps.get
-SLAP_LOCAL_DEPS=0 iex -S mix
+iex -e 'Mix.install([:slap])'
 ```
 
-_(`SLAP_LOCAL_DEPS=0` uses the Slap packages published on Hex.
-`SLAP_LOCAL_DEPS=1` uses the packages in the checkout instead.)_
+Then run the examples below, in order, in this IEx session.
 
 > [!NOTE]
 >
@@ -126,6 +119,8 @@ _(`SLAP_LOCAL_DEPS=0` uses the Slap packages published on Hex.
 > The `slap_slatedb` README lists the other [object
 > stores](slap_slatedb/README.md#object-stores), and the [`slap_streams` S3
 > walkthrough](slap_streams/README.md#using-s3) runs a Streams cluster on S3.
+
+The [`slap` README](slap/README.md#try-the-libraries) has additional examples.
 
 ### SlateDB Bindings
 

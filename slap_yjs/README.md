@@ -56,6 +56,9 @@ authentication; this package does not start a WebSocket or HTTP server.
 
 ## Installation
 
+Requires Elixir 1.18 or later and Erlang/OTP 26.2 or later (see
+[Requirements](#requirements)).
+
 To depend on `slap_yjs` directly, add it to the dependencies in your
 application's `mix.exs`:
 
@@ -68,8 +71,7 @@ end
 ```
 
 Run `mix deps.get`. API documentation is on
-[HexDocs](https://hexdocs.pm/slap_yjs/). This package requires OTP 26.2 or
-later (see [Requirements](#requirements)).
+[HexDocs](https://hexdocs.pm/slap_yjs/).
 
 ## Example
 
@@ -95,8 +97,8 @@ defmodule MyApp.DocServer do
 end
 ```
 
-With the supervision tree running, join the document from IEx, which acts as
-the client process:
+Start your application with `iex -S mix`, then join the document. IEx acts
+as the client process:
 
 ```elixir
 iex> {:ok, server} = Slap.Yjs.Docs.join(MyApp.DocServer, {"my-service", "doc-1"}); :ok
@@ -291,6 +293,10 @@ their `:pg` group, and before 26.2 a process that both monitors and joins
 a group crashes the `:pg` scope when it exits.
 
 ## Tests
+
+Follow the repository's
+[development setup](https://github.com/mjrusso/slap#development), then run
+from `slap_yjs/`:
 
 ```sh
 mix test

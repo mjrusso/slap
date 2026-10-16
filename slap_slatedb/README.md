@@ -56,6 +56,8 @@ partitioned key-value store with conditional writes, use
 
 ## Installation
 
+Requires Elixir 1.18 or later and Erlang/OTP 25 or later.
+
 To depend on `slap_slatedb` directly, add it to the dependencies in your
 application's `mix.exs`:
 
@@ -82,7 +84,8 @@ NIF from source with `SLAP_SLATEDB_BUILD=1`.
 
 ## Example
 
-Run this in `iex -S mix` with a fresh local directory.
+In an application that depends on `slap_slatedb`, run this in `iex -S mix`
+with a fresh local directory:
 
 ```elixir
 iex> {:ok, db} = Slap.SlateDB.open("my-db", store: {:local, "/tmp/slatedb"}); :ok
@@ -126,8 +129,9 @@ operations for rescaling are not exposed by this binding.
 
 ## Build and test
 
-You need Elixir 1.18 or later on OTP 25 or later. Building the NIF from
-source also needs Rust 1.91 or later.
+Follow the repository's
+[development setup](https://github.com/mjrusso/slap#development), then run
+the commands in this section from `slap_slatedb/`.
 
 ```sh
 export SLAP_SLATEDB_BUILD=1
@@ -332,6 +336,8 @@ yet durable are lost. Treat both as
 a normal shutdown of a writer that lost ownership.
 
 ## Benchmarks
+
+Run these scripts from `slap_slatedb/` after the development setup above.
 
 Run `MIX_ENV=bench mix run bench/micro.exs` to measure binding overhead on the
 in-memory store. `mix run bench/scenarios.exs` measures durable writes, reads,

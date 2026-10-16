@@ -72,6 +72,8 @@ specification](https://github.com/durable-streams/durable-streams/blob/main/PROT
 
 ## Installation
 
+Requires Elixir 1.18 or later.
+
 To depend on `slap_streams` directly, add it to the dependencies in your
 application's `mix.exs`:
 
@@ -135,6 +137,12 @@ defmodule MyApp.StreamsCluster do
 end
 
 children = [{MyApp.StreamsCluster, store: {:local, "/tmp/slap-streams"}, shards: 8}]
+```
+
+Add these children to your supervision tree. Once it is running, pass the
+cluster module to each operation:
+
+```elixir
 {:ok, :created, _} = Slap.Streams.create("/notes", cluster: MyApp.StreamsCluster)
 ```
 
@@ -178,9 +186,9 @@ In a `Plug.Router` that has no `Plug.Parsers` before it,
 
 Create the bucket first and configure `AWS_REGION` and credentials in the
 environment used to start the application, for example with
-`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. Then, in `iex -S mix` in an
-application that depends on `slap_streams`, start a cluster on a new prefix in
-that bucket:
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. In an application that depends
+on `slap_streams`, start a fresh `iex -S mix` session and open a cluster on a
+new prefix in that bucket:
 
 ```elixir
 iex> {:ok, _} = Slap.Streams.Cluster.start_link(
@@ -238,8 +246,8 @@ charges.
   flight, so no reply depends on state that could still be lost.
 - **Reads.** The server keeps a **durable view** that advances only as writes
   become durable. Reads, `head`, long-polls, and SSE see only that view, so
-  they never return unacknowledged data. The read itself runs in the caller's
-  process.
+  they never return data before it is durable. The read itself runs in the
+  caller's process.
 - **Failures.** A failed write fails that request and every request in flight,
   and the stream server stops. The next request reloads the stream from
   storage. When a shard stops or is fenced, its stream servers stop first and
@@ -438,6 +446,10 @@ each array element's original bytes.
 
 ## Tests
 
+Follow the repository's
+[development setup](https://github.com/mjrusso/slap#development), then run
+from `slap_streams/`:
+
 ```sh
 mix test                          # SLAP_STREAMS_PROP_RUNS=1000 for more model sequences
 ```
@@ -453,6 +465,8 @@ benchmarks](https://hexdocs.pm/slap/readme.html#durable-streams-conformance-and-
 the crash tests and the cluster tests.
 
 ## Benchmarks
+
+Run these scripts from `slap_streams/` after the development setup above:
 
 ```sh
 mix run bench/append_latency.exs

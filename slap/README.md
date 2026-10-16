@@ -55,15 +55,16 @@ the processes each service requires.
 
 ## Try the libraries
 
-Start IEx with `slap` installed:
+Requires Elixir 1.18 or later and Erlang/OTP 26.2 or later.
+
+Start IEx and install the published `slap` package:
 
 ```sh
 iex -e 'Mix.install([:slap])'
 ```
 
-In this repository, run `iex -S mix` from `slap/` instead. The examples below
-run in order in one IEx session and use in-memory storage, which is discarded
-when the VM exits.
+Run the examples below, in order, from this IEx session. These examples use
+in-memory storage, which is discarded when the VM exits.
 
 ### SlateDB
 
@@ -166,17 +167,15 @@ For production configuration and supervision, follow the package links in
 
 ## Try the standalone server
 
-You need Elixir 1.18 and Erlang/OTP 26.2 or later. This command installs `slap`
-from Hex with `Mix.install` and starts the server:
+You need Elixir 1.18 or later and Erlang/OTP 26.2 or later. This command
+installs `slap` from Hex with `Mix.install` and starts the server:
 
 ```sh
 elixir -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- \
   --streams --kv --store memory
 ```
 
-`--streams` and `--kv` select the services; pass one or both. In a Mix project
-that depends on `slap`, run `mix slap.server` with the same arguments; the
-examples below use that form.
+`--streams` and `--kv` select the services; pass one or both.
 
 The SlateDB NIF is precompiled for macOS and Linux (glibc and musl) on x86_64
 and arm64. The first run downloads it and compiles the dependencies; later
@@ -185,23 +184,30 @@ runs reuse them.
 The server listens on `http://127.0.0.1:4437`. It serves Streams under
 `/v1/stream/` and KV under `/v1/kv/`, and `GET /health` answers 200 once it is
 up. Use `--ip` to listen on another address, and `--port` for another port.
-Use `iex -S mix slap.server --streams --store memory` to keep an IEx prompt
-while the server runs.
 
 The memory store loses its data when the server stops. To use S3, create the
 bucket, set `AWS_REGION` and credentials (such as `AWS_ACCESS_KEY_ID` and
 `AWS_SECRET_ACCESS_KEY`) in the server's environment, then run:
 
 ```sh
-mix slap.server --streams --kv --store s3:s3://my-bucket/my-app
+elixir -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- \
+  --streams --kv --store s3:s3://my-bucket/my-app
 ```
 
 `--store local:DIR` keeps the data in a local directory.
 
+To keep an IEx prompt while the server runs:
+
+```sh
+iex -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- \
+  --streams --kv --store memory
+```
+
 ### Streams
 
-With Streams running, create a JSON stream, then append to it. The JSON
-extension stores each element of an appended array as a separate message.
+With the server running, use another terminal for the HTTP examples below.
+Create a JSON stream, then append to it. The JSON extension stores each element
+of an appended array as a separate message.
 
 ```sh
 curl -X PUT -H 'Content-Type: application/json' http://localhost:4437/v1/stream/events
@@ -246,16 +252,29 @@ The scan returns JSON with keys and values encoded as unpadded base64url.
 
 ### Options
 
-`mix help slap.server` lists the options: the store, the listener address,
-each service's shard count and flush interval, the long-poll and SSE timeouts,
-a pid file, and the placement (`local`, `object-lease`, `distributed` or
-`static`) for running as one node of a cluster. `object-lease` requires an S3
-store; `--peers` requires a placement other than `local`.
+Pass `--help` to the server command to list the options: the store, the
+listener address, each service's shard count and flush interval, the long-poll
+and SSE timeouts, a pid file, and the placement (`local`, `object-lease`,
+`distributed` or `static`) for running as one node of a cluster.
+`object-lease` requires an S3 store; `--peers` requires a placement other than
+`local`.
 
 Each service has its own shards: in a store, the streams' shards are under
 `streams/` and KV's under `kv/`, each with its own leases when the placement
 uses them. Run one server per VM; a cluster can have many shards and span
 several VMs.
+
+### Running from a Mix project
+
+In a Mix project that depends on `slap`, run the task directly:
+
+```sh
+mix slap.server --streams --kv --store memory
+```
+
+The same server options apply. Run `mix help slap.server` for the full list,
+or `iex -S mix slap.server --streams --kv --store memory` to keep an IEx
+prompt while the server runs.
 
 ### Supervising the server
 
@@ -275,6 +294,21 @@ children = [
 ```
 
 ## Use Slap in an application
+
+Requires Elixir 1.18 or later and Erlang/OTP 26.2 or later, because `slap`
+includes `slap_yjs`.
+
+Add `slap` to the dependencies in your application's `mix.exs`:
+
+```elixir
+defp deps do
+  [
+    {:slap, "~> 0.2.0"}
+  ]
+end
+```
+
+Run `mix deps.get`.
 
 `slap` makes every library below available. Applications that use only part
 of Slap can depend on those packages directly. In either case, add the
@@ -297,6 +331,12 @@ of them. Each package's README shows the children it needs and its in-process
 API.
 
 ## Development and testing
+
+To run against this checkout, follow the repository's
+[development setup](https://github.com/mjrusso/slap#development), then run
+commands from `slap/` unless a different directory is specified.
+Use `iex -S mix` for the library examples and
+`mix slap.server --streams --kv --store memory` for the standalone server.
 
 This project also holds the tests that run the server as an OS process:
 the official Durable Streams conformance suite and benchmarks, the kill -9
@@ -326,7 +366,8 @@ server does not provide.
 `scripts/streams_bench.sh` runs the benchmarks against `mix slap.server` and
 against the official Caddy server (a pinned release, downloaded and
 checked), one after another, and `durable_streams/summary.js` compares the
-results. From the repository root:
+results. These paths are relative to `slap/`. Run the benchmark recipes from
+the repository root:
 
 ```sh
 just streams-bench                                  # slap-local caddy-file

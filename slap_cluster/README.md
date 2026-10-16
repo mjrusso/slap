@@ -10,7 +10,8 @@ can write. `slap_cluster` also reports when a shard's writes become durable. It
 opens the databases with [`slap_slatedb`](https://hexdocs.pm/slap_slatedb/).
 
 An object store must support conditional writes, as S3 does. The cluster checks
-this when it starts, and does not start if the store fails the check.
+this before opening shards. By default, a failed check prevents startup; see
+[How it works](#how-it-works) for background retries.
 
 `slap_cluster` does not decide what the shards store. Your application provides
 the processes that run with each shard on its node, called shard children, and
@@ -62,6 +63,8 @@ does not fit an existing service such as
 <!-- /slap-preamble -->
 
 ## Installation
+
+Requires Elixir 1.18 or later.
 
 To depend on `slap_cluster` directly, add it to the dependencies in your
 application's `mix.exs`:
@@ -200,6 +203,10 @@ local file store cannot provide `If-Match`. Lower `net_ticktime` with
 `Distributed` if failure detection must be faster.
 
 ## Tests
+
+Follow the repository's
+[development setup](https://github.com/mjrusso/slap#development), then run
+from `slap_cluster/`:
 
 ```sh
 mix test                                                     # local directories

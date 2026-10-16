@@ -57,6 +57,8 @@ need to keep every entry, or don't need snapshots, use `slap_streams` directly.
 
 ## Installation
 
+Requires Elixir 1.18 or later.
+
 To depend on `slap_snapshot_log` directly, add it to the dependencies in your
 application's `mix.exs`:
 
@@ -189,6 +191,10 @@ share `base` as their placement key, so they are on one shard. `base` must be a
 stream path with no segment that starts with `.`.
 
 ## Tests
+
+Follow the repository's
+[development setup](https://github.com/mjrusso/slap#development), then run
+from `slap_snapshot_log/`:
 
 ```sh
 mix test

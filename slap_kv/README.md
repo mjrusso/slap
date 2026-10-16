@@ -67,6 +67,8 @@ server (`mix slap.server --kv --store memory`).
 
 ## Installation
 
+Requires Elixir 1.18 or later.
+
 To depend on `slap_kv` directly, add it to the dependencies in your
 application's `mix.exs`:
 
@@ -113,6 +115,12 @@ defmodule MyApp.KVCluster do
 end
 
 children = [{MyApp.KVCluster, store: {:local, "/tmp/slap-kv"}, shards: 8}]
+```
+
+Add these children to your supervision tree. Once it is running, pass the
+cluster module to each operation:
+
+```elixir
 {:ok, _} = Slap.KV.put("users", "42", "Ada", cluster: MyApp.KVCluster)
 ```
 
@@ -196,11 +204,12 @@ charges.
 ## HTTP
 
 `Slap.KV.HTTP.Router` serves KV over HTTP, under `/v1/kv` by default. To try
-it, run the standalone server from [`slap`](https://hexdocs.pm/slap/) in
-another terminal:
+it, install and run the standalone server from
+[`slap`](https://hexdocs.pm/slap/) in another terminal:
 
 ```sh
-mix slap.server --kv --store memory --kv-shards 4
+elixir -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- \
+  --kv --store memory --kv-shards 4
 ```
 
 The memory store loses its data when the server stops. Then:
@@ -242,6 +251,14 @@ limit of 65,535 bytes once encoded. Deletes are SlateDB deletes
 
 ## Benchmarks
 
+Follow the repository's
+[development setup](https://github.com/mjrusso/slap#development), then run
+from `slap_kv/`:
+
+```sh
+mix run bench/partition_writers.exs --store memory
+```
+
 `bench/partition_writers.exs` measures throughput, latency, and writer mailbox
 length with unconditional, warm conditional, and cold conditional writes. A
 cold conditional write waits for a store read and blocks its partition writer;
@@ -249,6 +266,8 @@ increasing `partition_writers` spreads that delay across partitions. Measure
 on the intended store before changing the default of 16.
 
 ## Tests
+
+Run from `slap_kv/` after the development setup above:
 
 ```sh
 mix test          # SLAP_KV_PROP_RUNS=1000 for more model sequences
