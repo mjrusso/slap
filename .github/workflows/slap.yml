@@ -3,11 +3,13 @@ name: slap
 on:
   push:
     paths:
+      - "README.md"
       - "slap/**"
       - "slap_*/**"
       - ".github/workflows/slap.yml"
   pull_request:
     paths:
+      - "README.md"
       - "slap/**"
       - "slap_*/**"
       - ".github/workflows/slap.yml"
@@ -50,6 +52,10 @@ jobs:
           key: plt-slap-${{ runner.os }}-otp29-elixir1.20-${{ hashFiles('slap/mix.exs', 'slap/mix.lock', 'slap_*/mix.exs') }}
           restore-keys: plt-slap-${{ runner.os }}-otp29-elixir1.20-
       - run: mix check
+      - name: Root README library examples
+        run: mix run scripts/readme_test.exs ../README.md
+      - name: Package README library examples
+        run: mix run scripts/readme_test.exs README.md
 
   mix-install:
     name: Without a Mix project

@@ -342,6 +342,18 @@ This project also holds the tests that run the server as an OS process:
 the official Durable Streams conformance suite and benchmarks, the kill -9
 crash tests, the cluster tests and the streams HTTP load benchmark.
 
+### Library examples
+
+CI checks the IEx examples in the root README and this package's README
+against this checkout, including their expected results. Each walkthrough
+runs in a separate VM so its bindings and named services stay within that
+session. From `slap/`:
+
+```sh
+mix run scripts/readme_test.exs ../README.md
+mix run scripts/readme_test.exs README.md
+```
+
 ### Durable Streams conformance and benchmarks
 
 `durable_streams/` runs version 0.3.7 of
