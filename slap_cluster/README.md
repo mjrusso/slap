@@ -57,8 +57,8 @@ does not fit an existing service such as
 > - [slap](https://hexdocs.pm/slap/): all Slap libraries and a standalone HTTP
 >   server for evaluating and benchmarking `slap_streams` and `slap_kv`
 >
-> Depend on `slap` to install every library. To keep the dependency set
-> smaller, depend directly on the individual packages the application uses.
+> The `slap` package pulls in all seven libraries. If you only need a
+> subset, add those packages directly.
 <!-- /slap-preamble -->
 
 ## Installation
