@@ -69,6 +69,9 @@ defmodule Slap.Yjs.DocServer do
 
   ## Awareness
 
+  Local publishers must subscribe and call `claim/4` before submitting awareness.
+  The host authenticates the principal and authorizes state fields.
+
   Awareness is not stored. The servers of a document form a `:pg` group
   (scope `Slap.Yjs.PG`, started by `Slap.Yjs.Docs`) and send each other their
   clients' awareness updates. Each monitors the group (`:pg.monitor/2`,
@@ -138,8 +141,8 @@ defmodule Slap.Yjs.DocServer do
   import Slap.Yjs.Follower, only: [transient?: 1]
 
   alias Slap.Yjs
-  alias Slap.Yjs.DocServer.{Appends, Compaction, Sync}
-  alias Yex.DocServer.State
+  alias Slap.Yjs.DocServer.{Appends, Awareness, Compaction, Sync}
+  alias Yex.DocServer.{State, Worker}
 
   # The origin of the updates read from the store: applied, broadcast, not
   # appended again.
@@ -252,7 +255,6 @@ defmodule Slap.Yjs.DocServer do
     :compaction,
     # The monitor of the document's :pg group.
     :group,
-    # Who set each awareness state (Slap.Yjs.Owners).
     :owners,
     sync: %Sync{},
     tasks: %{},
@@ -264,6 +266,12 @@ defmodule Slap.Yjs.DocServer do
   defmacro __using__(opts) do
     quote do
       use Yex.DocServer, unquote(opts)
+
+      defoverridable process_message_v1: 3
+
+      @impl Yex.DocServer
+      def process_message_v1(server, message, origin),
+        do: Yjs.DocServer.process_message_v1(server, message, origin)
 
       def child_spec(arg) do
         shutdown =
@@ -314,6 +322,45 @@ defmodule Slap.Yjs.DocServer do
   @doc "Unsubscribes `pid`, and removes the awareness states it set."
   @spec unsubscribe(GenServer.server(), pid(), timeout()) :: :ok | {:error, term()}
   def unsubscribe(server, pid, timeout), do: call(server, {:unsubscribe, pid}, timeout)
+
+  @doc """
+  Claims an awareness client id for the calling subscriber. The host supplies
+  its authenticated `principal`; another subscriber of the same principal may
+  take over. A replaced subscriber cannot reclaim that id until it unsubscribes
+  and subscribes again. Unsubscribe, exit, and server restart end claims.
+
+  Claims authorize local submissions only. Remote awareness can still conflict
+  with local claims. Hosts must authorize state fields before forwarding them.
+  Returns `:ok`, or `{:error, reason}` including `:claimed`, `:not_owner`,
+  `:not_subscribed`, `:timeout`, or `{:down, reason}`.
+  """
+  @spec claim(GenServer.server(), non_neg_integer(), term(), timeout()) :: :ok | {:error, term()}
+  def claim(server, client_id, principal, timeout \\ 5_000)
+      when is_integer(client_id) and client_id >= 0,
+      do: call(server, {:claim, client_id, {:client, principal}}, timeout)
+
+  @doc false
+  def claim_presence(server, client_id, timeout),
+    do: call(server, {:claim, client_id, {:presence, self()}}, timeout)
+
+  @doc """
+  Processes a client's y-protocols message. Awareness entries are applied only
+  for ids claimed by the calling subscriber; `origin` must be the caller's pid.
+  Unowned entries in a mixed update are filtered. An update with no owned entries
+  returns `{:error, :not_owner}`. Malformed awareness returns `{:error, :invalid}`.
+  Claiming does not change awareness clocks: an accepted update may be a clock
+  no-op. Other message types retain `Yex.DocServer`'s behavior.
+  """
+  def process_message_v1(server, <<0, _::binary>> = message, origin),
+    do: Worker.process_message_v1(server, message, origin)
+
+  def process_message_v1(server, message, origin) do
+    case Awareness.decode_message(message) do
+      {:ok, entries} -> call(server, {:awareness, entries, origin}, 5_000)
+      :other -> Worker.process_message_v1(server, message, origin)
+      {:error, _reason} -> {:error, :invalid}
+    end
+  end
 
   @doc """
   Returns the server's `Yex.Doc`. y_ex functions called on it run in the
@@ -460,8 +507,8 @@ defmodule Slap.Yjs.DocServer do
           follower: Yjs.Follower.start_link(doc_id, loaded.offset, self(), store),
           appends: Appends.new(opts),
           compaction: compaction,
-          group: join_group(doc_id, pg),
-          owners: %{}
+          group: Awareness.join_group(doc_id, pg),
+          owners: %Yjs.Owners{}
         }
 
         state = state |> State.assign(@key, persistence) |> idle()
@@ -492,20 +539,6 @@ defmodule Slap.Yjs.DocServer do
   defp reply_ready_waiters(%State{assigns: assigns} = state) do
     for from <- Map.get(assigns, @ready_waiters, []), do: reply(from, :ok)
     %{state | assigns: Map.delete(assigns, @ready_waiters)}
-  end
-
-  # Without Slap.Yjs.Docs (and its :pg scope), awareness stays on this server.
-  defp join_group(doc_id, pg) do
-    case Process.whereis(pg) do
-      nil ->
-        nil
-
-      _scope ->
-        group = {@key, doc_id}
-        {ref, _members} = :pg.monitor(pg, group)
-        :ok = :pg.join(pg, group, self())
-        ref
-    end
   end
 
   # yrs keeps an update whose predecessors are missing pending, and retries
@@ -542,7 +575,7 @@ defmodule Slap.Yjs.DocServer do
   # the same way.
   defp applied(%State{module: module, doc: doc} = state) do
     receive do
-      {:update_v1, update, origin, Yex.DocServer.Worker} ->
+      {:update_v1, update, origin, Worker} ->
         case module.handle_update_v1(doc, update, origin, state) do
           {:noreply, state} -> applied(state)
           other -> other
@@ -603,43 +636,8 @@ defmodule Slap.Yjs.DocServer do
   """
   @spec handle_awareness_update(Yex.Awareness.t(), map(), term(), State.t()) ::
           {:noreply, State.t()}
-  def handle_awareness_update(awareness, change, origin, state) do
-    %{added: added, updated: updated, removed: removed} = change
-
-    state =
-      update_persistence(state, fn p ->
-        %{p | owners: Yjs.Owners.changed(p.owners, owner(origin), added ++ updated, removed)}
-      end)
-
-    case added ++ updated ++ removed do
-      [] ->
-        {:noreply, state}
-
-      clients ->
-        {:ok, update} = Yex.Awareness.encode_update(awareness, clients)
-        broadcast(state, {:slap_yjs_awareness, persistence(state).doc_id, update}, owner(origin))
-        unless match?({@stored, _}, origin), do: send_to_group(state, update)
-        {:noreply, state}
-    end
-  end
-
-  defp owner({@stored, pid}), do: {:server, pid}
-  defp owner(pid) when is_pid(pid), do: pid
-  defp owner(_origin), do: nil
-
-  defp send_to_group(state, update) do
-    case persistence(state) do
-      %{group: nil} ->
-        :ok
-
-      %{doc_id: doc_id, pg: pg} ->
-        for pid <- :pg.get_members(pg, {@key, doc_id}),
-            pid != self(),
-            do: send(pid, {@key, :awareness, self(), update})
-
-        :ok
-    end
-  end
+  def handle_awareness_update(awareness, change, origin, state),
+    do: Awareness.changed(awareness, change, origin, state)
 
   # Subscribers other than the update's origin.
   defp broadcast(state, message, origin) do
@@ -715,16 +713,14 @@ defmodule Slap.Yjs.DocServer do
     applied(state)
   end
 
-  def handle_info({@key, :awareness, from, update}, %State{awareness: awareness} = state) do
-    :ok = Yex.Awareness.apply_update(awareness, update, {@stored, from})
-    {:noreply, state}
-  end
+  def handle_info({@key, :awareness, from, update}, state),
+    do: Awareness.relay(state, from, update)
 
   # The document's :pg group: send servers that join the current awareness
   # states, and remove those that came through servers that left.
   def handle_info({ref, event, {@key, _}, pids}, state) when event in [:join, :leave] do
     case persistence(state) do
-      %{group: ^ref} -> {:noreply, group_changed(state, event, pids -- [self()])}
+      %{group: ^ref} -> Awareness.group_changed(state, event, pids)
       _ -> {:noreply, state}
     end
   end
@@ -732,7 +728,7 @@ defmodule Slap.Yjs.DocServer do
   def handle_info({:DOWN, ref, :process, pid, _reason}, state) do
     case persistence(state).subscribers do
       %{^pid => ^ref} ->
-        {:noreply, remove_subscriber(state, pid)}
+        remove_subscriber(state, pid)
 
       _ ->
         {_removed, sync} = Sync.remove(persistence(state).sync, ref)
@@ -807,6 +803,18 @@ defmodule Slap.Yjs.DocServer do
 
   # -- Requests ---------------------------------------------------------------
 
+  defp handle_request({kind, _, _} = message, {pid, _ref} = from, state)
+       when kind in [:claim, :awareness] do
+    case Awareness.request(message, pid, state) do
+      {:reply, result, state} ->
+        reply(from, result)
+        {:noreply, state}
+
+      stop ->
+        stop
+    end
+  end
+
   defp handle_request(:ready, from, %State{assigns: %{@key => _}} = state) do
     reply(from, :ok)
     {:noreply, state}
@@ -830,18 +838,20 @@ defmodule Slap.Yjs.DocServer do
   end
 
   defp handle_request({:unsubscribe, pid}, from, state) do
-    state =
+    result =
       case persistence(state).subscribers do
         %{^pid => ref} ->
           Process.demonitor(ref, [:flush])
           remove_subscriber(state, pid)
 
         _ ->
-          state
+          {:noreply, state}
       end
 
-    reply(from, :ok)
-    {:noreply, state}
+    with {:noreply, state} <- result do
+      reply(from, :ok)
+      {:noreply, state}
+    end
   end
 
   defp handle_request(:sync, {pid, _ref} = from, state) do
@@ -864,40 +874,8 @@ defmodule Slap.Yjs.DocServer do
   end
 
   defp remove_subscriber(state, pid) do
-    state
-    |> update_persistence(&%{&1 | subscribers: Map.delete(&1.subscribers, pid)})
-    |> forget_owner(pid)
-    |> idle()
-  end
-
-  defp group_changed(state, _event, []), do: state
-
-  defp group_changed(%State{awareness: awareness} = state, :join, pids) do
-    # The joiner attributes what it receives to this server, and removes it
-    # when this server leaves: only the states not learned from another.
-    ids = Yex.Awareness.get_client_ids(awareness)
-
-    with [_ | _] = clients <- Yjs.Owners.local(persistence(state).owners, ids),
-         {:ok, update} <- Yex.Awareness.encode_update(awareness, clients) do
-      for pid <- pids, do: send(pid, {@key, :awareness, self(), update})
-    end
-
-    state
-  end
-
-  defp group_changed(state, :leave, pids),
-    do: Enum.reduce(pids, state, &forget_owner(&2, {:server, &1}))
-
-  # Removes the awareness states set through `owner`.
-  defp forget_owner(%State{awareness: awareness} = state, owner) do
-    case Yjs.Owners.forget(persistence(state).owners, owner) do
-      {[], _owners} ->
-        state
-
-      {ids, owners} ->
-        Yex.Awareness.remove_states(awareness, ids)
-        update_persistence(state, &%{&1 | owners: owners})
-    end
+    state = update_persistence(state, &%{&1 | subscribers: Map.delete(&1.subscribers, pid)})
+    with {:noreply, state} <- Awareness.depart(state, pid), do: {:noreply, idle(state)}
   end
 
   defp idle(state) do

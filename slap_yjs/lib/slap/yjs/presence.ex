@@ -6,6 +6,8 @@ defmodule Slap.Yjs.Presence do
 
   Awareness is Yjs's term for ephemeral participant state. To inspect and
   authorize client awareness messages, use the `Slap.Yjs.Awareness` codec.
+  The process claims its id before publishing. Local client claims cannot
+  take it over; remote awareness conflicts remain possible.
 
       {:ok, presence} =
         Slap.Yjs.Presence.start_link(
@@ -71,7 +73,7 @@ defmodule Slap.Yjs.Presence do
   end
 
   @doc "Sets `state`, publishing it now if connected, or on rejoin."
-  @spec update(GenServer.server(), map(), timeout()) :: :ok
+  @spec update(GenServer.server(), map(), timeout()) :: :ok | {:error, term()}
   def update(presence, state, timeout \\ 5_000)
 
   def update(presence, state, timeout) when is_map(state) do
@@ -136,17 +138,26 @@ defmodule Slap.Yjs.Presence do
   @impl true
   def handle_call({:update, state}, _from, p) do
     :ok = Yex.Awareness.set_local_state(p.awareness, state)
-    publish(p)
-    {:reply, :ok, p}
+
+    case publish(p) do
+      :ok -> {:reply, :ok, p}
+      {:error, reason} -> {:stop, reason, {:error, reason}, p}
+    end
   end
 
   @impl true
   def handle_info(:renew, p) do
     # y-protocols treats a state as renewed only when its clock advances.
     :ok = Yex.Awareness.set_local_state(p.awareness, Yex.Awareness.get_local_state(p.awareness))
-    publish(p)
-    Process.send_after(self(), :renew, p.renew_every)
-    {:noreply, p}
+
+    case publish(p) do
+      :ok ->
+        Process.send_after(self(), :renew, p.renew_every)
+        {:noreply, p}
+
+      {:error, reason} ->
+        {:stop, reason, p}
+    end
   end
 
   def handle_info({:DOWN, _ref, :process, server, {:shutdown, :deleted}}, %{server: server} = p),
@@ -184,11 +195,16 @@ defmodule Slap.Yjs.Presence do
   end
 
   defp join(p) do
-    with {:ok, server} <- Yjs.Docs.join(p.module, p.doc_id, p.join_opts) do
+    with {:ok, server} <- Yjs.Docs.join(p.module, p.doc_id, p.join_opts),
+         :ok <- Yjs.DocServer.claim_presence(server, Yex.Awareness.client_id(p.awareness), 5_000) do
       Process.monitor(server)
       p = %{p | server: server}
-      publish(p)
-      {:ok, p}
+
+      with :ok <- publish(p), do: {:ok, p}
+    else
+      {:error, {:down, {:shutdown, :deleted}}} -> {:error, :deleted}
+      {:error, {:down, _reason}} -> {:error, :unavailable}
+      error -> error
     end
   end
 
@@ -197,6 +213,12 @@ defmodule Slap.Yjs.Presence do
   defp publish(p) do
     {:ok, update} = Yex.Awareness.encode_update(p.awareness)
     message = Yjs.DocServer.encode_message({:slap_yjs_awareness, p.doc_id, update})
-    :ok = p.module.process_message_v1(p.server, message, self())
+
+    # The server monitor triggers rejoin on exit; renewal retries a timeout.
+    case p.module.process_message_v1(p.server, message, self()) do
+      {:error, {:down, _reason}} -> :ok
+      {:error, :timeout} -> :ok
+      result -> result
+    end
   end
 end

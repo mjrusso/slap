@@ -165,6 +165,7 @@ defmodule Slap.Yjs.SharingTest do
     client =
       spawn(fn ->
         :ok = Yjs.DocServer.subscribe(a, self(), 5_000)
+        :ok = Yjs.DocServer.claim(a, id, :ann)
         :ok = Server.process_message_v1(a, awareness_message(update), self())
         send(test, :sent)
         Process.sleep(:infinity)
@@ -185,7 +186,9 @@ defmodule Slap.Yjs.SharingTest do
     assert eventually(fn -> GenServer.call(c, :awareness_ids) == [] end)
 
     {update, id} = awareness_update(%{"user" => "bob"})
-    :ok = Server.process_message_v1(a, awareness_message(update), nil)
+    :ok = Yjs.DocServer.subscribe(a, self(), 5_000)
+    :ok = Yjs.DocServer.claim(a, id, :bob)
+    :ok = Server.process_message_v1(a, awareness_message(update), self())
     assert_receive {:slap_yjs_awareness, ^doc_id, _}, 5_000
     assert GenServer.call(b, :awareness_ids) == [id]
     stop_supervised!(:a)
@@ -200,10 +203,13 @@ defmodule Slap.Yjs.SharingTest do
     :ok = Yjs.DocServer.subscribe(b, self(), 5_000)
 
     {update, id_a} = awareness_update(%{"user" => "ann"})
-    :ok = Server.process_message_v1(a, awareness_message(update), nil)
+    :ok = Yjs.DocServer.subscribe(a, self(), 5_000)
+    :ok = Yjs.DocServer.claim(a, id_a, :ann)
+    :ok = Server.process_message_v1(a, awareness_message(update), self())
     assert_receive {:slap_yjs_awareness, ^doc_id, _}, 5_000
     {update, id_b} = awareness_update(%{"user" => "bob"})
-    :ok = Server.process_message_v1(b, awareness_message(update), nil)
+    :ok = Yjs.DocServer.claim(b, id_b, :bob)
+    :ok = Server.process_message_v1(b, awareness_message(update), self())
     assert eventually(fn -> GenServer.call(a, :awareness_ids) == Enum.sort([id_a, id_b]) end)
 
     # c hears from a first, and from b only after: a must not pass b's
@@ -231,6 +237,8 @@ defmodule Slap.Yjs.SharingTest do
     Yex.Awareness.set_local_state(awareness, %{"user" => "ann"})
     [id] = Yex.Awareness.get_client_ids(awareness)
     {:ok, update} = Yex.Awareness.encode_update(awareness)
+    :ok = Yjs.DocServer.subscribe(a, self(), 5_000)
+    :ok = Yjs.DocServer.claim(a, id, :ann)
     :ok = Server.process_message_v1(a, awareness_message(update), self())
     assert eventually(fn -> GenServer.call(b, :awareness_ids) == [id] end)
     assert_receive {:slap_yjs_awareness, ^doc_id, _}, 5_000
@@ -238,6 +246,8 @@ defmodule Slap.Yjs.SharingTest do
     # The client reconnects to b, with its next clock.
     Yex.Awareness.set_local_state(awareness, %{"user" => "ann"})
     {:ok, update} = Yex.Awareness.encode_update(awareness)
+    :ok = Yjs.DocServer.subscribe(b, self(), 5_000)
+    :ok = Yjs.DocServer.claim(b, id, :ann)
     :ok = Server.process_message_v1(b, awareness_message(update), self())
     assert_receive {:slap_yjs_awareness, ^doc_id, _}, 5_000
 

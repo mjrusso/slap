@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- Local awareness publishers must subscribe and claim their client ids through
+  `Slap.Yjs.DocServer.claim/4` before submitting messages with their pid as the
+  origin. This prevents another local connection from overwriting a claimed
+  entry merely by submitting the same browser-chosen client id. Hosts still
+  authenticate principals and authorize state fields.
+- Same-principal takeovers transfer cleanup ownership independently of awareness
+  clocks. A reconnecting client can resend an equal-clock state without its old
+  connection's later exit deleting its presence. Replaced subscribers cannot
+  submit states or removals, or reclaim the id within the same subscription.
+- `Slap.Yjs.Presence` claims its id before publishing, preventing local clients
+  from claiming, overwriting, or removing its state.
+- Ownership enforcement is local to each document server. Different servers can
+  accept conflicting claims, and relayed awareness is not checked against local
+  claims. The current `:pg` awareness relay does not coordinate claims across
+  nodes. See the README's
+  [multi-node ownership limitation](README.md#multi-node-ownership-limitation).
+
 ## 0.3.0
 
 - Presence rejects incompatible states in the caller before starting or

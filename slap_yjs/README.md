@@ -112,7 +112,8 @@ iex> {:ok, snapshots} = Slap.Yjs.Store.snapshots({"my-service", "doc-1"}); is_li
 true
 ```
 
-Pass each Yjs sync or awareness message from the client to
+Before forwarding awareness, [claim and authorize its client id](#authorizing-client-awareness).
+Pass each Yjs sync or authorized awareness message from the client to
 `MyApp.DocServer.process_message_v1(server, message, self())`. Encode each
 `{:slap_yjs_update, _, _}` and `{:slap_yjs_awareness, _, _}` message the
 client process receives with `Slap.Yjs.DocServer.encode_message/1`, and
@@ -135,8 +136,9 @@ to your document server module, use the `:assigns` option of
   it, which takes up to 10 ms (`:flush_after`) plus one append. If the
   server stops first, the update is lost unless a client that has it
   resyncs. Clients on other nodes receive only stored updates.
-- Awareness (presence) is not stored. A client's awareness state is removed
-  when the client exits, and a server's when the server or its node stops.
+- Awareness (presence) is not stored. A client's exit removes the awareness
+  states it still owns. A server's departure removes the states attributed
+  to it on its peers.
 - An append that fails for a reason other than a transient error
   stops the server with `{:slap_yjs_append_failed, reason}`. Clients join
   again and resend their state.
@@ -156,30 +158,43 @@ as document content.
 
 ### Authorizing client awareness
 
-Document servers relay awareness messages without authorizing their client ids
-or state. An authenticated host should authorize each message before passing
-it to `process_message_v1/3`. Apply the check where each node receives
-messages from clients, so states relayed between document servers have
-already passed it.
+Each awareness entry has a client id chosen by the browser. That id is separate
+from the authenticated user id. Checking the name or user id in the state does
+not establish who may update the entry: another connection could submit its own
+state under the same client id and overwrite it.
 
-One awareness update can contain entries for several clients because
-y-websocket clients forward states they receive and removals for states that
-timed out. Filter each entry independently. For each connection, accept:
+Local publishers must claim their awareness id with `Slap.Yjs.DocServer.claim/4`
+before submitting states or removals through `process_message_v1/3`. The caller
+must be subscribed and pass `self()` as the message origin. A claim belongs to
+that subscriber until it leaves or exits. Another connection of the same
+principal may take over; the previous connection's states and removals are
+then rejected, and its departure cannot remove the replacement's state.
 
-- states that identify the authenticated user, using the first accepted
-  client id as the only allowed id for that connection;
-- removals for that client id.
+For example, a reconnecting browser may keep client id `42` while its old
+connection is still alive. The new connection claims `42` with the same
+authenticated principal. Ownership transfers immediately, even if the browser
+resends a state with the clock the server already has. Yjs may ignore that
+equal-clock state, but the old connection's later exit still cannot delete the
+replacement's presence.
+
+The host supplies the authenticated principal and still authorizes or stamps
+state fields. One awareness update can contain entries for several clients:
+y-websocket clients forward states they receive and removals for timed-out
+states. Filter entries independently and bind each connection to its first
+accepted id. Claim only when establishing that binding; submitting later
+states checks ownership without reclaiming the id.
 
 The following function returns `{message, client_id}`. `message` is `nil` if
-it accepts no entries, and `client_id` is `nil` until it accepts a state. This
+it accepts no entries, and `client_id` is `nil` until it claims an id. This
 example expects states to identify their user as
 `%{"user" => %{"id" => user_id}}`.
 
 ```elixir
-def authorize_awareness(<<1, framed::binary>>, user_id, client_id) do
-  with {:ok, [update]} <- Slap.Yjs.Frame.parse(framed),
+def authorize_awareness(server, message, user_id, client_id) do
+  with {:ok, 1, framed} <- Slap.Yjs.Frame.read_varuint(message),
+       {:ok, [update]} <- Slap.Yjs.Frame.parse(framed),
        {:ok, entries} <- Slap.Yjs.Awareness.decode(update) do
-    case Enum.flat_map_reduce(entries, client_id, &accept(&1, &2, user_id)) do
+    case Enum.flat_map_reduce(entries, client_id, &accept(&1, &2, user_id, server)) do
       {[], client_id} -> {nil, client_id}
       {kept, client_id} ->
         {<<1>> <> Slap.Yjs.Frame.frame(Slap.Yjs.Awareness.encode(kept)), client_id}
@@ -189,18 +204,39 @@ def authorize_awareness(<<1, framed::binary>>, user_id, client_id) do
   end
 end
 
-defp accept({id, _clock, %{"user" => %{"id" => user_id}}} = entry, client_id, user_id)
-     when client_id in [nil, id],
-     do: {[entry], id}
+defp accept({id, _clock, %{"user" => %{"id" => user_id}}} = entry, nil, user_id, server) do
+  case Slap.Yjs.DocServer.claim(server, id, user_id) do
+    :ok -> {[entry], id}
+    {:error, _reason} -> {[], nil}
+  end
+end
 
-defp accept({id, _clock, nil} = entry, id, _user_id), do: {[entry], id}
-defp accept(_entry, client_id, _user_id), do: {[], client_id}
+defp accept({id, _clock, %{"user" => %{"id" => user_id}}} = entry, id, user_id, _server),
+  do: {[entry], id}
+
+defp accept({id, _clock, nil} = entry, id, _user_id, _server), do: {[entry], id}
+defp accept(_entry, client_id, _user_id, _server), do: {[], client_id}
 ```
 
-Client ids are not authenticated. A connection can choose an id that another
-client uses if it is the connection's first accepted id. Its accepted state
-still identifies its authenticated user. While both clients are connected,
-their updates replace each other under the shared id.
+Forward a non-nil message with `MyApp.DocServer.process_message_v1(server,
+message, self())`. It checks current ownership immediately before application,
+filters unowned entries, and returns `{:error, :not_owner}` if none remain.
+A successful submission can still be a no-op under awareness clock rules.
+Handle ownership loss without trying to claim again on every message.
+
+A replaced subscriber's claim retry fails with `{:error, :not_owner}` for the
+rest of its subscription. Unsubscribing ends that protection: resubscribing
+starts a new subscription, even for the same pid. Server restart clears all
+claims and revocations; clients must join and claim again.
+
+### Multi-node ownership limitation
+
+Claims protect submissions to one document server. Awareness relayed from another
+document server is accepted without these ownership checks. Two servers can each
+accept a claim for the same client id, including claims by different principals.
+Their updates can conflict with each other or with server-side presence. Hosts
+must authenticate and filter awareness on every node; local claims do not provide
+exclusive ownership across nodes.
 
 ### Server-side presence
 

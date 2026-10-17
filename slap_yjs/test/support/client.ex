@@ -74,6 +74,7 @@ defmodule Slap.Yjs.Test.Client do
 
   defp join(state) do
     with {:ok, server} <- Yjs.Docs.join(Server, state.doc_id, @join_opts),
+         :ok <- Yjs.DocServer.claim(server, Yex.Awareness.client_id(state.awareness), state.name),
          ref = Process.monitor(server),
          {:ok, remote} <- remote_state(server, ref) do
       Yex.Doc.transaction(state.doc, :remote, fn -> :ok = Yex.apply_update(state.doc, remote) end)

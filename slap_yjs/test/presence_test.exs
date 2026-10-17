@@ -9,6 +9,20 @@ defmodule Slap.Yjs.PresenceTest do
 
   @state %{"user" => %{"name" => "Assistant"}}
 
+  defmodule StopAfterPublishServer do
+    @moduledoc false
+    use Slap.Yjs.DocServer, restart: :temporary
+
+    @impl Yex.DocServer
+    def handle_awareness_update(awareness, change, origin, state) do
+      {:noreply, state} = super(awareness, change, origin, state)
+
+      if state.assigns[:stop_after_publish],
+        do: {:stop, :normal, state},
+        else: {:noreply, state}
+    end
+  end
+
   defp next_entries(doc_id) do
     assert_receive {:slap_yjs_awareness, ^doc_id, update}, 2_000
     {:ok, entries} = Awareness.decode(update)
@@ -96,6 +110,24 @@ defmodule Slap.Yjs.PresenceTest do
 
     stop_supervised!(Presence)
     assert [{^id, _clock, nil}] = next_entries(doc_id)
+  end
+
+  test "server exit before the publication reply preserves the presence process and id" do
+    doc_id = doc_id()
+
+    {:ok, server} =
+      Yjs.Docs.join(StopAfterPublishServer, doc_id, assigns: %{stop_after_publish: true})
+
+    :ok = Yjs.Docs.leave(server)
+    {:ok, _observer} = Yjs.Docs.join(Server, doc_id)
+
+    presence =
+      start_supervised!({Presence, module: StopAfterPublishServer, doc_id: doc_id, state: @state})
+
+    [{id, _clock, @state}] = next_entries(doc_id)
+    assert [{^id, _clock, nil}] = next_entries(doc_id)
+    assert [{^id, _clock, @state}] = next_entries(doc_id)
+    assert Process.alive?(presence)
   end
 
   test "document deletion leaves the presence supervisor running" do
