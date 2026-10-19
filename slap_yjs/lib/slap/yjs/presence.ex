@@ -41,6 +41,9 @@ defmodule Slap.Yjs.Presence do
       strings must be valid UTF-8, and integers must fit in signed 64 bits.
       Invalid maps raise `ArgumentError` in the caller. Invalid function results
       fail startup.
+    * `:owner` - a pid to monitor. Its exit stops the presence without a
+      supervisor restart, including while retrying a join. The owner is
+      independent of the process that starts or supervises the presence.
     * `:renew_every` - milliseconds between renewals (default 15,000).
     * `:docs`, `:timeout` - as for `Slap.Yjs.Docs.join/3`.
     * `:name` - the process name.
@@ -59,13 +62,25 @@ defmodule Slap.Yjs.Presence do
   def start_link(opts) do
     unless Keyword.keyword?(opts), do: raise(ArgumentError, "options must be a keyword list")
 
-    Keyword.validate!(opts, [:module, :doc_id, :state, :docs, :timeout, :renew_every, :name])
+    Keyword.validate!(opts, [
+      :module,
+      :doc_id,
+      :state,
+      :owner,
+      :docs,
+      :timeout,
+      :renew_every,
+      :name
+    ])
 
     for key <- [:module, :doc_id, :state],
         not Keyword.has_key?(opts, key),
         do: raise(ArgumentError, "#{inspect(key)} is required")
 
     unless is_function(opts[:state], 1), do: validate_state!(opts[:state])
+
+    if Keyword.has_key?(opts, :owner) and not is_pid(opts[:owner]),
+      do: raise(ArgumentError, ":owner must be a pid")
 
     renew_every = Keyword.get(opts, :renew_every, 15_000)
 
@@ -127,6 +142,7 @@ defmodule Slap.Yjs.Presence do
       renew_every: Keyword.get(opts, :renew_every, 15_000),
       retry_delay: @retry_base,
       awareness: awareness,
+      owner_monitor: if(opts[:owner], do: Process.monitor(opts[:owner])),
       server: nil
     }
 
@@ -172,6 +188,9 @@ defmodule Slap.Yjs.Presence do
         {:stop, reason, p}
     end
   end
+
+  def handle_info({:DOWN, ref, :process, _owner, _reason}, %{owner_monitor: ref} = p),
+    do: {:stop, {:shutdown, :owner_down}, p}
 
   def handle_info({:DOWN, _ref, :process, server, {:shutdown, :deleted}}, %{server: server} = p),
     do: {:stop, {:shutdown, :deleted}, p}

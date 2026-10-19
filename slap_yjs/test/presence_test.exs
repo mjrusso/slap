@@ -38,6 +38,10 @@ defmodule Slap.Yjs.PresenceTest do
     })
   end
 
+  defp owner do
+    start_supervised!({Task, fn -> receive do: (:finish -> :ok) end})
+  end
+
   defp disconnect(presence, doc_id, id) do
     server = Yjs.Docs.whereis(Server, doc_id)
     shard = StreamsCluster.shard_for(Yjs.Store.base(doc_id))
@@ -75,6 +79,10 @@ defmodule Slap.Yjs.PresenceTest do
 
     assert_raise ArgumentError, ~r/:renew_every must be a positive integer/, fn ->
       Presence.start_link(Keyword.merge(opts, state: @state, renew_every: 0))
+    end
+
+    assert_raise ArgumentError, ~r/:owner must be a pid/, fn ->
+      Presence.start_link(Keyword.merge(opts, state: @state, owner: :caller))
     end
 
     presence = start_supervised!({Presence, Keyword.put(opts, :state, @state)})
@@ -145,6 +153,27 @@ defmodule Slap.Yjs.PresenceTest do
 
     stop_supervised!(Presence)
     assert [{^id, _clock, nil}] = next_entries(doc_id)
+  end
+
+  test "normal owner exit removes presence without a supervisor restart" do
+    doc_id = doc_id()
+    {:ok, _server} = Yjs.Docs.join(Server, doc_id)
+    owner = owner()
+    supervisor = presence_supervisor()
+
+    {:ok, presence} =
+      Supervisor.start_child(
+        supervisor,
+        {Presence, module: Server, doc_id: doc_id, state: @state, owner: owner}
+      )
+
+    [{id, _clock, @state}] = next_entries(doc_id)
+    ref = Process.monitor(presence)
+    send(owner, :finish)
+
+    assert_receive {:DOWN, ^ref, :process, ^presence, {:shutdown, :owner_down}}, 2_000
+    assert [{^id, _clock, nil}] = next_entries(doc_id)
+    assert Supervisor.count_children(supervisor).active == 0
   end
 
   test "server exit before the publication reply preserves the presence process and id" do
@@ -237,5 +266,29 @@ defmodule Slap.Yjs.PresenceTest do
     assert [{^id, _clock, ^busy}] = next_entries(doc_id)
     assert Process.alive?(presence)
     refute_received {:initialized, _presence, _id}
+  end
+
+  test "owner exit while retrying a join stops presence without a supervisor restart" do
+    doc_id = doc_id()
+    observer = start_supervised!({Server, doc_id: doc_id})
+    :ok = Yjs.DocServer.subscribe(observer, self(), 5_000)
+    owner = owner()
+    supervisor = presence_supervisor()
+
+    {:ok, presence} =
+      Supervisor.start_child(
+        supervisor,
+        {Presence, module: Server, doc_id: doc_id, state: @state, owner: owner, timeout: 200}
+      )
+
+    [{id, _clock, @state}] = next_entries(doc_id)
+    disconnect(presence, doc_id, id)
+
+    assert :ok = Presence.update(presence, @state)
+    ref = Process.monitor(presence)
+    Process.exit(owner, :kill)
+
+    assert_receive {:DOWN, ^ref, :process, ^presence, {:shutdown, :owner_down}}, 2_000
+    assert Supervisor.count_children(supervisor).active == 0
   end
 end

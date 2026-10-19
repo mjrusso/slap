@@ -5,6 +5,9 @@
 - `Slap.Yjs.Presence` accepts `state: fn client_id -> map end` to derive initial
   state from its generated id. The function runs once per presence process;
   rejoining preserves the id and latest state.
+- `Slap.Yjs.Presence` accepts an optional `:owner` pid to monitor. Owner exit
+  stops the presence, including normal exit and while retrying a join. Its
+  default `restart: :transient` child policy prevents a supervisor restart.
 - Local awareness publishers must subscribe and claim their client ids through
   `Slap.Yjs.DocServer.claim/4` before submitting messages with their pid as the
   origin. This prevents another local connection from overwriting a claimed
