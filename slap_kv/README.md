@@ -162,9 +162,12 @@ charges.
   write may still become durable. Read the row to find out; nothing retries
   a write on its own.
 - **Scans.** Each page is a separate read of durable rows, not a snapshot
-  across pages. The opaque cursor identifies the last key returned. Scan
-  rows omit versions by default; `with_versions: true` includes them. There
-  are no scans or writes across partitions.
+  across pages. Passing `cursor: nil` starts at the beginning of the selected
+  range; a returned `cursor: nil` means iteration is complete. A binary
+  cursor identifies the last key returned and remains valid after that row
+  is deleted. Supplied `:prefix`, `:gte`, and `:lt` values must be binaries.
+  Scan rows omit versions by default; `with_versions: true` includes them.
+  There are no scans or writes across partitions.
 
 ## How it works
 

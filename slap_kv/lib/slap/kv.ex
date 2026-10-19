@@ -152,11 +152,14 @@ defmodule Slap.KV do
     * `:prefix` - only keys that start with it.
     * `:gte`, `:lt` - only keys in this range.
     * `:limit` - rows per page, 1 to 1,000 (default 100).
-    * `:cursor` - the `cursor` of the previous page, to continue after it.
+    * `:cursor` - the previous page's cursor, to continue after it. An input
+      of `nil` starts at the beginning of the selected range.
     * `:with_versions` - include each row's version (default `false`).
 
   Each page is a separate read of the durable rows: rows written between
-  pages appear in later pages if their keys come later.
+  pages appear in later pages if their keys come later. A binary cursor marks
+  a key position and remains valid after that row is deleted. Only `:cursor`
+  accepts `nil`; supplied `:prefix`, `:gte`, and `:lt` values must be binaries.
   """
   @spec scan(partition(), keyword()) ::
           {:ok, page()} | {:error, error()}
@@ -239,7 +242,10 @@ defmodule Slap.KV do
   defp range(partition, opts) do
     bounds = Keyword.take(opts, [:prefix, :gte, :lt, :cursor])
 
-    if Enum.all?(bounds, fn {_, v} -> is_binary(v) end) do
+    if Enum.all?(bounds, fn
+         {:cursor, nil} -> true
+         {_, value} -> is_binary(value)
+       end) do
       Keys.range(
         partition,
         Keyword.get(bounds, :prefix, ""),

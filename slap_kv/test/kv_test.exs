@@ -249,17 +249,30 @@ defmodule Slap.KVTest do
       end
     end
 
-    test "pages continue from the cursor" do
-      assert {:ok, %{rows: page1, cursor: cursor}} = KV.scan("s", prefix: "item/", limit: 2)
+    test "pages continue from the cursor after deleting the rows already read" do
+      assert {:ok, %{rows: page1, cursor: cursor}} =
+               KV.scan("s", prefix: "item/", limit: 2, cursor: nil)
+
       assert Enum.map(page1, &elem(&1, 0)) == ~w(item/a item/b)
+      for {key, _value} <- page1, do: assert(:ok = KV.delete("s", key))
+      assert {:ok, _} = KV.put("s", "item/a", "new")
 
       assert {:ok, %{rows: page2, cursor: cursor}} =
                KV.scan("s", prefix: "item/", limit: 2, cursor: cursor)
 
       assert Enum.map(page2, &elem(&1, 0)) == ~w(item/c item/d)
+      for {key, _value} <- page2, do: assert(:ok = KV.delete("s", key))
 
       assert {:ok, %{rows: [{"item/e", "ve"}], cursor: nil}} =
                KV.scan("s", prefix: "item/", limit: 2, cursor: cursor)
+
+      assert :ok = KV.delete("s", "item/e")
+
+      assert {:ok, %{rows: [{"item/a", "new"}], cursor: nil}} =
+               KV.scan("s", prefix: "item/", cursor: nil)
+
+      assert {:ok, %{rows: [{"item/a", "new"}, {"other", "o"}], cursor: nil}} =
+               KV.scan("s", cursor: nil)
     end
 
     test "a page that ends exactly at the last row has no cursor" do
@@ -271,6 +284,11 @@ defmodule Slap.KVTest do
       assert {:error, {:bad_request, :invalid_limit}} = KV.scan("s", limit: 0)
       assert {:error, {:bad_request, :invalid_limit}} = KV.scan("s", limit: 1_001)
       assert {:error, {:bad_request, :invalid_range}} = KV.scan("s", prefix: 1)
+
+      for bound <- [prefix: nil, gte: nil, lt: nil, cursor: 42] do
+        assert {:error, {:bad_request, :invalid_range}} = KV.scan("s", [bound])
+      end
+
       assert {:error, {:bad_request, :invalid_partition}} = KV.scan("")
     end
   end

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `Slap.KV.scan/2` accepts `cursor: nil` to start at the beginning of the
+  selected range. A returned `cursor: nil` marks the end of iteration.
+  `prefix: nil`, `gte: nil`, and `lt: nil` remain invalid.
+
 ## 0.3.0
 
 - `Slap.KV.Cluster` now sets SlateDB's `flush_interval` to 10 ms instead of

@@ -149,7 +149,7 @@ defmodule Slap.KV.ModelTest do
         do: [limit: limit, with_versions: with_versions],
         else: [prefix: prefix, limit: limit, with_versions: with_versions]
 
-    scan_all(run <> p, opts, [])
+    scan_all(run <> p, [cursor: nil] ++ opts, [])
   end
 
   # Replaces the partition writer through its supervisor, which waits for
