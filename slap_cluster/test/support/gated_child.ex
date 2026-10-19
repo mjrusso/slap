@@ -15,6 +15,8 @@ defmodule Slap.Cluster.Test.GatedChild do
 
     receive do
       :go -> {:ok, {n, test}}
+      :ignore -> :ignore
+      {:fail, reason} -> {:stop, reason}
     end
   end
 

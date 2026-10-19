@@ -58,11 +58,16 @@ defmodule Slap.Cluster.Probe do
   @impl true
   def handle_info(:retry, state), do: {:noreply, state, {:continue, :probe}}
 
-  defp probe(%Config{probe: false}), do: :ok
+  defp probe(%Config{probe: false, cluster: cluster}) do
+    GenServer.cast(Slap.Cluster.host(cluster), {:probe, :skipped})
+    :ok
+  end
 
   defp probe(config) do
     result = SlateDB.probe_store(config.store, Config.probe_path(config))
     ok? = match?({:ok, _}, result)
+    status = if ok?, do: :ok, else: result
+    GenServer.cast(Slap.Cluster.host(config.cluster), {:probe, status})
     Telemetry.execute([:probe], %{}, %{cluster: config.cluster, ok: ok?, result: result})
 
     case result do

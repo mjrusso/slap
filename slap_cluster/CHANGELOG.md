@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Add `status/2` and `await_ready/2`, also available on cluster modules.
+  Readiness includes remote owners and direct shard child startup and restarts.
+  Status reports the startup probe, shard lifecycle state, and retained
+  failures. Timeouts cover the whole query or wait; waits rediscover owners
+  after placement changes, including with `:infinity`. Neither function
+  accesses storage.
+
 ## 0.3.0
 
 - Distributed routing ignores placements from a killed strategy while the

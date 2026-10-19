@@ -89,6 +89,8 @@ defmodule Slap.Cluster.Host do
      %{
        cluster: cluster,
        strategy: strategy,
+       probe: %{status: :pending, last_error: nil},
+       failures: %{},
        shards: %{},
        starting: %{},
        # n => [{from, reply}], answered when the shard is closed.
@@ -155,6 +157,30 @@ defmodule Slap.Cluster.Host do
     {:reply, state.shards |> Map.keys() |> Enum.sort(), state}
   end
 
+  def handle_call(:status, _from, state) do
+    shards = Map.new(state.starting, fn {n, _} -> {n, :starting} end)
+    shards = Enum.reduce(state.stopping, shards, fn {n, _}, acc -> Map.put(acc, n, :stopping) end)
+
+    shards =
+      Enum.reduce(state.shards, shards, fn {n, shard}, acc ->
+        Map.put(acc, n, shard_status(shard))
+      end)
+
+    {:reply, %{probe: state.probe, shards: shards, failures: state.failures}, state}
+  end
+
+  @impl true
+  def handle_cast({:probe, result}, state) do
+    probe =
+      case result do
+        :ok -> %{state.probe | status: :passed}
+        :skipped -> %{state.probe | status: :skipped}
+        {:error, reason} -> %{status: :failed, last_error: reason}
+      end
+
+    {:noreply, %{state | probe: probe}}
+  end
+
   @impl true
   def handle_info({ref, result}, state) when is_map_key(state.tasks, ref) do
     Process.demonitor(ref, [:flush])
@@ -169,7 +195,7 @@ defmodule Slap.Cluster.Host do
   def handle_info({:shard_fenced, n, _shard_db}, state) do
     case Map.fetch(state.shards, n) do
       {:ok, shard} ->
-        state = terminate_shard(state, n, shard)
+        state = state |> failed(n, :fenced) |> terminate_shard(n, shard)
         report(state, n, :fenced)
         {:noreply, state}
 
@@ -187,7 +213,7 @@ defmodule Slap.Cluster.Host do
           Logger.error("#{inspect(state.cluster)}: shard #{n} crashed: #{inspect(reason)}")
         end
 
-        state = %{state | shards: Map.delete(state.shards, n)}
+        state = failed(%{state | shards: Map.delete(state.shards, n)}, n, {down, reason})
         report(state, n, down)
         {:noreply, state}
 
@@ -211,42 +237,43 @@ defmodule Slap.Cluster.Host do
     {:noreply, state}
   end
 
-  defp task_done({:start, n}, result, state) do
+  defp task_done({:start, n}, {:error, reason}, state) do
+    {{from, _status}, starting} = Map.pop!(state.starting, n)
+    reason = unwrap(reason)
+    state = failed(%{state | starting: starting}, n, reason)
+    GenServer.reply(from, {:error, reason})
+
+    if Map.has_key?(state.stopping, n),
+      do: task_done({:stop, n}, :ok, state),
+      else: {:noreply, state}
+  end
+
+  defp task_done({:start, n}, {:ok, pid}, state) do
     {{from, status}, starting} = Map.pop!(state.starting, n)
     state = %{state | starting: starting}
-    stop? = Map.has_key?(state.stopping, n)
 
-    case result do
+    cond do
       # The opener is answered once the shard is closed, so that it does
       # not act (free a lease) while the shard still runs.
-      {:ok, pid} when stop? ->
+      Map.has_key?(state.stopping, n) ->
         state = stop_later(state, n, from, {:error, :stopped})
         {:noreply, stop_task(state, n, status, pid)}
 
-      {:error, reason} when stop? ->
-        GenServer.reply(from, {:error, unwrap(reason)})
-        task_done({:stop, n}, :ok, state)
+      Shard.status(status) == :fenced ->
+        # Fenced while it was opening (the fence message found no running
+        # shard): another node opened it. Stop it rather than register it.
+        DynamicSupervisor.terminate_child(
+          Slap.Cluster.shard_supervisor(state.cluster, n),
+          pid
+        )
 
-      {:ok, pid} ->
-        if Shard.status(status) == :fenced do
-          # Fenced while it was opening (the fence message found no running
-          # shard): another node opened it. Stop it rather than register it.
-          DynamicSupervisor.terminate_child(
-            Slap.Cluster.shard_supervisor(state.cluster, n),
-            pid
-          )
+        GenServer.reply(from, {:error, :fenced})
+        {:noreply, failed(state, n, :fenced)}
 
-          GenServer.reply(from, {:error, :fenced})
-          {:noreply, state}
-        else
-          shard = %{pid: pid, ref: Process.monitor(pid), status: status}
-          GenServer.reply(from, {:ok, pid})
-          {:noreply, %{state | shards: Map.put(state.shards, n, shard)}}
-        end
-
-      {:error, reason} ->
-        GenServer.reply(from, {:error, unwrap(reason)})
-        {:noreply, state}
+      true ->
+        shard = %{pid: pid, ref: Process.monitor(pid), status: status}
+        GenServer.reply(from, {:ok, pid})
+        {:noreply, %{state | shards: Map.put(state.shards, n, shard)}}
     end
   end
 
@@ -280,6 +307,18 @@ defmodule Slap.Cluster.Host do
 
     %{state | shards: Map.delete(state.shards, n)}
   end
+
+  defp shard_status(shard) do
+    with true <- Process.alive?(shard.pid),
+         :running <- Shard.status(shard.status) do
+      {:running, shard.pid}
+    else
+      false -> :crashed
+      status -> status
+    end
+  end
+
+  defp failed(state, n, reason), do: %{state | failures: Map.put(state.failures, n, reason)}
 
   defp report(state, n, reason), do: state.strategy.handle_shard_down(state.cluster, n, reason)
 

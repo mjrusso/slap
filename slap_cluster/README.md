@@ -128,6 +128,41 @@ function's return value, including any `{:error, reason}` it returns.
 `Slap.Cluster`'s docs cover the options, shard children, durability and
 telemetry.
 
+## Readiness
+
+With `probe: :background`, startup can return before any shard opens. Even
+with synchronous probing, failed shard opens retry in the background. Before
+boot work that needs the cluster, wait for every configured shard and its
+children to finish starting:
+
+```elixir
+:ok = MyApp.Cluster.await_ready(30_000)
+```
+
+The result is `:ok` or `{:error, :timeout}`. The timeout covers the whole wait,
+including remote checks and retries. `await_ready(:infinity)` waits without an
+overall deadline. Each attempt has a finite deadline so waits can rediscover
+owners after placement changes, even when the previous owner stops responding.
+
+Readiness is checked on every call, including during child restarts. A shard
+whose supervisor cannot answer within the inspection deadline counts as
+unready. Ignored children, completed temporary tasks, and stopped or deleted
+child specifications do not block readiness. Children added through
+`Supervisor.start_child/2` are included. Inspection covers direct shard
+children. An application-provided supervisor is checked for a live process;
+its descendants are outside the readiness check.
+
+For health checks, `MyApp.Cluster.status()` returns
+`{:ok, %{ready?: ready?, probe: probe, shards: shards}}`. Each shard has its
+owner node, current lifecycle status, and `:last_error`. The local startup
+probe has its own status and `:last_error`. Hosts retain probe and shard
+failures after recovery, until they restart. `status(timeout)` bounds the whole
+query (default 5,000 ms). It returns `{:error, :timeout}` when the query times out,
+or `{:error, :unavailable}` when the local cluster cannot be queried.
+
+These functions read lifecycle state without storage I/O. To check current
+storage reachability, call `Slap.SlateDB.probe_store/3` separately.
+
 ## How it works
 
 The cluster probes the store's create-if-absent behavior before opening

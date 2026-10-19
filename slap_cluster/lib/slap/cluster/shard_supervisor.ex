@@ -29,6 +29,15 @@ defmodule Slap.Cluster.ShardSupervisor do
 
   def start_link(arg), do: Supervisor.start_link(__MODULE__, arg)
 
+  # Inspection can block during child startup; callers must bound it outside Host.
+  def status(pid) do
+    if Enum.all?(Supervisor.which_children(pid), &running_child?/1),
+      do: :running,
+      else: :starting
+  catch
+    :exit, _ -> :starting
+  end
+
   @impl true
   def init({cluster, n, _generation, _status} = arg) do
     config = Config.get(cluster)
@@ -63,4 +72,14 @@ defmodule Slap.Cluster.ShardSupervisor do
 
     Supervisor.start_link(specs, strategy: :one_for_one)
   end
+
+  defp running_child?({__MODULE__.Children, pid, :supervisor, _}) do
+    is_pid(pid) and Process.alive?(pid) and
+      Enum.all?(Supervisor.which_children(pid), &running_child?/1)
+  end
+
+  # OTP retains ignored and stopped child specifications with an undefined PID.
+  defp running_child?({_id, :undefined, _type, _modules}), do: true
+  defp running_child?({_id, pid, _type, _modules}) when is_pid(pid), do: Process.alive?(pid)
+  defp running_child?(_child), do: false
 end

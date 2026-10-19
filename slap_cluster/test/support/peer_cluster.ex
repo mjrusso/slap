@@ -65,6 +65,19 @@ defmodule Slap.Cluster.Test.Peers do
   @doc "Stops the cluster on `node` cleanly."
   def stop_cluster(node), do: :erpc.call(node, TestCluster, :stop, [], 60_000)
 
+  @doc false
+  def trace_receive(node, pid, receiver) do
+    :erpc.call(
+      node,
+      fn ->
+        tracer = spawn(fn -> receive do: (message -> send(receiver, message)) end)
+        :erlang.trace(pid, true, [:receive, {:tracer, tracer}])
+        tracer
+      end,
+      5_000
+    )
+  end
+
   @doc "SIGKILLs the node's OS process."
   def kill(node), do: signal(node, "KILL")
 

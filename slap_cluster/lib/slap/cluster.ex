@@ -28,9 +28,10 @@ defmodule Slap.Cluster do
   and add `MyApp.Cluster` to the application's supervision tree. On start
   it checks that the store honours conditional writes (see
   `Slap.SlateDB.probe_store/3`), then the strategy opens the shards. With the
-  default `Slap.Cluster.Strategy.Local`, every shard opens on this node
-  before `start_link/1` returns. With `probe: :background`, `start_link/1`
-  can return before any shard opens.
+  default `Slap.Cluster.Strategy.Local`, startup attempts every shard before
+  `start_link/1` returns; failed opens retry in the background. With
+  `probe: :background`, it can return before any shard opens. Use
+  `await_ready/2` before boot work that needs every shard.
 
   ## Options
 
@@ -101,7 +102,7 @@ defmodule Slap.Cluster do
   `{:error, reason}` from `call/4` and `lookup/2`.
   """
 
-  alias Slap.Cluster.{Config, Hash, Host, Shard, ShardDb, Telemetry}
+  alias Slap.Cluster.{Config, Hash, Host, Readiness, Shard, ShardDb, Telemetry}
   alias Slap.SlateDB
 
   defmacro __using__(opts) do
@@ -143,6 +144,12 @@ defmodule Slap.Cluster do
       @doc "The shards open on this node."
       def local_shards, do: Slap.Cluster.local_shards(__MODULE__)
 
+      @doc "Current shard lifecycle and readiness. See `Slap.Cluster.status/2`."
+      def status(timeout \\ 5_000), do: Slap.Cluster.status(__MODULE__, timeout)
+
+      @doc "Waits for every shard to finish starting. See `Slap.Cluster.await_ready/2`."
+      def await_ready(timeout), do: Slap.Cluster.await_ready(__MODULE__, timeout)
+
       @doc "Where every shard is. See `Slap.Cluster.assignments/1`."
       def assignments, do: Slap.Cluster.assignments(__MODULE__)
     end
@@ -182,6 +189,44 @@ defmodule Slap.Cluster do
         end
     end
   end
+
+  @doc """
+  Reports current lifecycle state without accessing storage.
+
+  Returns `{:ok, %{ready?: boolean, probe: probe, shards: shards}}`. `shards`
+  maps each configured shard number to `%{node: node, status: status,
+  last_error: reason}`. Status is `:running`, `:starting`, `:stopping`,
+  `:fenced`, `:crashed`, `:unassigned`, or `:unavailable`. A running shard has
+  completed startup, including its direct application children. Child restarts
+  are checked too. An application-provided supervisor is checked for a live
+  process; its descendants are outside the readiness check. Remote placements
+  are confirmed with their owning hosts, which are queried concurrently.
+
+  `probe` reports this node's startup probe, with `:status` (`:pending`,
+  `:passed`, `:failed`, or `:skipped`) and `:last_error`. Hosts retain probe
+  and shard failures after recovery, until the host restarts. An unavailable
+  shard reports the current owner-query error in `:last_error`.
+  Readiness is rechecked on every call and may change immediately afterward.
+  Use `Slap.SlateDB.probe_store/3` to check current storage reachability.
+
+  `timeout` bounds the entire query, including remote checks. Returns
+  `{:error, :timeout | :unavailable}` if the query cannot complete locally.
+  """
+  @spec status(module(), timeout()) :: {:ok, map()} | {:error, :timeout | :unavailable}
+  def status(cluster, timeout \\ 5_000), do: Readiness.status(cluster, timeout)
+
+  @doc """
+  Waits until every configured shard has completed startup on its owner,
+  including its direct application children, with the inspection scope
+  described in `status/2`. Returns `:ok` or `{:error, :timeout}`.
+
+  The timeout covers the whole wait, including remote checks and retries.
+  `:infinity` keeps waiting and rediscovering owners without a deadline.
+  This checks lifecycle state; use `Slap.SlateDB.probe_store/3` to check
+  storage reachability.
+  """
+  @spec await_ready(module(), timeout()) :: :ok | {:error, :timeout}
+  def await_ready(cluster, timeout), do: Readiness.await_ready(cluster, timeout)
 
   @call_timeout 30_000
 
