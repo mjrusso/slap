@@ -153,7 +153,11 @@ return `{:error, :unavailable}` until the KV shards open.
   `If-Range` or `If-Match`) as `if_version:`. If the file has changed since,
   the read returns `{:error, {:conflict, version}}`.
 - `list(partition, prefix:, gte:, lt:, limit:, cursor:)`: a partition's
-  files in id order, with their versions.
+  files in id order, with their versions. Passing `cursor: nil` starts at the
+  beginning of the selected range; a returned `cursor: nil` means iteration
+  is complete. A binary cursor identifies the last file id returned and
+  remains valid after that file is deleted. Supplied `:prefix`, `:gte`, and
+  `:lt` values must be binaries.
 - `delete(ref, if_version:)`.
 
 A partition is a stable group of files, such as a document's attachments,

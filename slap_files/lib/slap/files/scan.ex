@@ -10,9 +10,7 @@ defmodule Slap.Files.Scan do
   def reduce(partition, acc, fun, opts \\ []), do: reduce(partition, nil, acc, fun, opts)
 
   defp reduce(partition, cursor, acc, fun, route_opts) do
-    opts = if cursor, do: [limit: @page, cursor: cursor], else: [limit: @page]
-
-    case KV.scan(partition, opts ++ route_opts) do
+    case KV.scan(partition, [limit: @page, cursor: cursor] ++ route_opts) do
       {:ok, %{rows: rows, cursor: next}} ->
         acc = Enum.reduce(rows, acc, fun)
         if next, do: reduce(partition, next, acc, fun, route_opts), else: {:ok, acc}

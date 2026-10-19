@@ -236,7 +236,7 @@ defmodule Slap.Files.ModelTest do
   end
 
   defp execute({:list}, partition) do
-    case Files.list(partition) do
+    case Files.list(partition, cursor: nil) do
       {:ok, %{files: files}} ->
         {:ok, Map.new(files, fn file -> {elem(file.ref, 1), {file.version, file.size}} end)}
 

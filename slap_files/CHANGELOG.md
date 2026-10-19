@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `Slap.Files.list/2` accepts `cursor: nil` to start at the beginning of the
+  selected range. A returned `cursor: nil` marks the end of iteration.
+  `prefix: nil`, `gte: nil`, and `lt: nil` remain invalid.
+
 ## 0.3.0
 
 - Uses `slap_kv` 0.3.0 and `slap_cluster` 0.3.0.

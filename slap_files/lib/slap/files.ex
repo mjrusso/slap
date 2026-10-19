@@ -523,7 +523,10 @@ defmodule Slap.Files do
   Lists a partition's files in id order, including their versions. Takes the
   `:prefix`, `:gte`, `:lt`, `:limit` and
   `:cursor` of `Slap.KV.scan/2`, and returns `{:ok, %{files: files, cursor:
-  cursor}}`.
+  cursor}}`. An input `cursor: nil` starts at the beginning of the selected
+  range; a returned `cursor: nil` means there are no more pages. A binary
+  cursor remains valid after the file it follows is deleted. Supplied
+  `:prefix`, `:gte`, and `:lt` values must be binaries.
   """
   @spec list(binary(), keyword()) ::
           {:ok, %{files: [Slap.Files.File.t()], cursor: binary() | nil}} | {:error, error()}

@@ -273,6 +273,33 @@ defmodule Slap.FilesTest do
     assert write_error in [:unavailable, :timeout]
   end
 
+  test "listing continues after deleting the files from the previous page" do
+    for id <- ~w(item/a item/b item/c item/d other) do
+      assert {:ok, _} = Files.put({"listed", id}, "body")
+    end
+
+    assert {:ok, %{files: first, cursor: cursor}} =
+             Files.list("listed", prefix: "item/", limit: 2, cursor: nil)
+
+    assert Enum.map(first, & &1.ref) == [{"listed", "item/a"}, {"listed", "item/b"}]
+    assert is_binary(cursor)
+    for file <- first, do: assert(:ok = Files.delete(file.ref))
+    assert {:ok, _} = Files.put({"listed", "item/a"}, "new")
+
+    assert {:ok, %{files: last, cursor: nil}} =
+             Files.list("listed", prefix: "item/", limit: 2, cursor: cursor)
+
+    assert Enum.map(last, & &1.ref) == [{"listed", "item/c"}, {"listed", "item/d"}]
+    for file <- last, do: assert(:ok = Files.delete(file.ref))
+
+    assert {:ok, %{files: [%{ref: {"listed", "item/a"}}], cursor: nil}} =
+             Files.list("listed", prefix: "item/", cursor: nil)
+
+    assert {:ok,
+            %{files: [%{ref: {"listed", "item/a"}}, %{ref: {"listed", "other"}}], cursor: nil}} =
+             Files.list("listed", cursor: nil)
+  end
+
   describe "inline bodies" do
     test "a small file is stored in its record: put, get, read, list, delete" do
       ref = {"doc", "a"}
@@ -402,6 +429,10 @@ defmodule Slap.FilesTest do
     end
 
     test "invalid arguments" do
+      for bound <- [prefix: nil, gte: nil, lt: nil, cursor: 42] do
+        assert {:error, {:bad_request, :invalid_range}} = Files.list("doc", [bound])
+      end
+
       assert {:error, {:bad_request, :invalid_ref}} = Files.put({"", "a"}, "x")
       assert {:error, {:bad_request, :invalid_partition}} = Files.list(42)
       assert {:error, {:bad_request, :invalid_partition}} = Files.list("")
