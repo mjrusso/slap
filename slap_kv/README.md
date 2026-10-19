@@ -133,6 +133,11 @@ application from starting. With `probe: :background`, the cluster starts
 without shards and retries the probe. Operations return
 `{:error, :unavailable}` until the shards open.
 
+Before boot work that needs every shard, call `Slap.KV.Cluster.await_ready(30_000)`
+and handle `{:error, :timeout}`. `Slap.KV.Cluster.status()` reports current
+readiness and the latest failures without accessing storage; see
+[cluster readiness](https://hexdocs.pm/slap_cluster/Slap.Cluster.html#status/2).
+
 ## Flush interval
 
 A durable write waits for SlateDB to flush its write-ahead log (WAL) to
