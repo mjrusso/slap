@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `Slap.Yjs.Presence` accepts `state: fn client_id -> map end` to derive initial
+  state from its generated id. The function runs once per presence process;
+  rejoining preserves the id and latest state.
 - Local awareness publishers must subscribe and claim their client ids through
   `Slap.Yjs.DocServer.claim/4` before submitting messages with their pid as the
   origin. This prevents another local connection from overwriting a claimed

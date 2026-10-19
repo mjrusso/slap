@@ -251,15 +251,15 @@ With the supervision tree and `MyApp.DocServer` from the example above:
   Slap.Yjs.Presence.start_link(
     module: MyApp.DocServer,
     doc_id: {"my-service", "doc-1"},
-    state: %{"user" => %{"name" => "Assistant"}, "busy" => false}
+    state: fn client_id ->
+      %{"user" => %{"name" => "Assistant"}, "colorIndex" => rem(client_id, 8), "busy" => false}
+    end
   )
-
-:ok =
-  Slap.Yjs.Presence.update(presence, %{
-    "user" => %{"name" => "Assistant"},
-    "busy" => true
-  })
 ```
+
+The initial state can be a map or a function of the generated client id. The
+function runs once in each presence process, before its first publication.
+Rejoining keeps the same id and the latest state, including any updates.
 
 `update/2` replaces the participant's whole state. Browser clients receive
 this state through the same Yjs awareness protocol used for other participants.

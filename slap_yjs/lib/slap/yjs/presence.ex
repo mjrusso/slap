@@ -35,9 +35,12 @@ defmodule Slap.Yjs.Presence do
     * `:module` (required) - the document server module, as for
       `Slap.Yjs.Docs.join/3`.
     * `:doc_id` (required) - the document.
-    * `:state` (required) - a JSON map with string keys. Nested maps also
-      require string keys; strings must be valid UTF-8, and integers must
-      fit in signed 64 bits. Invalid states raise `ArgumentError` in the caller.
+    * `:state` (required) - a JSON map with string keys, or `fn client_id -> map end`.
+      The function runs in the presence process once during startup; rejoining
+      preserves the id and latest state. Nested maps require string keys;
+      strings must be valid UTF-8, and integers must fit in signed 64 bits.
+      Invalid maps raise `ArgumentError` in the caller. Invalid function results
+      fail startup.
     * `:renew_every` - milliseconds between renewals (default 15,000).
     * `:docs`, `:timeout` - as for `Slap.Yjs.Docs.join/3`.
     * `:name` - the process name.
@@ -55,13 +58,14 @@ defmodule Slap.Yjs.Presence do
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     unless Keyword.keyword?(opts), do: raise(ArgumentError, "options must be a keyword list")
+
     Keyword.validate!(opts, [:module, :doc_id, :state, :docs, :timeout, :renew_every, :name])
 
     for key <- [:module, :doc_id, :state],
         not Keyword.has_key?(opts, key),
         do: raise(ArgumentError, "#{inspect(key)} is required")
 
-    validate_state!(opts[:state])
+    unless is_function(opts[:state], 1), do: validate_state!(opts[:state])
 
     renew_every = Keyword.get(opts, :renew_every, 15_000)
 
@@ -113,7 +117,8 @@ defmodule Slap.Yjs.Presence do
   @impl true
   def init(opts) do
     {:ok, awareness} = Yex.Awareness.new(Yex.Doc.new())
-    :ok = Yex.Awareness.set_local_state(awareness, Keyword.fetch!(opts, :state))
+    state = initial_state(Keyword.fetch!(opts, :state), Yex.Awareness.client_id(awareness))
+    :ok = Yex.Awareness.set_local_state(awareness, state)
 
     p = %{
       module: Keyword.fetch!(opts, :module),
@@ -134,6 +139,14 @@ defmodule Slap.Yjs.Presence do
         {:stop, reason}
     end
   end
+
+  defp initial_state(fun, client_id) when is_function(fun, 1) do
+    state = fun.(client_id)
+    validate_state!(state)
+    state
+  end
+
+  defp initial_state(state, _client_id), do: state
 
   @impl true
   def handle_call({:update, state}, _from, p) do

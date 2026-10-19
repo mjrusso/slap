@@ -29,6 +29,31 @@ defmodule Slap.Yjs.PresenceTest do
     entries
   end
 
+  defp presence_supervisor do
+    start_supervised!(%{
+      id: :presence_supervisor,
+      start: {Supervisor, :start_link, [[], [strategy: :one_for_one]]},
+      restart: :temporary,
+      type: :supervisor
+    })
+  end
+
+  defp disconnect(presence, doc_id, id) do
+    server = Yjs.Docs.whereis(Server, doc_id)
+    shard = StreamsCluster.shard_for(Yjs.Store.base(doc_id))
+    :sys.suspend(presence)
+
+    try do
+      :ok = Host.stop_shard(StreamsCluster, shard)
+      Process.exit(server, :kill)
+      assert [{^id, _clock, nil}] = next_entries(doc_id)
+    after
+      :sys.resume(presence)
+    end
+
+    shard
+  end
+
   test "publishes and updates its state" do
     doc_id = doc_id()
     {:ok, _server} = Yjs.Docs.join(Server, doc_id)
@@ -92,6 +117,16 @@ defmodule Slap.Yjs.PresenceTest do
     assert renewed == clock + 1
   end
 
+  test "rejects an incompatible state returned by the initial state function" do
+    supervisor = presence_supervisor()
+
+    assert {:error, {{%ArgumentError{}, _stacktrace}, _child}} =
+             Supervisor.start_child(
+               supervisor,
+               {Presence, module: Server, doc_id: doc_id(), state: fn _id -> %{busy: true} end}
+             )
+  end
+
   test "renews its state with a later clock" do
     doc_id = doc_id()
     {:ok, _server} = Yjs.Docs.join(Server, doc_id)
@@ -133,13 +168,7 @@ defmodule Slap.Yjs.PresenceTest do
   test "document deletion leaves the presence supervisor running" do
     doc_id = doc_id()
 
-    supervisor =
-      start_supervised!(%{
-        id: :presence_supervisor,
-        start: {Supervisor, :start_link, [[], [strategy: :one_for_one]]},
-        restart: :temporary,
-        type: :supervisor
-      })
+    supervisor = presence_supervisor()
 
     {:ok, presence} =
       Supervisor.start_child(
@@ -184,30 +213,29 @@ defmodule Slap.Yjs.PresenceTest do
     observer = start_supervised!({Server, doc_id: doc_id})
     :ok = Yjs.DocServer.subscribe(observer, self(), 5_000)
 
-    presence =
-      start_supervised!(
-        {Presence,
-         module: Server, doc_id: doc_id, state: @state, renew_every: 1_000, timeout: 200}
-      )
+    test = self()
 
-    [{id, _clock, @state}] = next_entries(doc_id)
-    server = Yjs.Docs.whereis(Server, doc_id)
-    shard = StreamsCluster.shard_for(Yjs.Store.base(doc_id))
-    :sys.suspend(presence)
-
-    try do
-      :ok = Host.stop_shard(StreamsCluster, shard)
-      Process.exit(server, :kill)
-      assert [{^id, _clock, nil}] = next_entries(doc_id)
-    after
-      :sys.resume(presence)
+    state = fn id ->
+      send(test, {:initialized, self(), id})
+      Map.put(@state, "colorIndex", rem(id, 8))
     end
 
-    busy = Map.put(@state, "busy", true)
+    presence =
+      start_supervised!(
+        {Presence, module: Server, doc_id: doc_id, state: state, renew_every: 1_000, timeout: 200}
+      )
+
+    [{id, _clock, initial}] = next_entries(doc_id)
+    assert initial == Map.put(@state, "colorIndex", rem(id, 8))
+    assert_received {:initialized, ^presence, ^id}
+    shard = disconnect(presence, doc_id, id)
+
+    busy = Map.put(initial, "busy", true)
     assert :ok = Presence.update(presence, busy)
 
     assert {:ok, _} = Host.start_shard(StreamsCluster, shard)
     assert [{^id, _clock, ^busy}] = next_entries(doc_id)
     assert Process.alive?(presence)
+    refute_received {:initialized, _presence, _id}
   end
 end
