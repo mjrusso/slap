@@ -5,8 +5,8 @@ defmodule Slap.Streams.Store.Read do
   alias Slap.Streams.Offset
   alias Slap.Streams.Store.{Codec, Keys, Meta, Producer, Tail}
 
-  @spec get_meta(SlateDB.t(), binary()) :: {:ok, Meta.t() | nil} | {:error, term()}
-  def get_meta(db, path), do: get(db, Keys.meta(path))
+  @spec get_meta(SlateDB.t(), binary(), keyword()) :: {:ok, Meta.t() | nil} | {:error, term()}
+  def get_meta(db, path, opts \\ []), do: get(db, Keys.meta(path), opts)
 
   @doc """
   `{path, %Meta{}}` of every stream whose path starts with `prefix`, in path
@@ -110,8 +110,8 @@ defmodule Slap.Streams.Store.Read do
     {{offset, bytes}, byte_size(bytes)}
   end
 
-  defp get(db, key) do
-    case SlateDB.get(db, key) do
+  defp get(db, key, opts \\ []) do
+    case SlateDB.get(db, key, opts) do
       {:ok, nil} -> {:ok, nil}
       {:ok, value} -> {:ok, Codec.decode(value)}
       {:error, _} = error -> error

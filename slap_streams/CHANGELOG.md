@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Fix in-flight reads returning `:gone` (410) for streams that were removed
+  completely. These reads now return `:not_found` (404), including after row
+  cleanup or recreation at the same path. Soft-deleted streams still return
+  `:gone`; long-polls woken by deletion still return `:deleted`.
+
 ## 0.3.0
 
 - `Slap.Streams.Cluster` now sets SlateDB's `flush_interval` to 10 ms instead

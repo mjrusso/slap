@@ -18,7 +18,8 @@ defmodule Slap.Streams.ModelTest do
   alias Slap.SlateDB
   alias Slap.Streams
   alias Slap.Streams.Jobs.{Deleter, Expiry, Repair}
-  alias Slap.Streams.Test.{FakeClock, Model}
+  alias Slap.Streams.{Reader, StreamServer}
+  alias Slap.Streams.Test.{FakeClock, Model, ReadView}
 
   @commands 40
   @start_ms 1_700_000_000_000
@@ -42,6 +43,49 @@ defmodule Slap.Streams.ModelTest do
                Streams.read(path, 0, wait: timeout, timeout: timeout)
 
       assert :ok = Streams.delete(path)
+    end
+  end
+
+  test "a read view predating deletion agrees with the model before and after cleanup" do
+    start_supervised!({Registry, keys: :unique, name: __MODULE__.ReadViews})
+
+    for fork? <- [false, true] do
+      path = "/deleted-read-#{System.unique_integer([:positive])}"
+      create = {:create, path, body: "old"}
+      {expected, model} = Model.run(Model.new(FakeClock.now_ms(), @max_fork_copy_bytes), create)
+      assert execute(create) == expected
+      ctx = ctx_for(path)
+      {:ok, view} = StreamServer.call(ctx, path, :read_info, 5_000)
+      held = %{ctx | registry: __MODULE__.ReadViews}
+      start_supervised!(Supervisor.child_spec({ReadView, {held, path, view}}, id: path))
+
+      model =
+        if fork? do
+          command = {:create, path <> "-fork", forked_from: path}
+          {expected, model} = Model.run(model, command)
+          assert execute(command) == expected
+          model
+        else
+          model
+        end
+
+      {expected, model} = Model.run(model, {:delete, path})
+      deleter = GenServer.whereis(Slap.Cluster.via(Streams.Cluster, ctx.n, :deleter))
+      :ok = :sys.suspend(deleter)
+
+      try do
+        assert execute({:delete, path}) == expected
+        {expected, _} = Model.run(model, {:read, path, 0, 1_024})
+        assert Reader.read(held, path, 0, 1_024, 5_000) == expected
+      after
+        :sys.resume(deleter)
+      end
+
+      :ok = Deleter.drain(ctx)
+      {expected, _} = Model.run(model, {:read, path, 0, 1_024})
+      assert Reader.read(held, path, 0, 1_024, 5_000) == expected
+      delete_all(model)
+      stop_supervised!(path)
     end
   end
 

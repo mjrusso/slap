@@ -4,7 +4,7 @@ defmodule Slap.Streams.Reader do
   require Logger
 
   alias Slap.SlateDB
-  alias Slap.Streams.Store.{Keys, Read}
+  alias Slap.Streams.Store.{Keys, Meta, Read}
   alias Slap.Streams.{Stream, StreamServer}
 
   @doc """
@@ -14,11 +14,11 @@ defmodule Slap.Streams.Reader do
   """
   def read(ctx, path, offset, max_bytes, timeout, request \\ :read_info) do
     with {:ok, view} <- StreamServer.call(ctx, path, request, timeout) do
-      read_view(ctx, view, offset, max_bytes)
+      read_view(ctx, path, view, offset, max_bytes)
     end
   end
 
-  defp read_view(ctx, %Stream.View{status: :active} = view, offset, max_bytes) do
+  defp read_view(ctx, path, %Stream.View{status: :active} = view, offset, max_bytes) do
     %Stream.View{next_offset: tail} = view
 
     offset =
@@ -38,17 +38,18 @@ defmodule Slap.Streams.Reader do
         {:error, :trimmed}
 
       true ->
-        read_msgs(ctx, view, offset, tail, max_bytes)
+        read_msgs(ctx, path, view, offset, tail, max_bytes)
     end
   end
 
-  defp read_view(_ctx, %Stream.View{status: status}, _offset, _max), do: Stream.error(status)
+  defp read_view(_ctx, _path, %Stream.View{status: status}, _offset, _max),
+    do: Stream.error(status)
 
-  defp read_msgs(ctx, view, offset, tail, max_bytes) do
+  defp read_msgs(ctx, path, view, offset, tail, max_bytes) do
     %Stream.View{sid: sid, meta: meta} = view
 
     with {:ok, {messages, next}} <- safe_read(ctx, sid, offset, tail, max_bytes),
-         :ok <- check_rows_kept(ctx, sid, offset) do
+         :ok <- check_rows_kept(ctx, path, sid, offset) do
       up_to_date = next == tail
 
       {:ok,
@@ -85,25 +86,17 @@ defmodule Slap.Streams.Reader do
       {:error, :unavailable}
   end
 
-  # The view this read used may predate a trim or delete that became durable
-  # since, and whose rows the deleter may have removed during the scan:
-  # answer as the next read will (410) rather than with messages missing.
-  # The markers are read durable only (one that is not durable yet may be
-  # lost, and the deleter waits for it); the tail row is removed last, once
-  # a deleted stream's rows are gone.
-  defp check_rows_kept(ctx, sid, offset) do
-    remote = [durability: :remote]
-
-    with {:ok, marker} <- SlateDB.get(ctx.db, Keys.delete_pending(sid), remote),
-         {:ok, trim} <- SlateDB.get(ctx.db, Keys.trim(sid), remote),
-         {:ok, tail} <- SlateDB.get(ctx.db, Keys.tail(sid)) do
-      cond do
-        marker != nil or tail == nil -> {:error, :gone}
-        match?(<<t::64>> when offset < t, trim) -> {:error, :trimmed}
-        true -> :ok
-      end
+  # Cleanup waits for durable deletion metadata and trim markers. Read metadata
+  # last: deletion may remove the trim marker after the scan has lost rows to a trim.
+  defp check_rows_kept(ctx, path, sid, offset) do
+    with {:ok, trim} <- SlateDB.get(ctx.db, Keys.trim(sid), durability: :remote),
+         {:ok, %Meta{sid: ^sid, soft_deleted: false}} <-
+           Read.get_meta(ctx.db, path, durability: :remote) do
+      if match?(<<t::64>> when offset < t, trim), do: {:error, :trimmed}, else: :ok
     else
-      {:error, _} -> {:error, :unavailable}
+      {:ok, %Meta{sid: ^sid, soft_deleted: true}} -> {:error, :gone}
+      {:ok, _meta} -> {:error, :not_found}
+      {:error, _reason} -> {:error, :unavailable}
     end
   end
 

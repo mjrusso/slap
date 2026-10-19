@@ -342,11 +342,13 @@ cannot.
   A fork inherits the source's TTL or Expires-At unless it sets its own.
 - **Deletes.** Deleting a stream that has forks soft-deletes it. From then on,
   requests to it get 410, and creating a stream at its path or a fork from it
-  gets 409. Its
-  data is deleted at once, because each fork has its own copy. A stream
+  gets 409. Its data is deleted at once, because each fork has its own copy. A stream
   without forks is removed completely. If it was a fork, it is removed from
   its source's list of forks, and a soft-deleted source with no forks left is
-  removed too.
+  removed too. An in-flight read that detects deletion returns 410 only when
+  durable metadata marks its stream id as soft-deleted. Otherwise it returns
+  404, even if that path now names another stream. A long-poll woken by deletion
+  returns `:deleted` through the in-process API.
 - **Expiry.** Every 10 s (`:expiry_interval`), a background job finds the
   streams whose deadline has passed and has each one's stream server check
   it; a stream that has expired is deleted. Every request to a stream also
