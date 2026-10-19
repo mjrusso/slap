@@ -184,10 +184,17 @@ states. Filter entries independently and bind each connection to its first
 accepted id. Claim only when establishing that binding; submitting later
 states checks ownership without reclaiming the id.
 
-The following function returns `{message, client_id}`. `message` is `nil` if
-it accepts no entries, and `client_id` is `nil` until it claims an id. This
-example expects states to identify their user as
-`%{"user" => %{"id" => user_id}}`.
+This example expects states to identify their user as
+`%{"user" => %{"id" => user_id}}`. It returns `{message, client_id}`;
+`message` is `nil` when no entries are accepted.
+
+Start a new subscription with `client_id` set to `nil`. Save the returned
+value after each call and pass it to the next call:
+
+- `nil`: no claim has been confirmed; a later state can try again.
+- An integer: the connection's claimed awareness id.
+- `:not_owner`: the connection lost ownership. Further entries are discarded
+  without trying to claim again.
 
 ```elixir
 def authorize_awareness(server, message, user_id, client_id) do
@@ -207,6 +214,7 @@ end
 defp accept({id, _clock, %{"user" => %{"id" => user_id}}} = entry, nil, user_id, server) do
   case Slap.Yjs.DocServer.claim(server, id, user_id) do
     :ok -> {[entry], id}
+    {:error, :not_owner} -> {[], :not_owner}
     {:error, _reason} -> {[], nil}
   end
 end
@@ -218,16 +226,18 @@ defp accept({id, _clock, nil} = entry, id, _user_id, _server), do: {[entry], id}
 defp accept(_entry, client_id, _user_id, _server), do: {[], client_id}
 ```
 
-Forward a non-nil message with `MyApp.DocServer.process_message_v1(server,
-message, self())`. It checks current ownership immediately before application,
-filters unowned entries, and returns `{:error, :not_owner}` if none remain.
-A successful submission can still be a no-op under awareness clock rules.
-Handle ownership loss without trying to claim again on every message.
+Forward a non-nil `message` with
+`MyApp.DocServer.process_message_v1(server, message, self())`. The server
+checks ownership again before applying the entries. If it returns
+`{:error, :not_owner}`, set the connection's `client_id` to `:not_owner` too.
+The next call to the example function will then discard the entries.
+An accepted update can still be ignored under awareness clock rules.
 
-A replaced subscriber's claim retry fails with `{:error, :not_owner}` for the
-rest of its subscription. Unsubscribing ends that protection: resubscribing
-starts a new subscription, even for the same pid. Server restart clears all
-claims and revocations; clients must join and claim again.
+A takeover prevents the old subscriber from reclaiming that id for the rest
+of its subscription. Unsubscribing and subscribing again starts a new
+subscription, even for the same pid. A server restart clears all claims and
+requires clients to subscribe again. Reset `client_id` to `nil` only when
+starting a new subscription.
 
 ### Multi-node ownership limitation
 
