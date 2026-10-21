@@ -114,8 +114,9 @@ Slap.Cluster.notify_when_durable(ctx, seq, {:ack, ref})
 ```
 
 The child later receives `{:slap_cluster_durable, {:ack, ref}}`. A caller can
-route an operation to the owner of a key's shard. Here `MyApp.Streams.append/2`
-is an application function, and `path` and `body` are its arguments:
+route an operation to the owner of a key's shard. Here `MyApp.Streams.append/3`
+is an application function. The owner calls it with the shard context as an
+extra first argument, so it receives `(ctx, path, body)`:
 
 ```elixir
 shard = MyApp.Cluster.shard_for("some/key")
