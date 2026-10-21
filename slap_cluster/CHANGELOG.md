@@ -1,13 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
-- Add `status/2` and `await_ready/2`, also available on cluster modules.
-  Readiness includes remote owners and direct shard child startup and restarts.
-  Status reports the startup probe, shard lifecycle state, and retained
-  failures. Timeouts cover the whole query or wait; waits rediscover owners
-  after placement changes, including with `:infinity`. Neither function
-  accesses storage.
+- Adds `Slap.Cluster.status/2` to report the startup probe, shard lifecycle
+  state, and retained failures, and `Slap.Cluster.await_ready/2` to wait for
+  every shard to finish starting. Cluster modules expose `status/1` and
+  `await_ready/1`.
+- Readiness checks remote owners and direct shard children, including child
+  restarts. It reports lifecycle state without accessing storage; it does not
+  check current storage reachability or write durability.
+- Timeouts cover the whole query or wait. Waits rediscover owners after
+  placement changes, including when the timeout is `:infinity`.
 
 ## 0.3.0
 
