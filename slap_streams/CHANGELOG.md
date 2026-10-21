@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 - Fix in-flight reads returning `:gone` (410) for streams that were removed
   completely. These reads now return `:not_found` (404), including after row
