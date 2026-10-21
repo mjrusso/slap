@@ -1,18 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
-- `Slap.Yjs.Presence` accepts `state: fn client_id -> map end` to derive initial
-  state from its generated id. The function runs once per presence process;
-  rejoining preserves the id and latest state.
-- `Slap.Yjs.Presence` accepts an optional `:owner` pid to monitor. Owner exit
-  stops the presence, including normal exit and while retrying a join. Its
-  default `restart: :transient` child policy prevents a supervisor restart.
-- Local awareness publishers must subscribe and claim their client ids through
-  `Slap.Yjs.DocServer.claim/4` before submitting messages with their pid as the
-  origin. This prevents another local connection from overwriting a claimed
-  entry merely by submitting the same browser-chosen client id. Hosts still
-  authenticate principals and authorize state fields.
+- Breaking change: local awareness publishers must subscribe and claim their
+  client ids through `Slap.Yjs.DocServer.claim/4` before submitting messages
+  with their pid as the origin. This prevents another local connection from
+  overwriting a claimed entry merely by submitting the same browser-chosen
+  client id. Hosts still authenticate principals and authorize state fields.
 - Same-principal takeovers transfer cleanup ownership independently of awareness
   clocks. A reconnecting client can resend an equal-clock state without its old
   connection's later exit deleting its presence. Replaced subscribers cannot
@@ -24,6 +18,12 @@
   claims. The current `:pg` awareness relay does not coordinate claims across
   nodes. See the README's
   [multi-node ownership limitation](README.md#multi-node-ownership-limitation).
+- `Slap.Yjs.Presence` accepts `state: fn client_id -> map end` to derive initial
+  state from its generated id. The function runs once per presence process;
+  rejoining preserves the id and latest state.
+- `Slap.Yjs.Presence` accepts an optional `:owner` pid to monitor. Owner exit
+  stops the presence, including normal exit and while retrying a join. Its
+  default `restart: :transient` child policy prevents a supervisor restart.
 
 ## 0.3.0
 
