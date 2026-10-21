@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- Updates `slap_cluster`, `slap_streams`, `slap_snapshot_log`, `slap_yjs`,
+  `slap_kv`, and `slap_files` dependencies to 0.4.0.
+- Breaking change for Yjs users: local awareness publishers must subscribe
+  and claim their client ids before submitting awareness messages. See the
+  `slap_yjs` changelog for the ownership requirements and multi-node limitation.
+
 ## 0.3.0
 
 - Adds `slap_snapshot_log`, `slap_yjs`, and `slap_files` as dependencies.
