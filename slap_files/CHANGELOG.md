@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 - `Slap.Files.list/2` accepts `cursor: nil` to start at the beginning of the
   selected range. A returned `cursor: nil` marks the end of iteration.
