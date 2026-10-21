@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0
+
+- Updates `slap_streams` and `slap_cluster` dependencies to 0.4.0.
+
 ## 0.3.0
 
 - Uses `slap_streams` 0.3.0 and `slap_cluster` 0.3.0.
