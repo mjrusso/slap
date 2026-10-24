@@ -7,7 +7,6 @@ defmodule Slap.Streams.Store.Keys do
   @spec meta(binary()) :: binary()
   def meta(path) when is_binary(path), do: <<0x01, path::binary>>
 
-  @doc "The path in a meta key."
   @spec meta_path(binary()) :: binary()
   def meta_path(<<0x01, path::binary>>), do: path
 
@@ -18,11 +17,9 @@ defmodule Slap.Streams.Store.Keys do
   def producer(sid, producer_id) when is_binary(producer_id),
     do: <<0x03, sid::64, producer_id::binary>>
 
-  @doc "The prefix of every producer key of `sid`."
   @spec producer_prefix(non_neg_integer()) :: binary()
   def producer_prefix(sid), do: <<0x03, sid::64>>
 
-  @doc "The producer id in a producer key."
   @spec producer_id(binary()) :: binary()
   def producer_id(<<0x03, _sid::64, producer_id::binary>>), do: producer_id
 
@@ -44,11 +41,9 @@ defmodule Slap.Streams.Store.Keys do
   @spec decode_expiry(binary()) :: {non_neg_integer(), non_neg_integer()}
   def decode_expiry(<<0x05, deadline_ms::64, sid::64>>), do: {deadline_ms, sid}
 
-  @doc "The sid in a delete-pending, trim or repair key."
   @spec decode_sid(binary()) :: non_neg_integer()
-  def decode_sid(<<type, sid::64>>) when type in [0x06, 0x07, 0x08], do: sid
+  def decode_sid(<<type, sid::64>>) when type in [0x06, 0x07, 0x08, 0x0A, 0x0C], do: sid
 
-  @doc "The prefix of every key of `type` (a byte)."
   @spec type_prefix(0..255) :: binary()
   def type_prefix(type), do: <<type>>
 
@@ -63,4 +58,30 @@ defmodule Slap.Streams.Store.Keys do
 
   @spec repair(non_neg_integer()) :: binary()
   def repair(sid), do: <<0x08, sid::64>>
+  @spec reclaim(non_neg_integer()) :: binary()
+  def reclaim(sid), do: <<0x0A, sid::64>>
+
+  @spec witness(non_neg_integer()) :: binary()
+  def witness(sid), do: <<0x0C, sid::64>>
+
+  def registration(sid, target), do: <<0x0D, sid::64, target.shard::64, target.sid::64>>
+  def registration_prefix(sid), do: <<0x0D, sid::64>>
+  def pin(sid, start, target), do: <<0x0E, sid::64, start::64, target.shard::64, target.sid::64>>
+  def pin_prefix(sid), do: <<0x0E, sid::64>>
+  def pin_start(<<0x0E, _sid::64, start::64, _target_shard::64, _target_sid::64>>), do: start
+
+  @spec scope(binary()) :: :shared | :meta | {:stream, non_neg_integer()}
+  def scope(<<0x00, "next_sid">>), do: :shared
+  def scope(<<0x09, _group::binary>>), do: :shared
+  def scope(<<0x01, _path::binary>>), do: :meta
+  def scope(<<0x03, sid::64, _producer::binary>>), do: {:stream, sid}
+  def scope(<<0x04, sid::64, _offset::64, _part::16>>), do: {:stream, sid}
+  def scope(<<0x05, _deadline::64, sid::64>>), do: {:stream, sid}
+
+  def scope(<<type, sid::64>>) when type in [0x02, 0x06, 0x07, 0x08, 0x0A, 0x0C],
+    do: {:stream, sid}
+
+  def scope(<<0x0D, sid::64, _target_shard::64, _target_sid::64>>), do: {:stream, sid}
+  def scope(<<0x0E, sid::64, _start::64, _target_shard::64, _target_sid::64>>), do: {:stream, sid}
+  def scope(key), do: raise(ArgumentError, "unrecognized stream key: #{inspect(key)}")
 end

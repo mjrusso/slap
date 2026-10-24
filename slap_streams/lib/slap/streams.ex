@@ -1,9 +1,8 @@
 defmodule Slap.Streams do
   @moduledoc """
-  Durable Streams operations, in process (the HTTP layer and Yjs build on
-  these). Each stream lives on the shard `Slap.Streams.Cluster.shard_for(path)` and is
-  served by one process there. Writes are acknowledged only once
-  durable.
+  Durable Streams operations for in-process callers, including the HTTP layer
+  and Yjs. Each stream has one server process on the shard selected by its
+  placement key (see `placement_key/1`). Writes are acknowledged only once durable.
 
   Offsets are integers here (`Slap.Streams.Offset` converts to and from the wire
   format), and results are protocol outcomes, not HTTP responses.
@@ -37,7 +36,8 @@ defmodule Slap.Streams do
       `:invalid_producer`;
     * `:invalid_fork_source`, `:invalid_fork_offset`,
       `:invalid_fork_sub_offset`, `:fork_of_itself`,
-      `:fork_offset_beyond_source`, `:fork_offset_trimmed`;
+      `:fork_offset_beyond_source`, `:fork_offset_trimmed`,
+      `:max_fork_depth_exceeded`;
     * `:empty_body`, `:empty_array`, `:invalid_json`,
       `:ttl_and_expires_at`, `:new_epoch_must_start_at_zero`,
       `:trim_offset_beyond_tail`.
@@ -57,6 +57,7 @@ defmodule Slap.Streams do
           | :fork_of_itself
           | :fork_offset_beyond_source
           | :fork_offset_trimmed
+          | :max_fork_depth_exceeded
           | :invalid_body
           | :invalid_close
           | :invalid_closed
@@ -125,16 +126,29 @@ defmodule Slap.Streams do
 
   A fork (§4.2) also takes `:forked_from` (the source's path), and optionally
   `:fork_offset` (default: the source's tail) and `:fork_sub_offset`. The
-  source's data before the fork offset is copied into the fork.
+  fork reads the source's durable messages before the fork offset, its
+  inherited range, from the source's storage; creation does not copy them.
 
   Returns `{:ok, :created, info}` (201), `{:ok, :exists, info}` when a stream
   with the same configuration exists (200), or `{:error, :conflict}` when one
   with a different configuration does, or the path is soft-deleted (409).
 
   Fork errors: `:source_not_found` (404), `:source_gone` (409),
-  `:content_type_mismatch` (409), `:payload_too_large` (the copy would
-  exceed `:max_fork_copy_bytes`, 413). A fork whose copy was interrupted is
-  `:unavailable` (503) until the create is retried, which finishes it.
+  `:content_type_mismatch` (409), and
+  `{:bad_request, :max_fork_depth_exceeded}` (400, default depth limit 8).
+
+  Reads of the inherited range need the source's shard, and those of the
+  source's own sources, to be available. The source keeps the inherited range
+  until the fork and every fork made from it are removed; trimming the fork
+  does not shrink it. Use `:source_placement_key` to select the source's shard
+  and `:placement_key` for the target.
+
+  A fork that is still being created returns `:unavailable` for reads and
+  appends. After `{:error, :timeout}` or another error, the fork can stay
+  pending: call `create/2` again with the same options to finish it (it
+  returns `{:ok, :exists, info}` if the earlier call finished after
+  returning), or delete it to cancel. Repair cancels it after
+  `:creation_grace`.
   """
   @spec create(path(), keyword()) :: {:ok, :created | :exists, info()} | {:error, error()}
   def create(path, opts \\ []) do
@@ -149,15 +163,58 @@ defmodule Slap.Streams do
       :fork_sub_offset,
       :timeout,
       :placement_key,
-      :cluster
+      :cluster,
+      :source_placement_key
     ])
 
-    with :ok <- validate_create(opts) do
-      request(
-        path,
-        {:create, Map.new(Keyword.drop(opts, [:timeout, :placement_key, :cluster]))},
-        opts
-      )
+    validate_route_opts!(opts)
+    validate_source_placement!(opts)
+
+    with :ok <- validate_create(opts), :ok <- validate_path(path) do
+      req =
+        Map.new(Keyword.drop(opts, [:timeout, :placement_key, :source_placement_key, :cluster]))
+
+      if req[:forked_from],
+        do: Streams.Creation.run(path, req, :reference, opts),
+        else: request(path, {:create, req}, opts)
+    end
+  end
+
+  @doc """
+  Copies the source's messages before `:at` into a new stream with its own storage.
+
+  Options: `:at` (`:latest`, the default, or an integer offset), `:cluster`,
+  `:timeout`, `:source_placement_key` and target `:placement_key`. The copy
+  preserves offsets, trim, content type, closed state and expiry configuration.
+  Relative TTL starts when the copy becomes active; an absolute expiry that
+  passes before then cancels it. Producer and Stream-Seq state start empty.
+  Reference depth resets to zero.
+
+  Time and storage grow with the copied data. A completed copy does not
+  depend on its source. Until then, the target is hidden and the source keeps
+  the messages being copied.
+
+  The copy runs in the calling process and stops at `:timeout` (default
+  30 s), keeping the pages copied so far. Call `copy/3` again with the same
+  source path, `:source_placement_key` and `:at` until it returns
+  `{:ok, :created, info}`, or `{:ok, :exists, info}` if an earlier call
+  finished after returning. A larger `:timeout` needs fewer calls. Retries
+  copy the range the first call selected, even if the source changes or is
+  deleted. Delete the target to cancel the copy; repair cancels it once no
+  page has been copied for `:creation_grace`.
+  """
+  @spec copy(path(), path(), keyword()) :: {:ok, :created | :exists, info()} | {:error, error()}
+  def copy(source_path, target_path, opts \\ []) do
+    validate_options!(opts, [:at, :cluster, :timeout, :source_placement_key, :placement_key])
+    validate_route_opts!(opts)
+    validate_source_placement!(opts)
+    at = Keyword.get(opts, :at, :latest)
+
+    with :ok <- validate_path(source_path),
+         :ok <- validate_path(target_path),
+         :ok <- validate_offset(at, [:latest]) do
+      req = %{forked_from: source_path, fork_offset: if(at == :latest, do: nil, else: at)}
+      Streams.Creation.run(target_path, req, :copy, opts)
     end
   end
 
@@ -214,9 +271,10 @@ defmodule Slap.Streams do
   end
 
   @doc """
-  Trims the stream before `offset`: reads from earlier offsets get
-  `{:error, :trimmed}` (410), and a background job deletes the data. An
-  offset past the tail is a bad request.
+  Makes reads below `offset` return `{:error, :trimmed}` (410). A background
+  job deletes the messages below both `offset` and the inherited ranges of
+  this stream's forks and pending copies. Trimming a fork does not shrink its
+  inherited range on its source. An offset past the tail is a bad request.
   """
   @spec trim(path(), non_neg_integer(), keyword()) :: :ok | {:error, error()}
   def trim(path, offset, opts \\ []) do
@@ -225,14 +283,53 @@ defmodule Slap.Streams do
   end
 
   @doc false
-  # A request between stream servers (forks), routed like any other.
   def internal(path, request, opts \\ []), do: request(path, request, opts)
 
+  @doc false
+  def internal_identity(identity, request, timeout, cluster) do
+    identity_route(
+      identity,
+      cluster,
+      timeout,
+      {StreamServer, :call, [identity.path, request, timeout]}
+    )
+  end
+
+  @doc false
+  def read_identity(identity, view, offset, max_bytes, timeout, cluster) do
+    identity_route(
+      identity,
+      cluster,
+      timeout,
+      {Reader, :read_identity, [identity, view, offset, max_bytes, timeout]}
+    )
+  end
+
+  @doc false
+  def retained(capture, offset, until, max_bytes, timeout, cluster) do
+    identity_route(
+      capture.source,
+      cluster,
+      timeout,
+      {Reader, :retained, [capture, offset, until, max_bytes, timeout]}
+    )
+  end
+
+  defp identity_route(_identity, _cluster, 0, _mfa), do: {:error, :timeout}
+
+  defp identity_route(identity, cluster, timeout, mfa) do
+    case Slap.Cluster.call(cluster, identity.shard, mfa, timeout: timeout) do
+      {:ok, result} -> result
+      {:error, {:erpc, :timeout}} -> {:error, :timeout}
+      {:error, _} -> {:error, :unavailable}
+    end
+  end
+
   @doc """
-  The paths, in order, of the streams in `prefix`'s placement group
-  (`placement_key/1`) whose paths start with `prefix`: every stream whose
-  creation is durable and that is not deleted. A stream past its expiry is
-  listed until it is removed. Not part of the Durable Streams protocol.
+  Lists active streams in `prefix`'s placement group (`placement_key/1`) whose
+  paths start with `prefix`, in path order. Pending creations and deleted
+  streams are excluded. An expired stream stays listed until it is removed.
+  This operation is available only through the Elixir API.
   """
   @spec list(path(), keyword()) :: {:ok, [path()]} | {:error, error()}
   def list(prefix, opts \\ []) do
@@ -247,12 +344,13 @@ defmodule Slap.Streams do
   end
 
   @doc """
-  Seals the placement group `group` for good: from when this returns, a
-  create of a stream in the group (`placement_key/1` of its path is
-  `group`), or a fork into it, fails with `{:error, :sealed}` (409), and
-  every stream created in it before is durable, so `list/2` returns it.
-  The group's existing streams are not changed. Not part of the Durable
-  Streams protocol.
+  Permanently prevents new streams in the placement group `group`
+  (see `placement_key/1`). New streams, forks and copies return
+  `{:error, :sealed}` (409). A fork or copy that is still pending is removed
+  when it tries to become active, and that call returns `{:error, :sealed}`.
+  Existing streams are unchanged, and a retry of a creation that had already
+  completed returns `{:ok, :exists, info}`.
+  This operation is available only through the Elixir API.
   """
   @spec seal(binary(), keyword()) :: :ok | {:error, error()}
   def seal(group, opts \\ []) do
@@ -304,7 +402,7 @@ defmodule Slap.Streams do
   def read_internal(path, offset, opts \\ []), do: read_request(path, offset, opts, true)
 
   defp read_request(path, offset, opts, internal?) do
-    validate_options!(opts, @read_options ++ if(internal?, do: [:peek], else: []))
+    validate_options!(opts, @read_options)
     validate_read_opts!(opts)
     deadline = read_deadline(opts)
 
@@ -329,12 +427,9 @@ defmodule Slap.Streams do
     max_bytes = Keyword.get(opts, :max_bytes, @default_max_bytes)
     timeout = read_remaining(deadline, Keyword.get(opts, :timeout, @default_timeout))
 
-    request = if opts[:peek], do: :peek_info, else: :read_info
-
     if timeout == 0,
       do: {:error, :timeout},
-      else:
-        route(path, opts, timeout, {Reader, :read, [path, offset, max_bytes, timeout, request]})
+      else: route(path, opts, timeout, {Reader, :read, [path, offset, max_bytes, timeout]})
   end
 
   defp read_after_wait(path, initial, wait, opts, deadline) do
@@ -597,6 +692,15 @@ defmodule Slap.Streams do
       do: raise(ArgumentError, ":placement_key must be a binary")
   end
 
+  defp validate_source_placement!(opts) do
+    if Keyword.has_key?(opts, :source_placement_key) and
+         not is_binary(opts[:source_placement_key]),
+       do: raise(ArgumentError, ":source_placement_key must be a binary")
+  end
+
+  defp validate_path(path) when is_binary(path), do: :ok
+  defp validate_path(_path), do: {:error, {:bad_request, :invalid_path}}
+
   defp validate_read_opts!(opts) do
     for key <- [:wait, :max_bytes], Keyword.has_key?(opts, key) do
       value = opts[key]
@@ -605,9 +709,6 @@ defmodule Slap.Streams do
       unless is_integer(value) and value >= min,
         do: raise(ArgumentError, "#{inspect(key)} must be an integer at least #{min}")
     end
-
-    if Keyword.has_key?(opts, :peek) and not is_boolean(opts[:peek]),
-      do: raise(ArgumentError, ":peek must be boolean")
   end
 
   defp validate_create(opts) do

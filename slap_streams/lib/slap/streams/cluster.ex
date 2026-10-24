@@ -27,8 +27,10 @@ defmodule Slap.Streams.Cluster do
   Service settings go in `child_options:` at start. See
   `child_option_keys/0` for the accepted keys. Values are positive integers
   in milliseconds for timeouts and intervals, bytes for byte limits, and
-  entries for `:deleter_page`. `:max_fork_copy_bytes` and `:fork_copy_grace`
-  may also be zero.
+  entries for `:deleter_page`. `:max_fork_depth` limits fork depth: a fork of
+  a stream that is not a fork has depth 1, and a fork of that fork depth 2
+  (a fork that inherits no messages has depth 0). Both `:max_fork_depth` and
+  `:creation_grace` may be zero.
   """
 
   @default_settings %{flush_interval: "10ms"}
@@ -52,8 +54,8 @@ defmodule Slap.Streams.Cluster do
   def child_option_keys do
     [
       :idle_timeout,
-      :max_fork_copy_bytes,
-      :fork_copy_grace,
+      :max_fork_depth,
+      :creation_grace,
       :expiry_interval,
       :repair_interval,
       :deleter_interval,

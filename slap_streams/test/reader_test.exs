@@ -3,7 +3,7 @@ defmodule Slap.Streams.ReaderTest do
   use Slap.Streams.Test.ClusterCase, async: false
 
   alias Slap.SlateDB
-  alias Slap.Streams.Jobs.Deleter
+  alias Slap.Streams.Jobs.{Deleter, Repair}
   alias Slap.Streams.Reader
   alias Slap.Streams.Store.{Batch, Keys, Meta, Read}
   alias Slap.Streams.Stream
@@ -30,6 +30,9 @@ defmodule Slap.Streams.ReaderTest do
     assert {:ok, :created, _} = Streams.create("/fork", forked_from: "/source")
     {ctx, sid, read} = held_read("/source")
     assert :ok = Streams.delete("/fork")
+
+    for ctx <- contexts(), do: Repair.sweep(ctx)
+
     deleter = GenServer.whereis(Slap.Cluster.via(Streams.Cluster, ctx.n, :deleter))
     :ok = :sys.suspend(deleter)
 
@@ -63,7 +66,7 @@ defmodule Slap.Streams.ReaderTest do
     end
 
     :ok = Deleter.drain(ctx)
-    assert {:ok, nil} = Read.get_tail(ctx.db, sid)
+    assert {:ok, %Slap.Streams.Store.Tail{}} = Read.get_tail(ctx.db, sid)
     assert read.() == {:error, :gone}
   end
 
@@ -84,14 +87,14 @@ defmodule Slap.Streams.ReaderTest do
   test "classification ignores finalization that is not durable" do
     path = "/source"
     ctx = ctx_for(path)
-    meta = %Meta{sid: 1, forks: ["/fork"]}
+    meta = %Meta{sid: 1}
     view = %Stream.View{status: :active, meta: meta, sid: 1, next_offset: 0, trim: 0}
     held = %{ctx | registry: __MODULE__.Views}
     start_supervised!({ReadView, {held, path, view}})
 
-    assert {:ok, _} = SlateDB.write(ctx.db, Batch.soft_delete(path, meta, nil))
+    assert {:ok, _} = SlateDB.write(ctx.db, Batch.put_meta(path, %{meta | soft_deleted: true}))
     assert :ok = SlateDB.flush(ctx.db)
-    assert {:ok, _} = SlateDB.write(ctx.db, Batch.finalize(path, meta.sid))
+    assert {:ok, _} = SlateDB.write(ctx.db, Batch.logical_delete(path, meta.sid))
     assert {:ok, nil} = Read.get_meta(ctx.db, path)
     assert Reader.read(held, path, 0, 1_024, 5_000) == {:error, :gone}
   end

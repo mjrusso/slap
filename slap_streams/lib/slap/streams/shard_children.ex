@@ -5,7 +5,7 @@ defmodule Slap.Streams.ShardChildren do
 
   alias Slap.Streams
 
-  @nonnegative_options [:max_fork_copy_bytes, :fork_copy_grace]
+  @nonnegative_options [:max_fork_depth, :creation_grace]
 
   @doc false
   @impl true

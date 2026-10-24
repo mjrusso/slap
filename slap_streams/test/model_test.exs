@@ -1,37 +1,38 @@
 defmodule Slap.Streams.ModelTest do
-  # Random command sequences against Slap.Streams and Slap.Streams.Test.Model: every
-  # result, read and head must match. Includes forks, trims, TTLs and
-  # Expires-At on a fake clock, the expiry and repair sweeps, and killing
-  # stream servers, so state must reload from storage. After each sequence every stream is
-  # deleted, and at the end the deleter must have left no rows behind.
-  #
-  # Each command is chosen from the model's state and a seed; StreamData
-  # generates the seeds, so a failure shrinks to the shortest sequence of
-  # commands that fails. SLAP_STREAMS_PROP_RUNS (default 100) sets the number of
-  # sequences; `mix test --seed N` replays a run.
+  # SLAP_STREAMS_PROP_RUNS (default 100) sets the sequence count;
+  # `mix test --seed N` replays a run.
   use Slap.Streams.Test.ClusterCase, async: false
   use ExUnitProperties
+
+  import Slap.Streams.Test.CreationFixtures, only: [reserve: 3, register: 1, call: 2, meta: 1]
 
   @moduletag :capture_log
   @moduletag timeout: :infinity
 
   alias Slap.SlateDB
   alias Slap.Streams
-  alias Slap.Streams.Jobs.{Deleter, Expiry, Repair}
+  alias Slap.Streams.Jobs.{Deleter, Expiry}
   alias Slap.Streams.{Reader, StreamServer}
+  alias Slap.Streams.Store.{CopyCreation, CopyProgress, Meta}
   alias Slap.Streams.Test.{FakeClock, Model, ReadView}
 
   @commands 40
   @start_ms 1_700_000_000_000
-  @max_fork_copy_bytes 100
+  @max_fork_depth 3
   @moduletag child_options: [
                expiry_interval: :timer.hours(1),
-               max_fork_copy_bytes: @max_fork_copy_bytes
+               max_fork_depth: @max_fork_depth
              ]
 
   setup_all do
     FakeClock.install(@start_ms)
     on_exit(fn -> FakeClock.uninstall() end)
+  end
+
+  setup do
+    # Only generated repair commands release the model's deferred holds.
+    suspend_repair()
+    :ok
   end
 
   property "an idle stream stays at its tail after a bounded wait" do
@@ -52,7 +53,7 @@ defmodule Slap.Streams.ModelTest do
     for fork? <- [false, true] do
       path = "/deleted-read-#{System.unique_integer([:positive])}"
       create = {:create, path, body: "old"}
-      {expected, model} = Model.run(Model.new(FakeClock.now_ms(), @max_fork_copy_bytes), create)
+      {expected, model} = Model.run(Model.new(FakeClock.now_ms(), @max_fork_depth), create)
       assert execute(create) == expected
       ctx = ctx_for(path)
       {:ok, view} = StreamServer.call(ctx, path, :read_info, 5_000)
@@ -63,7 +64,7 @@ defmodule Slap.Streams.ModelTest do
         if fork? do
           command = {:create, path <> "-fork", forked_from: path}
           {expected, model} = Model.run(model, command)
-          assert execute(command) == expected
+          assert execute(command, model) == expected
           model
         else
           model
@@ -89,6 +90,197 @@ defmodule Slap.Streams.ModelTest do
     end
   end
 
+  test "inherited sub-offsets and copy retries preserve captured pagination" do
+    commands = [
+      {:create, "/a", [content_type: "application/json", body: "[1]", closed: true]},
+      {:create, "/b", [forked_from: "/a", fork_offset: 3, body: "[2]"]},
+      {:create, "/one", [forked_from: "/b", fork_offset: 0, fork_sub_offset: 1]},
+      {:create, "/two", [forked_from: "/b", fork_offset: 0, fork_sub_offset: 2]},
+      {:create, "/one",
+       [forked_from: "/b", content_type: "application/json", fork_offset: 0, fork_sub_offset: 1]},
+      {:create, "/one",
+       [forked_from: "/b", content_type: "application/json", fork_offset: 5, fork_sub_offset: 1]},
+      {:copy, "/b", "/copy", []},
+      {:append, "/b", "[3]", []},
+      {:repair},
+      {:copy, "/b", "/copy", []},
+      {:copy, "/b", "/copy", [at: 0]},
+      {:read, "/one", 0, 1},
+      {:read, "/two", 0, 1},
+      {:read, "/two", 3, 1},
+      {:read, "/copy", 0, 1},
+      {:read, "/copy", 3, 1},
+      {:delete, "/one"},
+      {:delete, "/two"},
+      {:delete, "/b"},
+      {:delete, "/a"},
+      {:repair},
+      {:copy, "/b", "/copy", []},
+      {:read, "/copy", 0, 1}
+    ]
+
+    check_commands(commands)
+  end
+
+  test "repair cancels a copy that stops making progress, not one that is still copying" do
+    check_commands([
+      {:create, "/source", [body: "a"]},
+      {:append, "/source", "b", []},
+      {:append, "/source", "c", []},
+      {:interrupt_copy, "/source", "/copying"},
+      {:interrupt_copy, "/source", "/stalled"},
+      {:advance, :timer.minutes(40)},
+      {:copy_page, "/copying"},
+      {:advance, :timer.minutes(40)},
+      {:repair},
+      {:head, "/copying"},
+      {:head, "/stalled"},
+      {:append, "/source", "d", []},
+      {:copy, "/source", "/copying", []},
+      {:read, "/copying", 0, 100},
+      {:repair}
+    ])
+  end
+
+  test "seals reject new derived streams before capture and preserve published retries" do
+    check_commands([
+      {:create, "/source", [body: "a"]},
+      {:create, "/g/.reference", [forked_from: "/source"]},
+      {:copy, "/source", "/g/.copy", []},
+      {:seal, "/g"},
+      {:create, "/g/.new-reference", [forked_from: "/source", fork_offset: 99]},
+      {:copy, "/source", "/g/.new-copy", [at: 99]},
+      {:head, "/g/.new-reference"},
+      {:head, "/g/.new-copy"},
+      {:create, "/g/.reference", [forked_from: "/source"]},
+      {:copy, "/source", "/g/.copy", []},
+      {:repair},
+      {:read, "/g/.reference", 0, 100},
+      {:read, "/g/.copy", 0, 100}
+    ])
+  end
+
+  test "published fork retries keep their selected source route" do
+    commands = [
+      {:create, "/source", [body: "original"]},
+      {:create, "/fork", [forked_from: "/source"]},
+      {:create, "/fork", [forked_from: "/source", source_placement_key: "another-route"]},
+      {:kill, "/fork"},
+      {:create, "/fork", [forked_from: "/source", source_placement_key: "/source"]},
+      {:read, "/fork", 0, 100}
+    ]
+
+    check_commands(commands)
+  end
+
+  test "inherited trims survive repair while reference and copy targets remain active" do
+    check_commands([
+      {:create, "/source", [body: "a"]},
+      {:append, "/source", "b", []},
+      {:append, "/source", "c", []},
+      {:trim, "/source", 5},
+      {:create, "/reference", [forked_from: "/source"]},
+      {:copy, "/source", "/copy", []},
+      {:repair},
+      {:append, "/reference", "own", []},
+      {:append, "/copy", "own", []},
+      {:repair},
+      {:read, "/reference", 5, 100},
+      {:read, "/copy", 5, 100},
+      {:delete, "/source"},
+      {:repair},
+      {:read, "/reference", 5, 100},
+      {:read, "/copy", 5, 100}
+    ])
+  end
+
+  test "cleanup remains pending across reads, retries and target path reuse" do
+    step = fn command, model ->
+      {expected, model} = Model.run(model, command)
+      assert execute(command, model) == expected
+      model
+    end
+
+    commands = [
+      {:create, "/a", [body: "original"]},
+      {:create, "/b", [forked_from: "/a"]},
+      {:copy, "/a", "/copy", []},
+      {:delete, "/b"},
+      {:create, "/b", [forked_from: "/a", body: "replacement"]},
+      {:delete, "/a"},
+      {:head, "/a"},
+      {:repair},
+      {:head, "/a"},
+      {:read, "/b", 0, 100},
+      {:delete, "/b"}
+    ]
+
+    model = Enum.reduce(commands, Model.new(FakeClock.now_ms(), @max_fork_depth), step)
+    assert {{:error, :gone}, _} = Model.run(model, {:head, "/a"})
+    assert execute({:head, "/a"}) == {:error, :gone}
+
+    model = step.({:repair}, model)
+    assert execute({:head, "/a"}) == {:error, :not_found}
+
+    model =
+      Enum.reduce(
+        [
+          {:create, "/a", [body: "new source"]},
+          {:copy, "/a", "/copy", []},
+          {:read, "/copy", 0, 100}
+        ],
+        model,
+        step
+      )
+
+    delete_all(model)
+  end
+
+  test "failed observations reserve their request and invalid target bodies release their holds" do
+    request = [forked_from: "/pending-source", fork_offset: 0, fork_sub_offset: 3]
+
+    commands = [
+      {:create, "/pending-source", []},
+      {:create, "/future-fork", [forked_from: "/pending-source", fork_offset: 9]},
+      {:head, "/future-fork"},
+      {:create, "/future-fork", [forked_from: "/pending-source", fork_offset: 0]},
+      {:copy, "/pending-source", "/future-copy", [at: 9]},
+      {:head, "/future-copy"},
+      {:create, "/pending-target", request},
+      {:head, "/pending-target"},
+      {:append, "/pending-target", "x", []},
+      {:copy, "/pending-source", "/pending-target", []},
+      {:create, "/pending-target", Keyword.put(request, :body, "different")},
+      {:append, "/pending-source", "hello", []},
+      {:copy, "/pending-source", "/future-copy", [at: 9]},
+      {:create, "/future-fork", [forked_from: "/pending-source", fork_offset: 9]},
+      {:read, "/future-copy", 0, 100},
+      {:read, "/future-fork", 0, 100},
+      {:create, "/pending-target", request},
+      {:read, "/pending-target", 0, 100},
+      {:create, "/pending-abandon", Keyword.put(request, :fork_sub_offset, 99)},
+      {:delete, "/pending-abandon"},
+      {:create, "/reused-source", [body: "a"]},
+      {:copy, "/reused-source", "/stale-copy", [at: 10]},
+      {:create, "/stale-fork", [forked_from: "/reused-source", fork_offset: 10]},
+      {:delete, "/reused-source"},
+      {:copy, "/reused-source", "/stale-copy", [at: 10]},
+      {:create, "/reused-source", [body: "replacement"]},
+      {:copy, "/reused-source", "/stale-copy", [at: 10]},
+      {:create, "/stale-fork", [forked_from: "/reused-source", fork_offset: 10]},
+      {:head, "/stale-copy"},
+      {:head, "/stale-fork"},
+      {:create, "/json-source", [content_type: "application/json"]},
+      {:create, "/invalid-body", [forked_from: "/json-source", body: "{bad"]},
+      {:delete, "/json-source"},
+      {:head, "/json-source"},
+      {:repair},
+      {:head, "/json-source"}
+    ]
+
+    check_commands(commands)
+  end
+
   property "Streams behaves like the model" do
     runs = String.to_integer(System.get_env("SLAP_STREAMS_PROP_RUNS", "100"))
     seeds = list_of(integer(0..0xFFFF_FFFF), min_length: 1, max_length: @commands)
@@ -96,7 +288,7 @@ defmodule Slap.Streams.ModelTest do
     check all(seeds <- seeds, max_runs: runs, initial_size: @commands) do
       prefix = "/run#{System.unique_integer([:positive])}"
       paths = for i <- 1..4, do: "#{prefix}/s#{i}"
-      start = Model.new(FakeClock.now_ms(), @max_fork_copy_bytes)
+      start = Model.new(FakeClock.now_ms(), @max_fork_depth)
 
       {model, _} =
         seeds
@@ -106,7 +298,7 @@ defmodule Slap.Streams.ModelTest do
           command = command(model, paths)
           history = [command | history]
           {expected, model} = Model.run(model, command)
-          actual = execute(command)
+          actual = execute(command, model)
 
           assert actual == expected, """
           command #{i}: #{inspect(command)}
@@ -124,7 +316,7 @@ defmodule Slap.Streams.ModelTest do
 
     # Every stream is deleted: once the deleters have run, nothing is left
     # but the stream id counter and the seals, which are kept for good.
-    for ctx <- shards() do
+    for ctx <- contexts() do
       Deleter.drain(ctx)
 
       left =
@@ -166,48 +358,97 @@ defmodule Slap.Streams.ModelTest do
       assert Streams.delete(path) in [:ok, {:error, :gone}, {:error, :not_found}]
     end
 
+    repair_all(fn -> retention_counts() == %{} end)
+
     for path <- Model.paths(model) do
       assert Streams.head(path) == {:error, :not_found}, "#{path} left behind"
     end
   end
 
-  defp shards do
-    for n <- Streams.Cluster.local_shards() do
-      {:ok, {:local, ctx}} = Streams.Cluster.lookup(n)
-      ctx
-    end
+  defp check_commands(commands) do
+    model =
+      Enum.reduce(commands, Model.new(FakeClock.now_ms(), @max_fork_depth), fn command, model ->
+        {expected, model} = Model.run(model, command)
+        assert execute(command, model) == expected
+        model
+      end)
+
+    delete_all(model)
   end
 
-  defp execute({:create, path, opts}), do: Streams.create(path, opts)
-  defp execute({:trim, path, offset}), do: Streams.trim(path, offset)
-  defp execute({:invalid, request, _reason}), do: execute(request)
+  defp execute(command, model \\ nil)
 
-  defp execute({:advance, ms}) do
+  defp execute({:repair}, model) do
+    expected =
+      Map.new(model.streams, fn {path, stream} -> {path, length(Map.get(stream, :forks, []))} end)
+
+    repair_all(fn -> retention_counts() == expected end)
+  end
+
+  defp execute(command, _model), do: execute_request(command)
+
+  defp repair_all(condition) do
+    resume_repair()
+
+    try do
+      repair_until(condition)
+    after
+      suspend_repair()
+    end
+
+    assert condition.()
+    :ok
+  end
+
+  defp execute_request({:copy, source, target, opts}), do: Streams.copy(source, target, opts)
+
+  defp execute_request({:interrupt_copy, source, target}) do
+    c = reserve(target, %{forked_from: source}, :copy)
+    cap = register(c)
+    {:ok, {:pending, _}} = call(c.target, {:capture, c.target, cap})
+    :ok
+  end
+
+  defp execute_request({:copy_page, target}) do
+    %Meta{
+      creation: %CopyCreation{
+        target: identity,
+        progress: %CopyProgress{capture: cap, cursor: cursor}
+      }
+    } = meta(target)
+
+    {:ok, {page, next}} = Streams.retained(cap, cursor, cap.offset, 1, 5_000, Streams.Cluster)
+    {:ok, {:pending, ^next}} = call(identity, {:copy_page, identity, cursor, page, next})
+    :ok
+  end
+
+  defp execute_request({:create, path, opts}), do: Streams.create(path, opts)
+  defp execute_request({:trim, path, offset}), do: Streams.trim(path, offset)
+  defp execute_request({:invalid, request, _reason}), do: execute_request(request)
+
+  defp execute_request({:advance, ms}) do
     FakeClock.advance(ms)
     :ok
   end
 
-  defp execute({:sweep}) do
-    for ctx <- shards(), do: Expiry.sweep(ctx)
+  defp execute_request({:sweep}) do
+    for ctx <- contexts(), do: Expiry.sweep(ctx)
     :ok
   end
 
-  defp execute({:repair}) do
-    for ctx <- shards(), do: Repair.sweep(ctx)
-    :ok
-  end
+  defp execute_request({:append, path, body, opts}), do: Streams.append(path, body, opts)
 
-  defp execute({:append, path, body, opts}), do: Streams.append(path, body, opts)
-  defp execute({:delete, path}), do: Streams.delete(path)
-  defp execute({:head, path}), do: Streams.head(path)
-  defp execute({:list, prefix}), do: Streams.list(prefix)
-  defp execute({:seal, group}), do: Streams.seal(group)
+  defp execute_request({:delete, path}), do: Streams.delete(path)
 
-  defp execute({:read, path, offset, max}) do
+  defp execute_request({:head, path}), do: Streams.head(path)
+  defp execute_request({:list, prefix}), do: Streams.list(prefix)
+  defp execute_request({:seal, group}), do: Streams.seal(group)
+
+  defp execute_request({:read, path, offset, max}) do
     Streams.read(path, offset, max_bytes: max, timeout: 30_000)
   end
 
-  defp execute({:kill, path}) do
+  defp execute_request({:kill, path}) do
     if pid = server(path) do
       ref = Process.monitor(pid)
       Process.exit(pid, :kill)
@@ -219,9 +460,9 @@ defmodule Slap.Streams.ModelTest do
 
   @types ["text/plain", "application/json", nil, "Text/Plain; charset=utf-8"]
 
-  # Out of 100: how often each kind of command is picked.
   @kinds [
     create: 10,
+    copy: 5,
     fork: 6,
     trim: 4,
     advance: 3,
@@ -244,7 +485,6 @@ defmodule Slap.Streams.ModelTest do
     path = choose(paths)
     stream = Model.get(model, path)
 
-    # Mostly create a missing stream, so the other commands have one to act on.
     kind =
       if stream == nil and chance(0.7),
         do: choose([:create, :fork, :fork]),
@@ -270,7 +510,6 @@ defmodule Slap.Streams.ModelTest do
      )}
   end
 
-  # Mostly from an active source to a free path.
   defp generate(:fork, %{model: model} = ctx) do
     {source, path} = fork_paths(ctx)
     src = Model.get(model, source)
@@ -287,6 +526,11 @@ defmodule Slap.Streams.ModelTest do
        closed: chance(0.05),
        body: if(chance(0.3), do: body(ct))
      )}
+  end
+
+  defp generate(:copy, %{model: model, path: path, paths: paths}) do
+    source = Enum.random(paths)
+    {:copy, source, path, at: if(chance(0.5), do: :latest, else: fork_offset(model, source))}
   end
 
   defp generate(:trim, %{model: model, path: path}), do: {:trim, path, fork_offset(model, path)}
@@ -325,10 +569,8 @@ defmodule Slap.Streams.ModelTest do
   defp generate(:head, %{path: path}), do: {:head, path}
   defp generate(:kill, %{path: path}), do: {:kill, path}
 
-  # A path's own group: creating it there fails for the rest of the run.
   defp generate(:seal, %{path: path}), do: {:seal, path}
 
-  # The path itself, or a shorter prefix in another placement group.
   defp generate(:list, %{path: path}),
     do: {:list, if(chance(0.7), do: path, else: binary_part(path, 0, byte_size(path) - 1))}
 
@@ -345,10 +587,8 @@ defmodule Slap.Streams.ModelTest do
     {source, if(free != [] and chance(0.8), do: choose(free), else: path)}
   end
 
-  # The options that are set.
   defp present(opts), do: Enum.reject(opts, fn {_, v} -> v in [nil, false] end)
 
-  # A message boundary, sometimes past the tail.
   defp fork_offset(model, path) do
     offset = choose(Model.boundaries(model, path))
     if chance(0.05), do: offset + 1000, else: offset

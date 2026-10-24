@@ -4,9 +4,9 @@
     forbidden: [
       # Databases belong to slap_cluster's placement (Slap.Cluster.ShardDb).
       {["Slap.Streams", "Slap.Streams.*"], ["Slap.SlateDB.open", "Slap.SlateDB.close"]},
-      # On a shard's owner, a stream's stream server writes the stream; the
-      # shard state reserves stream ids, the deleter removes deleted and
-      # trimmed rows, and Group seals groups and creates their streams.
+      # Stream servers write stream data and authorize retention and deletion.
+      # ShardState reserves ids; Deleter applies durable deletion bounds.
+      # Group owns seals and transactional creation.
       {["Slap.Streams", "Slap.Streams.*"],
        [
          "Slap.SlateDB.write",
@@ -25,6 +25,9 @@
       # A stream is created in a group by its stream server.
       {["Slap.Streams", "Slap.Streams.*"], ["Slap.Streams.Group.create_write"],
        except: ["Slap.Streams.StreamServer"]},
+      # Source retention decisions cannot depend on target creation or the protocol.
+      {"Slap.Streams.Retention", ["Slap.Streams.Creation.*", "Slap.Streams.Protocol.*"]},
+      {"Slap.Streams.Protocol", ["Slap.Streams.Creation.*"]},
       # The HTTP layer goes through Slap.Streams, never to storage.
       {"Slap.Streams.HTTP.*",
        [

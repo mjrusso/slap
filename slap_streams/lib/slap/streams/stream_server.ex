@@ -10,9 +10,21 @@ defmodule Slap.Streams.StreamServer do
   alias Slap.Cluster
   alias Slap.SlateDB
   alias Slap.Streams
-  alias Slap.Streams.{Clock, Fork, Group, Protocol, ShardChildren, ShardLoad, ShardState, Stream}
+
+  alias Slap.Streams.{
+    Clock,
+    Group,
+    Protocol,
+    Retention,
+    ShardChildren,
+    ShardLoad,
+    ShardState,
+    Stream
+  }
+
+  alias Slap.Streams.Creation.Target
   alias Slap.Streams.Jobs.Repair
-  alias Slap.Streams.Store.{Batch, Meta, Read, Tail}
+  alias Slap.Streams.Store.{Identity, Meta, Read, Tail}
 
   @default_idle_timeout :timer.minutes(5)
 
@@ -98,7 +110,6 @@ defmodule Slap.Streams.StreamServer do
          :ok <- await_loaded_durable(ctx) do
       idle = Keyword.get(ctx.child_options, :idle_timeout, @default_idle_timeout)
       Process.send_after(self(), :idle_check, idle)
-      check_forks(ctx, stream)
 
       {:ok,
        %__MODULE__{
@@ -114,12 +125,8 @@ defmodule Slap.Streams.StreamServer do
     end
   end
 
-  # The load read the latest writes, durable or not: a write of the previous
-  # server of this stream may not be durable yet (it crashed, or stopped
-  # after a write failed). Its state becomes the durable view, so wait until
-  # every write made so far is durable. If one never becomes durable (the
-  # shard was fenced or its store failed), the load fails, and so does the
-  # request (503), rather than serve data that may be lost.
+  # Loading includes writes left by the previous server. They must become
+  # durable before this state can serve reads.
   defp await_loaded_durable(ctx) do
     seq = SlateDB.last_write_seq(ctx.db)
 
@@ -141,16 +148,18 @@ defmodule Slap.Streams.StreamServer do
       {:ok, nil} ->
         {:ok, Stream.absent(path)}
 
-      {:ok, %Meta{soft_deleted: true} = meta} ->
-        {:ok, Stream.gone(path, meta)}
-
       {:ok, %Meta{sid: sid} = meta} ->
         with {:ok, %Tail{} = tail} <- Read.get_tail(ctx.db, sid),
              {:ok, trim} <- Read.get_trim(ctx.db, sid) do
           {:ok,
            %Stream{
              path: path,
-             status: if(meta.copying, do: :copying, else: :active),
+             status:
+               cond do
+                 meta.soft_deleted -> :gone
+                 Meta.pending?(meta) -> :pending
+                 true -> :active
+               end,
              meta: meta,
              sid: sid,
              tail: tail.next_offset,
@@ -169,11 +178,12 @@ defmodule Slap.Streams.StreamServer do
   @impl true
   def handle_call(request, from, state) do
     now = Clock.now_ms()
-    state = %{state | last_active: now, request: request_info(request)}
+    policy = lifecycle(if is_tuple(request), do: elem(request, 0), else: request)
+    state = if policy.activity, do: %{state | last_active: now}, else: state
+    state = %{state | request: request_info(request)}
 
-    # A failed write here is a write failure like any other (rule 7).
-    with {:ok, state} <- expire(state, request, now),
-         {:ok, state} <- touch(state, request, now) do
+    with {:ok, state} <- expire(state, policy.expire, now),
+         {:ok, state} <- touch(state, policy.touch, now) do
       case handle(request, from, state) do
         {:reply, reply, state} -> reply_after_expiry(reply, from, state)
         other -> other
@@ -183,17 +193,45 @@ defmodule Slap.Streams.StreamServer do
     end
   end
 
-  # An expired stream is removed when next accessed (and by
-  # Slap.Streams.Jobs.Expiry). The view drops it at once, but no reply based
-  # on that view leaves until the removal is durable; list reads durable
-  # metadata and may still see the stream before then.
-  # Asking a fork what it was forked from (a check by its source) is not an
-  # access: it must not remove the stream, which would unregister it.
-  defp expire(state, :fork_of, _now), do: {:ok, state}
+  defp lifecycle(operation)
+       when operation in [
+              :read_info,
+              :wait,
+              :cancel_wait,
+              :create,
+              :append,
+              :delete,
+              :trim,
+              :reservation,
+              :reserve
+            ],
+       do: %{activity: true, expire: true, touch: true}
 
+  defp lifecycle(operation)
+       when operation in [
+              :head,
+              :source_identity,
+              :register,
+              :capture,
+              :activate,
+              :copy_page,
+              :reconcile_creation
+            ],
+       do: %{activity: true, expire: true, touch: false}
+
+  defp lifecycle(:expiry_check), do: %{activity: false, expire: true, touch: false}
+
+  defp lifecycle(operation)
+       when operation in [:repair_check, :terminal, :unregister, :compact_registration],
+       do: %{activity: false, expire: false, touch: false}
+
+  defp expire(state, false, _now), do: {:ok, state}
+
+  # Expiry changes the read view before its write is durable. Every reply
+  # using that view must wait for expiry_seq.
   defp expire(%{stream: %Stream{status: :active} = stream} = state, _request, now) do
     if Stream.expired?(stream, now) do
-      with {:ok, state} <- commit(state, Protocol.remove(stream, nil), nil),
+      with {:ok, state} <- commit(state, Retention.remove(stream, nil), nil),
            do:
              {:ok,
               %{state | durable: Stream.view(state.stream), expiry_seq: state.last_write_seq}}
@@ -204,18 +242,7 @@ defmodule Slap.Streams.StreamServer do
 
   defp expire(state, _request, _now), do: {:ok, state}
 
-  # Reads, waits and writes reset a sliding TTL; HEAD and internal requests
-  # do not (PROTOCOL.md §5.1).
-  defp touch(state, request, _now)
-       when request in [:head, :peek_info, :fork_of] or
-              (is_tuple(request) and
-                 elem(request, 0) in [
-                   :expiry_check,
-                   :repair_check,
-                   :fork_source,
-                   :unregister_fork
-                 ]),
-       do: {:ok, state}
+  defp touch(state, false, _now), do: {:ok, state}
 
   defp touch(state, _request, now) do
     case Protocol.touch(state.stream, now) do
@@ -227,7 +254,7 @@ defmodule Slap.Streams.StreamServer do
   # -- Requests -------------------------------------------------------------
 
   # Reads, head and waits use the durable view and are answered at once.
-  defp handle(info, _from, state) when info in [:read_info, :peek_info],
+  defp handle(:read_info, _from, state),
     do: {:reply, {:ok, state.durable}, state}
 
   defp handle(:head, _from, state), do: {:reply, Protocol.head(state.durable), state}
@@ -263,16 +290,7 @@ defmodule Slap.Streams.StreamServer do
       :create ->
         create(req, from, state)
 
-      :fork ->
-        fork_create(req, from, state, nil)
-
-      :resume_fork ->
-        fork_create(req, from, state, state.stream.sid)
-
       {:reply, reply} ->
-        # A soft-deleted stream stays while it has forks: check that they
-        # are all still there.
-        check_forks(state.ctx, state.stream)
         reply_in_order(reply, from, state)
     end
   end
@@ -298,32 +316,82 @@ defmodule Slap.Streams.StreamServer do
   defp handle({:trim, offset}, from, state),
     do: decide(Protocol.trim(state.stream, offset), from, state)
 
-  defp handle({:fork_source, fork, req}, from, state),
-    do: decide(Fork.register(state.stream, state.durable, state.ctx, fork, req), from, state)
+  defp handle(:source_identity, _from, %{durable: %{status: :active} = view} = state),
+    do: {:reply, {:ok, Identity.new(state.ctx, state.stream.path, view.sid)}, state}
 
-  defp handle({:unregister_fork, fork}, from, state),
-    do: decide(Fork.unregister(state.stream, fork), from, state)
+  defp handle(:source_identity, _from, %{durable: %{status: status}} = state) do
+    error =
+      case status do
+        :absent -> :source_not_found
+        :gone -> :source_gone
+        _ -> :unavailable
+      end
 
-  # On a fork: the stream it was forked from, while it exists.
-  defp handle(:fork_of, _from, %{stream: %Stream{status: :absent}} = state),
-    do: {:reply, {:ok, nil}, state}
+    {:reply, {:error, error}, state}
+  end
 
-  defp handle(:fork_of, _from, %{stream: %Stream{meta: meta}} = state),
-    do: {:reply, {:ok, meta.fork_of && meta.fork_of.path}, state}
+  defp handle({:reservation, kind, req}, from, state),
+    do: decide(Target.reservation(state.stream, kind, req), from, state)
+
+  defp handle({:reserve, kind, req, source}, from, state) do
+    case Target.reservation(state.stream, kind, req) do
+      {:reply, :needs_source} ->
+        case allocate_sid(state.ctx) do
+          {:ok, sid} ->
+            decide(
+              Target.reserve(state.ctx, state.stream, kind, req, source, sid, Clock.now_ms()),
+              from,
+              state
+            )
+
+          {:error, reason} ->
+            reply_in_order({:error, reason}, from, state)
+        end
+
+      decision ->
+        decide(decision, from, state)
+    end
+  end
+
+  defp handle({:register, c, resolved}, from, state),
+    do:
+      decide(Retention.register(state.stream, state.durable, state.ctx, c, resolved), from, state)
+
+  defp handle({:capture, target, cap}, from, state),
+    do: decide(Target.capture(state.stream, target, cap, Clock.now_ms()), from, state)
+
+  defp handle({:copy_page, target, cursor, page, next}, from, state),
+    do:
+      decide(
+        Target.page(state.stream, target, cursor, page, next, Clock.now_ms()),
+        from,
+        state
+      )
+
+  defp handle({:activate, target}, from, state),
+    do: decide(Target.activate(state.stream, target, nil, Clock.now_ms()), from, state)
+
+  defp handle({:activate, target, cap}, from, state),
+    do: decide(Target.activate(state.stream, target, cap, Clock.now_ms()), from, state)
+
+  defp handle({:reconcile_creation, target, failure}, from, state),
+    do: decide(Target.reconcile(state.stream, target, failure), from, state)
+
+  defp handle({:unregister, source, target}, from, state),
+    do: decide(Retention.unregister(state.ctx, state.stream, source, target), from, state)
+
+  defp handle({:compact_registration, source, target}, from, state),
+    do:
+      decide(Retention.compact_registration(state.ctx, state.stream, source, target), from, state)
+
+  defp handle({:terminal, target}, from, state),
+    do: decide(Retention.terminal(state.stream, target), from, state)
 
   defp handle({:expiry_check, sid, at}, from, state),
     do: decide(Protocol.expiry_check(state.stream, sid, at), from, state)
 
   defp handle({:repair_check, sid}, from, state),
-    do: decide(Fork.repair_check(state.ctx, state.stream, sid, Clock.now_ms()), from, state)
-
-  # A soft-deleted stream stays while it has forks. A fork that was deleted
-  # but could not unregister itself (its source was unreachable) would keep
-  # it forever: have the repair job check them.
-  defp check_forks(ctx, %Stream{status: :gone, meta: %Meta{forks: [_ | _] = forks}} = stream),
-    do: Repair.check_forks(ctx, stream.path, forks)
-
-  defp check_forks(_ctx, _stream), do: :ok
+    do: decide(Retention.repair_check(state.ctx, state.stream, sid, Clock.now_ms()), from, state)
 
   defp create(req, from, state) do
     with {:ok, messages} <- Protocol.create_messages(req),
@@ -341,92 +409,6 @@ defmodule Slap.Streams.StreamServer do
     end
   end
 
-  # -- Forks ----------------------------------------------------------------
-
-  # `sid` is set when resuming an interrupted copy.
-  defp fork_create(req, from, state, sid) do
-    case Fork.source(state.ctx, state.stream.path, req, sid != nil) do
-      {:ok, src} -> start_copy(req, from, state, sid, src)
-      {:error, {:abandon, reason}} -> abandon_fork(reason, from, state)
-      {:error, reason} -> reply_in_order({:error, reason}, from, state)
-    end
-  end
-
-  # A new fork that fails from here on is unregistered again.
-  defp start_copy(req, from, state, sid, src) do
-    with {:ok, body} <- Protocol.split(src.content_type, req[:body] || "", true),
-         {:ok, sid} <- if(sid, do: {:ok, sid}, else: allocate_sid(state.ctx)) do
-      fork_copy(req, from, state, sid, src, body)
-    else
-      {:error, reason} ->
-        if sid == nil, do: Fork.unregister_from(state.ctx, req[:forked_from], state.stream.path)
-        reply_in_order({:error, reason}, from, state)
-    end
-  end
-
-  defp fork_copy(req, from, state, sid, src, body) do
-    now = Clock.now_ms()
-    {copying, start} = Fork.start(state.stream.path, req, src, sid, now)
-
-    with {:ok, state} <- copy_write(state, start, copying),
-         {:ok, state} <- copy(state, req[:forked_from], Fork.copy_from(src), src.offset) do
-      decide(Fork.finish(copying, req, src, body, now), from, state)
-    else
-      {:error, error, state} ->
-        write_failed(error, from, state)
-
-      {:sealed, state} ->
-        Fork.unregister_from(state.ctx, req[:forked_from], state.stream.path)
-        reply_in_order({:error, :sealed}, from, state)
-
-      {:unreadable, :gone, state} ->
-        abandon_fork(:source_gone, from, state)
-
-      # The source could not be read: left as :copying; a retried create
-      # resumes.
-      {:unreadable, _reason, state} ->
-        reply_in_order({:error, :unavailable}, from, state)
-    end
-  end
-
-  # Copies the source's messages that start in `from..until - 1`, at the
-  # same offsets.
-  defp copy(state, source, from, until) do
-    case Fork.read_page(state.ctx, source, from, until) do
-      {:ok, page, next} ->
-        with {:ok, state} <- copy_page(state, page), do: copy(state, source, next, until)
-
-      :done ->
-        {:ok, state}
-
-      {:error, reason} ->
-        {:unreadable, reason, state}
-    end
-  end
-
-  defp copy_page(state, []), do: {:ok, state}
-
-  defp copy_page(%{stream: copying} = state, page),
-    do: copy_write(state, Batch.messages(copying.sid, page), copying)
-
-  # A write of a fork's copy, before the write that finishes it. It goes in
-  # flight like any other (load, ordering of replies, durable view) but
-  # answers no request: the fork is acknowledged by `Fork.finish/5`'s write,
-  # which becomes durable after it.
-  defp copy_write(state, ops, %Stream{status: :copying} = copying),
-    do: commit(state, {:write, ops, nil, copying, []}, nil)
-
-  # The source was deleted before the copy finished (its rows go with it):
-  # the fork cannot be completed. Remove the partial copy and answer as for
-  # a new fork of a deleted source, so a retry does not wait forever.
-  defp abandon_fork(reason, from, %{stream: stream} = state) do
-    Logger.warning(
-      "fork #{inspect(stream.path)}: source #{inspect(stream.meta.fork_of.path)} was deleted"
-    )
-
-    decide(Fork.drop(stream, {:error, reason}), from, state)
-  end
-
   # -- Writes and replies ---------------------------------------------------
 
   defp decide({:reply, reply}, from, state), do: reply_in_order(reply, from, state)
@@ -434,10 +416,15 @@ defmodule Slap.Streams.StreamServer do
   defp decide({:write, _, _, _, _} = write, from, state) do
     case commit(state, write, from) do
       {:ok, state} -> {:noreply, state}
-      {:sealed, state} -> reply_in_order({:error, :sealed}, from, state)
+      {:sealed, state} -> sealed(from, state)
       {:error, error, state} -> write_failed(error, from, state)
     end
   end
+
+  defp sealed(from, %{stream: %Stream{status: :pending} = s} = state),
+    do: decide(Retention.remove(s, {:error, :sealed}), from, state)
+
+  defp sealed(from, state), do: reply_in_order({:error, :sealed}, from, state)
 
   # Even an error or duplicate reply may depend on preceding live writes;
   # it cannot overtake them before they are durable.
@@ -455,9 +442,8 @@ defmodule Slap.Streams.StreamServer do
 
   defp reply_after_expiry(reply, from, state), do: reply_in_order(reply, from, state)
 
-  # Writes `ops` without waiting, and queues `reply` to `from` (if any) for
-  # when they are durable. The live stream becomes `stream`, and the
-  # durable view becomes it once the write is durable.
+  # Replies and effects must wait for durability: effects can initiate
+  # retention cleanup.
   defp commit(state, {:write, ops, reply, %Stream{} = stream, effects}, from) do
     case write(state, ops, stream) do
       {:ok, seq} ->
@@ -471,10 +457,9 @@ defmodule Slap.Streams.StreamServer do
           reply: reply,
           view: Stream.view(stream),
           bytes: bytes,
-          request: if(from, do: state.request)
+          request: if(from, do: state.request),
+          effects: effects
         }
-
-        Enum.each(effects, &run_effect(&1, state))
 
         {:ok,
          %{
@@ -493,9 +478,16 @@ defmodule Slap.Streams.StreamServer do
     end
   end
 
-  # A write that creates the stream checks that its group is not sealed.
   defp write(%{stream: %Stream{status: :absent}} = state, ops, %Stream{status: status} = stream)
-       when status != :absent,
+       when status in [:pending, :active],
+       do: Group.create_write(state.ctx.db, Streams.placement_key(stream.path), ops)
+
+  # A seal can arrive after reservation, so activation must check it again.
+  defp write(
+         %{stream: %Stream{status: :pending}} = state,
+         ops,
+         %Stream{status: :active} = stream
+       ),
        do: Group.create_write(state.ctx.db, Streams.placement_key(stream.path), ops)
 
   defp write(state, ops, _stream), do: SlateDB.write(state.ctx.db, ops)
@@ -503,8 +495,8 @@ defmodule Slap.Streams.StreamServer do
   defp run_effect(:kick_deleter, %{ctx: ctx}),
     do: GenServer.cast(Cluster.via(ctx.cluster, ctx.n, :deleter), :kick)
 
-  defp run_effect({:unregister_from, source}, state),
-    do: Fork.unregister_from(state.ctx, source, state.stream.path)
+  defp run_effect({:repair_source, source, target}, %{ctx: ctx}),
+    do: Repair.notify(ctx.cluster, source, target)
 
   # The live stream may no longer match storage. Fail everything in flight
   # and stop; the next request reloads from storage.
@@ -545,11 +537,9 @@ defmodule Slap.Streams.StreamServer do
     fail_all(state)
   end
 
-  # A sliding TTL's saved deadline moves only every tenth of the TTL: save
-  # the latest access when the server stops (idle, or its shard is moving;
-  # the database is still open, and closing it flushes), so a reloaded
-  # stream does not expire early. Best effort: a failure costs at most a
-  # tenth of the TTL.
+  # Save access before shutdown to preserve sliding-TTL resets across reloads.
+  # The shard database stays open through termination and flushes on close.
+  # A failed save can lose at most a tenth of the TTL.
   defp save_access(state) do
     with [_ | _] = ops <- Protocol.save_access(state.stream),
          {:error, error} <- SlateDB.write(state.ctx.db, ops) do
@@ -557,8 +547,6 @@ defmodule Slap.Streams.StreamServer do
     end
   end
 
-  # Replies to every in-flight request and tells every waiter that the
-  # stream is unavailable (the shard is stopping, or a write failed).
   defp fail_all(state) do
     for %{from: from} <- :queue.to_list(state.inflight),
         from != nil,
@@ -571,8 +559,6 @@ defmodule Slap.Streams.StreamServer do
     %{state | inflight: :queue.new(), inflight_bytes: 0, waiters: %{}}
   end
 
-  # Replies to every entry whose write is durable, in order, and advances
-  # the durable view with them.
   defp drain(state, durable) do
     case :queue.peek(state.inflight) do
       {:value, %{seq: seq} = entry} when seq <= durable ->
@@ -600,8 +586,6 @@ defmodule Slap.Streams.StreamServer do
     set_waiters(state, Map.new(waiting, fn {ref, w, nil} -> {ref, w} end))
   end
 
-  # A write is durable: the durable view advances to it, its bytes are no
-  # longer in flight, and an append's latency is reported.
   defp written(state, entry) do
     ShardLoad.add(state.load, -entry.bytes, -1, 0)
 
@@ -616,6 +600,8 @@ defmodule Slap.Streams.StreamServer do
       _ ->
         :ok
     end
+
+    Enum.each(entry.effects, &run_effect(&1, state))
 
     expiry_seq =
       case state.expiry_seq do
@@ -636,7 +622,6 @@ defmodule Slap.Streams.StreamServer do
     %{state | waiters: waiters}
   end
 
-  # What a request is, for telemetry.
   defp request_info({:append, req}),
     do: {:append, System.monotonic_time(), byte_size(req[:body] || "")}
 

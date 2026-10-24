@@ -1,130 +1,224 @@
 defmodule Slap.Streams.Jobs.Repair do
-  @concurrency 16
-
   @moduledoc false
 
   use Slap.Streams.ShardProcess, name: :repair
   require Logger
 
-  alias Slap.SlateDB
-  alias Slap.Streams.{Fork, StreamServer}
-  alias Slap.Streams.Store.Keys
+  alias Slap.{Cluster, SlateDB}
+  alias Slap.Streams
+  alias Slap.Streams.{Clock, Retention, StreamServer}
+  alias Slap.Streams.Store.{Keys, Meta, Read}
 
+  @concurrency 8
+  @queue_limit 64
   @default_interval 60_000
-  @batch 1_000
   @timeout 30_000
 
-  @doc "Sweeps now and returns the number of entries checked (for tests)."
-  def sweep(ctx), do: GenServer.call(name(ctx), :sweep, :infinity)
+  @doc "Waits for a scan started after this request and its checks; returns the source count."
+  def sweep(ctx, timeout \\ :infinity), do: GenServer.call(name(ctx), :sweep, timeout)
 
-  @doc """
-  Checks `forks`, the forks of the soft-deleted stream at `path`, soon,
-  unless they are being checked already.
-  """
-  @spec check_forks(Slap.Cluster.Shard.t(), binary(), [binary()]) :: :ok
-  def check_forks(ctx, path, forks), do: GenServer.cast(name(ctx), {:check_forks, path, forks})
+  @doc false
+  def notify(cluster, source, target) do
+    case Cluster.lookup(cluster, source.shard) do
+      {:ok, {:local, _ctx}} -> kick(cluster, source, target)
+      {:ok, {:remote, node}} -> :erpc.cast(node, __MODULE__, :kick, [cluster, source, target])
+      {:error, :unassigned} -> :ok
+    end
+  end
+
+  @doc false
+  def kick(cluster, source, target),
+    do:
+      GenServer.cast(
+        Cluster.via(cluster, source.shard, :repair),
+        {:check, {:registration, source, target}}
+      )
+
+  @doc false
+  def target_status(ctx, target) do
+    with {:ok, meta} <- Read.get_meta(ctx.db, target.path, durability: :remote) do
+      case Retention.protection(meta, target) do
+        :unprotected -> StreamServer.call(ctx, target.path, {:terminal, target}, @timeout)
+        status -> {:ok, status}
+      end
+    end
+  end
 
   @impl true
   def init(ctx) do
     interval = Keyword.get(ctx.child_options, :repair_interval, @default_interval)
     Process.send_after(self(), :tick, interval)
-    # `queue` holds the requested fork checks not started yet, as
-    # `{path, fork}`; `running`, the started ones by task ref; and `busy`,
-    # how many of each path's are queued or running.
-    {:ok, %{ctx: ctx, interval: interval, queue: :queue.new(), running: %{}, busy: %{}}}
+
+    {:ok,
+     %{
+       ctx: ctx,
+       interval: interval,
+       sweep: nil,
+       waiting: [],
+       queue: :queue.new(),
+       checks: %{}
+     }}
   end
 
   @impl true
-  def handle_call(:sweep, _from, state), do: {:reply, run(state.ctx, 0, 0), state}
+  def handle_call(:sweep, from, %{sweep: nil} = state),
+    do: {:noreply, start_sweep(state, [from])}
+
+  def handle_call(:sweep, from, state),
+    do: {:noreply, %{state | waiting: [from | state.waiting]}}
 
   @impl true
-  def handle_cast({:check_forks, path, _forks}, %{busy: busy} = state)
-      when is_map_key(busy, path),
-      do: {:noreply, state}
+  def handle_cast({:check, work}, state) do
+    # The durable index recovers dropped notifications.
+    if Map.has_key?(state.checks, work) or :queue.len(state.queue) >= @queue_limit do
+      {:noreply, state}
+    else
+      state = %{
+        state
+        | queue: :queue.in(work, state.queue),
+          checks: Map.put(state.checks, work, nil)
+      }
 
-  def handle_cast({:check_forks, _path, []}, state), do: {:noreply, state}
-
-  def handle_cast({:check_forks, path, forks}, state) do
-    queue = Enum.reduce(forks, state.queue, &:queue.in({path, &1}, &2))
-    busy = Map.put(state.busy, path, length(forks))
-    {:noreply, start_checks(%{state | queue: queue, busy: busy})}
+      {:noreply, dispatch(state)}
+    end
   end
 
   @impl true
   def handle_info(:tick, state) do
-    run(state.ctx, 0, 0)
     Process.send_after(self(), :tick, state.interval)
+    state = if state.sweep == nil, do: start_sweep(state, []), else: state
     {:noreply, state}
   end
 
-  # A fork check finished.
-  def handle_info({ref, _result}, %{running: running} = state) when is_map_key(running, ref) do
+  def handle_info({ref, count}, %{sweep: {ref, callers}} = state) do
     Process.demonitor(ref, [:flush])
-    {path, running} = Map.pop!(running, ref)
-
-    busy =
-      case Map.fetch!(state.busy, path) do
-        1 -> Map.delete(state.busy, path)
-        n -> Map.put(state.busy, path, n - 1)
-      end
-
-    {:noreply, start_checks(%{state | running: running, busy: busy})}
+    Enum.each(callers, &GenServer.reply(&1, count))
+    {:noreply, next_sweep(%{state | sweep: nil})}
   end
 
-  defp start_checks(%{running: running} = state) when map_size(running) >= @concurrency,
-    do: state
+  def handle_info({ref, _result}, state) when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    checks = Map.reject(state.checks, fn {_work, running} -> running == ref end)
+    {:noreply, dispatch(%{state | checks: checks})}
+  end
 
-  defp start_checks(state) do
+  def handle_info({:DOWN, _ref, :process, _pid, :normal}, state), do: {:noreply, state}
+
+  defp start_sweep(state, callers) do
+    ctx = state.ctx
+    task = Task.async(fn -> scan(ctx) end)
+    %{state | sweep: {task.ref, callers}, waiting: []}
+  end
+
+  defp next_sweep(%{waiting: []} = state), do: state
+  defp next_sweep(state), do: start_sweep(state, state.waiting)
+
+  defp dispatch(state) do
+    running = Enum.count(state.checks, fn {_work, ref} -> ref != nil end)
+    dispatch(state, @concurrency - running)
+  end
+
+  defp dispatch(state, 0), do: state
+
+  defp dispatch(state, slots) do
     case :queue.out(state.queue) do
-      {{:value, {path, fork}}, queue} ->
-        %Task{ref: ref} = Task.async(Fork, :check, [state.ctx, path, fork])
-        start_checks(%{state | queue: queue, running: Map.put(state.running, ref, path)})
+      {{:value, work}, queue} ->
+        ctx = state.ctx
+        task = Task.async(fn -> check(ctx, work) end)
+        state = %{state | queue: queue, checks: Map.put(state.checks, work, task.ref)}
+        dispatch(state, slots - 1)
 
       {:empty, _} ->
         state
     end
   end
 
-  # A copying fork cannot be finished here: its initial body existed only
-  # in the create request. After the grace period it is dropped and
-  # unregistered from its source. A soft-deleted stream stays indexed until
-  # its last fork is gone, so the sweep pages through entries by sid.
-  defp run(ctx, from_sid, checked) do
-    entries =
-      ctx.db
-      |> SlateDB.scan(gte: Keys.repair(from_sid), lt: Keys.type_prefix(0x09))
-      |> Enum.take(@batch)
-
-    entries
-    |> concurrently(fn {key, path} ->
-      case StreamServer.call(ctx, path, {:repair_check, Keys.decode_sid(key)}, @timeout) do
-        :ok ->
-          []
-
-        {:ok, {:forks, forks}} ->
-          Enum.map(forks, &{path, &1})
-
-        other ->
-          Logger.warning("repair check of #{inspect(path)} failed: #{inspect(other)}")
-          []
-      end
+  defp scan(ctx) do
+    # Separate worker budgets keep stalled notification checks from blocking a pass.
+    ctx.db
+    |> SlateDB.scan(prefix: Keys.type_prefix(0x08), durability: :remote)
+    |> Stream.flat_map(fn {key, path} ->
+      Stream.concat([:source_entry], source_work(ctx, path, Keys.decode_sid(key)))
     end)
-    |> Enum.concat()
-    |> concurrently(fn {path, fork} -> Fork.check(ctx, path, fork) end)
+    |> Task.async_stream(
+      fn
+        :source_entry ->
+          1
 
-    checked = checked + length(entries)
+        work ->
+          check(ctx, work)
+          0
+      end,
+      max_concurrency: @concurrency,
+      ordered: false,
+      timeout: :infinity
+    )
+    |> Enum.reduce(0, fn {:ok, count}, total -> total + count end)
+  rescue
+    error in SlateDB.Error ->
+      Logger.warning("repair: #{Exception.message(error)}")
+      0
+  end
 
-    case List.last(entries) do
-      {key, _path} when length(entries) == @batch -> run(ctx, Keys.decode_sid(key) + 1, checked)
-      _ -> checked
+  defp source_work(ctx, path, sid) do
+    case Read.get_meta(ctx.db, path, durability: :remote) do
+      {:ok, %Meta{sid: ^sid} = meta} ->
+        if (meta.registration_count == 0 and not Meta.pending?(meta)) or
+             Retention.repair_due?(meta, ctx.child_options, Clock.now_ms()) do
+          [{:source, path, sid}]
+        else
+          registration_work(ctx, sid)
+        end
+
+      {:ok, _absent_or_replaced} ->
+        [{:source, path, sid}]
+
+      {:error, _} ->
+        []
     end
   end
 
-  # The checks are independent (of different streams, or forks), and each
-  # is bounded by its calls' timeouts.
-  defp concurrently(entries, fun) do
-    entries
-    |> Task.async_stream(fun, max_concurrency: @concurrency, ordered: false, timeout: :infinity)
-    |> Enum.map(fn {:ok, result} -> result end)
+  defp registration_work(ctx, sid) do
+    ctx.db
+    |> Read.registrations(sid, durability: :remote)
+    |> Stream.map(fn cap -> {:registration, cap.source, cap.target} end)
+  end
+
+  defp check(ctx, {:source, path, sid}),
+    do: StreamServer.call(ctx, path, {:repair_check, sid}, @timeout)
+
+  defp check(ctx, {:registration, source, target}) do
+    with true <- source.shard == ctx.n,
+         {:ok, %Meta{sid: sid}} when sid == source.sid <-
+           Read.get_meta(ctx.db, source.path, durability: :remote),
+         {:ok, registration} when registration != nil <-
+           Read.get_registration(ctx.db, sid, target, durability: :remote) do
+      check_registration(ctx, registration)
+    end
+  end
+
+  defp check_registration(ctx, cap) do
+    case Cluster.call(ctx.cluster, cap.target.shard, {__MODULE__, :target_status, [cap.target]},
+           timeout: @timeout
+         ) do
+      {:ok, {:ok, :terminal}} ->
+        Streams.internal_identity(
+          cap.source,
+          {:unregister, cap.source, cap.target},
+          @timeout,
+          ctx.cluster
+        )
+
+      {:ok, {:ok, :referenced}} when cap.prefix != nil ->
+        Streams.internal_identity(
+          cap.source,
+          {:compact_registration, cap.source, cap.target},
+          @timeout,
+          ctx.cluster
+        )
+
+      _protected_or_unknown ->
+        :ok
+    end
   end
 end

@@ -10,7 +10,10 @@ defmodule Slap.Streams.StreamServerTest do
   alias Slap.Cluster.Config
   alias Slap.SlateDB
   alias Slap.Streams
+  alias Slap.Streams.Creation.Target
+  alias Slap.Streams.Jobs.Repair
   alias Slap.Streams.Offset
+  alias Slap.Streams.Store.Read
   alias Slap.Streams.Test.OtherCluster
   alias Slap.Streams.Wait
 
@@ -31,7 +34,7 @@ defmodule Slap.Streams.StreamServerTest do
   test "invalid control options raise at the caller" do
     assert_raise ArgumentError, ~r/:timeout/, fn -> Streams.head("/x", timeout: -1) end
     assert_raise ArgumentError, ~r/:max_bytes/, fn -> Streams.read("/x", 0, max_bytes: 0) end
-    assert_raise ArgumentError, ~r/:peek/, fn -> Streams.read("/x", 0, peek: true) end
+    assert_raise ArgumentError, ~r/:unknown/, fn -> Streams.read("/x", 0, unknown: true) end
     assert_raise ArgumentError, ~r/:cluster/, fn -> Streams.create("/x", cluster: 1) end
 
     assert_raise ArgumentError, ~r/:placement_key/, fn ->
@@ -80,8 +83,8 @@ defmodule Slap.Streams.StreamServerTest do
 
     for {key, value} <- [
           idle_timeout: "5m",
-          max_fork_copy_bytes: -1,
-          fork_copy_grace: -1,
+          max_fork_depth: -1,
+          creation_grace: -1,
           expiry_interval: 0,
           repair_interval: 0,
           deleter_interval: 0,
@@ -104,7 +107,7 @@ defmodule Slap.Streams.StreamServerTest do
 
     start_supervised!(
       {OtherCluster,
-       store: :memory, shards: 1, child_options: [max_fork_copy_bytes: 0, fork_copy_grace: 0]}
+       store: :memory, shards: 1, child_options: [max_fork_depth: 0, creation_grace: 0]}
     )
   end
 
@@ -171,9 +174,25 @@ defmodule Slap.Streams.StreamServerTest do
       Streams.seal("/s", placement_key: "/other")
     end
 
-    # The failed fork is not left registered with its source.
     :ok = Streams.delete("/src")
+    Repair.sweep(ctx_for("/src"))
     assert {:error, :not_found} = Streams.head("/src")
+  end
+
+  test "sealed groups reject new reference and copy reservations" do
+    {:ok, :created, _} = Streams.create("/source", body: "a")
+    {:ok, source} = Streams.internal("/source", :source_identity)
+    :ok = Streams.seal("/sealed")
+    req = Target.request(%{forked_from: "/source"})
+
+    for kind <- [:reference, :copy] do
+      path = "/sealed/.#{kind}"
+      assert {:error, :sealed} = Streams.internal(path, {:reserve, kind, req, source})
+      assert {:ok, nil} = Read.get_meta(ctx_for(path).db, path, durability: :remote)
+    end
+
+    assert {:ok, %{registration_count: 0}} =
+             Read.get_meta(ctx_for("/source").db, "/source", durability: :remote)
   end
 
   describe "create (§5.1)" do
@@ -212,7 +231,6 @@ defmodule Slap.Streams.StreamServerTest do
       json = [content_type: "application/json"]
       assert {:ok, :created, %{next_offset: 0}} = Streams.create("/j1", [body: "[]"] ++ json)
 
-      # 4 + 1, then 4 + 7.
       assert {:ok, :created, %{next_offset: 16}} =
                Streams.create("/j2", [body: ~s([1, {"a":2}])] ++ json)
 

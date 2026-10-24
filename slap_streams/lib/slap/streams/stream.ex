@@ -1,7 +1,7 @@
 defmodule Slap.Streams.Stream do
   @moduledoc false
 
-  alias Slap.Streams.Store.{Meta, Producer}
+  alias Slap.Streams.Store.{CopyCreation, Meta, Producer, ReferenceCreation}
 
   @enforce_keys [
     :path,
@@ -16,7 +16,7 @@ defmodule Slap.Streams.Stream do
   ]
   defstruct @enforce_keys
 
-  @type status :: :absent | :active | :copying | :gone
+  @type status :: :absent | :active | :pending | :gone
 
   @type t :: %__MODULE__{
           path: binary(),
@@ -60,15 +60,11 @@ defmodule Slap.Streams.Stream do
     }
   end
 
-  @doc "A soft-deleted stream, as loaded."
-  @spec gone(binary(), Meta.t()) :: t()
-  def gone(path, %Meta{soft_deleted: true, sid: sid} = meta),
-    do: %{absent(path) | status: :gone, meta: meta, sid: sid}
-
-  @doc "A fork that starts copying its source's data."
-  @spec copying(binary(), Meta.t()) :: t()
-  def copying(path, %Meta{copying: true, sid: sid} = meta),
-    do: %{absent(path) | status: :copying, meta: meta, sid: sid}
+  @doc "A reserved creation that is hidden until activation."
+  @spec pending(binary(), Meta.t()) :: t()
+  def pending(path, %Meta{creation: %{__struct__: variant}, sid: sid} = meta)
+      when variant in [ReferenceCreation, CopyCreation],
+      do: %{absent(path) | status: :pending, meta: meta, sid: sid}
 
   @spec view(t()) :: View.t()
   def view(%__MODULE__{} = stream) do
@@ -82,10 +78,10 @@ defmodule Slap.Streams.Stream do
   end
 
   @doc "The error for a request that needs an active stream."
-  @spec error(:absent | :gone | :copying) :: {:error, :not_found | :gone | :unavailable}
+  @spec error(:absent | :gone | :pending) :: {:error, :not_found | :gone | :unavailable}
   def error(:absent), do: {:error, :not_found}
   def error(:gone), do: {:error, :gone}
-  def error(:copying), do: {:error, :unavailable}
+  def error(:pending), do: {:error, :unavailable}
 
   @doc "Whether an active stream has expired at `now` (PROTOCOL.md §5.1)."
   @spec expired?(t(), integer()) :: boolean()

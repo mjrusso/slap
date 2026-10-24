@@ -1,21 +1,22 @@
 defmodule Slap.Streams.LifecycleTest do
   use Slap.Streams.Test.ClusterCase, async: false
 
+  import Slap.Streams.Test.CreationFixtures, only: [kill: 1, meta: 1]
+
   @moduletag :capture_log
   @moduletag child_options: [deleter_page: 5]
 
   alias Slap.SlateDB
   alias Slap.Streams
-  alias Slap.Streams.Jobs.{Deleter, Expiry, Repair}
-  alias Slap.Streams.Store.{Batch, Keys, Read}
+  alias Slap.Streams.Jobs.{Deleter, Expiry}
+  alias Slap.Streams.Store.{Keys, Read}
   alias Slap.Streams.Test.FakeClock
 
   describe "forks (§4.2)" do
-    test "copy the source up to the fork offset, then diverge" do
+    test "inherit the source prefix, then diverge" do
       {:ok, :created, _} = Streams.create("/src", content_type: "text/plain")
       for m <- ["a", "b", "c"], do: {:ok, _} = Streams.append("/src", m)
 
-      # "a" is at 0, "b" at 5, "c" at 10.
       assert {:ok, :created, %{next_offset: 10, content_type: "text/plain"}} =
                Streams.create("/fork", forked_from: "/src", fork_offset: 10)
 
@@ -28,7 +29,6 @@ defmodule Slap.Streams.LifecycleTest do
       assert {:ok, read} = Streams.read("/src", 10)
       assert bodies(read) == ["c"]
 
-      # Without an offset, the fork starts at the source's tail.
       assert {:ok, :created, %{next_offset: 15}} = Streams.create("/fork2", forked_from: "/src")
       # As in the official server, a retry repeats the content type.
       assert {:ok, :exists, _} =
@@ -46,8 +46,14 @@ defmodule Slap.Streams.LifecycleTest do
       assert {:error, :content_type_mismatch} =
                Streams.create("/f", forked_from: "/src", content_type: "application/json")
 
+      assert Streams.head("/f") == {:error, :unavailable}
+      assert :ok = Streams.delete("/f")
+
       assert {:error, {:bad_request, :fork_offset_beyond_source}} =
                Streams.create("/f", forked_from: "/src", fork_offset: 10)
+
+      assert Streams.head("/f") == {:error, :unavailable}
+      assert :ok = Streams.delete("/f")
 
       assert {:error, {:bad_request, :fork_of_itself}} =
                Streams.create("/src2", forked_from: "/src2")
@@ -59,7 +65,6 @@ defmodule Slap.Streams.LifecycleTest do
       json = [content_type: "application/json"]
       {:ok, :created, _} = Streams.create("/j", [body: "[1, 2, 3]"] ++ json)
 
-      # Each message is 4 + 1 bytes.
       assert {:ok, :created, %{next_offset: 10}} =
                Streams.create("/jf", forked_from: "/j", fork_offset: 0, fork_sub_offset: 2)
 
@@ -76,13 +81,6 @@ defmodule Slap.Streams.LifecycleTest do
 
       assert {:ok, read} = Streams.read("/bf", 0)
       assert bodies(read) == ["hel"]
-    end
-
-    @tag child_options: [deleter_page: 5, max_fork_copy_bytes: 8]
-    test "the copy is capped by :max_fork_copy_bytes" do
-      {:ok, :created, _} = Streams.create("/src", body: "0123456789")
-      assert {:error, :payload_too_large} = Streams.create("/f", forked_from: "/src")
-      assert {:ok, :created, _} = Streams.create("/f", forked_from: "/src", fork_offset: 0)
     end
 
     test "expiry: the fork's own, else the source's" do
@@ -111,173 +109,32 @@ defmodule Slap.Streams.LifecycleTest do
       :ok = Streams.delete("/f1")
       assert Streams.head("/src") == {:error, :gone}
       :ok = Streams.delete("/f2")
+      repair_until(%{"/src" => nil})
       assert Streams.head("/src") == {:error, :not_found}
       assert {:ok, :created, _} = Streams.create("/src")
     end
 
+    @tag child_options: [max_fork_depth: 16]
     test "removal cascades up a chain of soft-deleted sources" do
-      {:ok, :created, _} = Streams.create("/a", body: "x")
-      {:ok, :created, _} = Streams.create("/b", forked_from: "/a")
-      {:ok, :created, _} = Streams.create("/c", forked_from: "/b")
+      paths = for n <- 0..16, do: "/chain-#{n}"
+      [root | descendants] = paths
+      {:ok, :created, _} = Streams.create(root, body: "x")
 
-      :ok = Streams.delete("/a")
-      :ok = Streams.delete("/b")
-      assert Streams.head("/a") == {:error, :gone}
-      assert Streams.head("/b") == {:error, :gone}
+      Enum.reduce(descendants, root, fn path, source ->
+        assert {:ok, :created, _} = Streams.create(path, forked_from: source)
+        path
+      end)
 
-      :ok = Streams.delete("/c")
-      for p <- ["/a", "/b", "/c"], do: assert(Streams.head(p) == {:error, :not_found})
-      assert_all_deleted()
-    end
+      for path <- Enum.drop(paths, -1) do
+        assert :ok = Streams.delete(path)
+        assert Streams.head(path) == {:error, :gone}
+      end
 
-    test "an interrupted copy is finished by a retried create" do
-      {:ok, :created, _} = Streams.create("/src", content_type: "text/plain")
-      for m <- ["a", "b", "c"], do: {:ok, _} = Streams.append("/src", m)
-      opts = [forked_from: "/src", content_type: "text/plain", body: "d"]
-      {:ok, :created, _} = Streams.create("/f", opts)
-
-      # As if the fork's server crashed during the copy.
-      ctx = ctx_for("/f")
-      {:ok, meta} = Read.get_meta(ctx.db, "/f")
-      {:ok, _} = SlateDB.write(ctx.db, Batch.put_meta("/f", %{meta | copying: true}))
-      {:ok, _} = SlateDB.write(ctx.db, [{:delete, Keys.msg(meta.sid, 5, 0)}])
-      kill(server("/f"))
-
-      assert Streams.head("/f") == {:error, :unavailable}
-      assert Streams.read("/f", 0) == {:error, :unavailable}
-      assert Streams.append("/f", "e") == {:error, :unavailable}
-
-      assert {:ok, :created, %{next_offset: 20}} = Streams.create("/f", opts)
-      assert {:ok, read} = Streams.read("/f", 0)
-      assert bodies(read) == ["a", "b", "c", "d"]
-    end
-  end
-
-  describe "forks: failures (review fixes)" do
-    test "a retried create resumes a copy even when the fork inherited its expiry" do
-      {:ok, :created, _} = Streams.create("/src", ttl_s: 3600)
-      {:ok, _} = Streams.append("/src", "a")
-      opts = [forked_from: "/src"]
-      {:ok, :created, _} = Streams.create("/f", opts)
-
-      ctx = ctx_for("/f")
-      {:ok, meta} = Read.get_meta(ctx.db, "/f")
-      # Inherited from the source, not asked for.
-      assert meta.ttl_s == 3600
-      {:ok, _} = SlateDB.write(ctx.db, Batch.put_meta("/f", %{meta | copying: true}))
-      kill(server("/f"))
-
-      assert {:ok, :created, _} = Streams.create("/f", opts)
-      assert {:ok, read} = Streams.read("/f", 0)
-      assert bodies(read) == ["a"]
-    end
-
-    test "a copy whose source was deleted meanwhile is abandoned, not left stuck" do
-      {:ok, :created, _} = Streams.create("/src")
-      {:ok, _} = Streams.append("/src", "a")
-      {:ok, :created, _} = Streams.create("/f", forked_from: "/src")
-
-      # As if the copy were interrupted, and then the source deleted.
-      ctx = ctx_for("/f")
-      {:ok, meta} = Read.get_meta(ctx.db, "/f")
-      {:ok, _} = SlateDB.write(ctx.db, Batch.put_meta("/f", %{meta | copying: true}))
-      kill(server("/f"))
-      :ok = Streams.delete("/src")
-
-      # The retry gets a definite answer, and both paths are free again.
-      assert {:error, :source_gone} = Streams.create("/f", forked_from: "/src")
-      assert {:error, :not_found} = Streams.head("/f")
-      wait_until(fn -> match?({:error, :not_found}, Streams.head("/src")) end)
-      assert_all_deleted()
-    end
-
-    test "a fork that could not unregister does not keep its deleted source forever" do
-      {:ok, :created, _} = Streams.create("/src")
-      # Registered, but never created (as if its delete could not reach the
-      # source to unregister).
-      {:ok, _} = Streams.internal("/src", {:fork_source, "/ghost", []})
-      :ok = Streams.delete("/src")
-      assert {:error, :gone} = Streams.head("/src")
-
-      # The next create finds the stale fork, and the source goes.
-      assert {:error, :conflict} = Streams.create("/src")
-      wait_until(fn -> match?({:ok, :created, _}, Streams.create("/src")) end)
-    end
-  end
-
-  describe "fork checks" do
-    test "a fork that does not answer does not hold up its source's other forks" do
-      {:ok, :created, _} = Streams.create("/src")
-      {:ok, _} = Streams.internal("/src", {:fork_source, "/ghost", []})
-      {:ok, :created, _} = Streams.create("/slow", forked_from: "/src")
-      :ok = Streams.delete("/src")
-      assert meta("/src").forks == ["/slow", "/ghost"]
-
-      # A refused create asks for the forks to be checked; "/slow" is first.
-      :ok = :sys.suspend(server("/slow"))
-      assert {:error, :conflict} = Streams.create("/src")
-      wait_until(fn -> meta("/src").forks == ["/slow"] end)
-
-      :ok = :sys.resume(server("/slow"))
-      :ok = Streams.delete("/slow")
-      assert Streams.head("/src") == {:error, :not_found}
-    end
-  end
-
-  describe "repair sweep" do
-    test "removes a fork left copying past the grace period, and unregisters it", context do
-      {:ok, :created, _} = Streams.create("/src")
-      {:ok, _} = Streams.append("/src", "a")
-      {:ok, :created, _} = Streams.create("/f", forked_from: "/src", body: "b")
-
-      # As if the fork's server crashed during the copy, and nobody retried.
-      ctx = ctx_for("/f")
-      {:ok, meta} = Read.get_meta(ctx.db, "/f")
-      stuck = Batch.put_meta("/f", %{meta | copying: true}) ++ Batch.repair("/f", meta.sid)
-      {:ok, _} = SlateDB.write(ctx.db, stuck)
-      kill(server("/f"))
-
-      sweep_all()
-      assert Streams.head("/f") == {:error, :unavailable}
-
-      stop_supervised!(Streams.Cluster)
-
-      start_supervised!(
-        {Streams.Cluster,
-         Keyword.put(context.cluster_opts, :child_options, deleter_page: 5, fork_copy_grace: 0)}
-      )
-
-      sweep_all()
-      assert Streams.head("/f") == {:error, :not_found}
-
-      # Unregistered: the source is deleted outright, not soft-deleted.
-      :ok = Streams.delete("/src")
-      assert Streams.head("/src") == {:error, :not_found}
-      assert_all_deleted()
-    end
-
-    test "removes a soft-deleted source whose fork could not unregister" do
-      {:ok, :created, _} = Streams.create("/src")
-      {:ok, _} = Streams.internal("/src", {:fork_source, "/ghost", []})
-      :ok = Streams.delete("/src")
-      assert {:error, :gone} = Streams.head("/src")
-
-      sweep_all()
-      assert Streams.head("/src") == {:error, :not_found}
-      assert_all_deleted()
-    end
-
-    test "drops nothing a live fork or soft-deleted source still needs" do
-      {:ok, :created, _} = Streams.create("/src")
-      {:ok, :created, _} = Streams.create("/f", forked_from: "/src")
-      :ok = Streams.delete("/src")
-
-      sweep_all()
-      assert {:error, :gone} = Streams.head("/src")
-      assert rows(0x08) == 1
-
-      :ok = Streams.delete("/f")
-      assert Streams.head("/src") == {:error, :not_found}
+      assert {:ok, page} = Streams.read(List.last(paths), 0)
+      assert bodies(page) == ["x"]
+      assert :ok = Streams.delete(List.last(paths))
+      repair_until(Map.new(paths, &{&1, nil}))
+      for path <- paths, do: assert(Streams.head(path) == {:error, :not_found})
       assert_all_deleted()
     end
   end
@@ -350,6 +207,26 @@ defmodule Slap.Streams.LifecycleTest do
   end
 
   describe "trim" do
+    test "committed trims preserve pinned rows across a server reload" do
+      {:ok, :created, _} = Streams.create("/source", body: "a")
+      {:ok, _} = Streams.append("/source", "b")
+      {:ok, :created, _} = Streams.create("/fork", forked_from: "/source")
+      ctx = ctx_for("/source")
+      sid = meta("/source").sid
+      :ok = Streams.trim("/source", 5)
+      kill(server("/source"))
+      assert {:ok, _} = Streams.head("/source")
+      Deleter.drain(ctx)
+      assert Streams.read("/source", 0) == {:error, :trimmed}
+      assert {:ok, %{messages: [{0, "a"}, {5, "b"}]}} = Streams.read("/fork", 0)
+      assert {:ok, nil} = SlateDB.get(ctx.db, Keys.reclaim(sid), durability: :remote)
+      :ok = Streams.delete("/fork")
+      repair_until(%{"/source" => 0})
+      Deleter.drain(ctx)
+      assert {:ok, nil} = SlateDB.get(ctx.db, Keys.msg(sid, 0, 0))
+      assert {:ok, %{messages: [{5, "b"}]}} = Streams.read("/source", :start)
+    end
+
     test "reads before the trim point get :trimmed, and the deleter removes the data" do
       {:ok, :created, _} = Streams.create("/t", content_type: "text/plain")
       for m <- ["a", "b", "c"], do: {:ok, _} = Streams.append("/t", m)
@@ -415,7 +292,6 @@ defmodule Slap.Streams.LifecycleTest do
       deleter = GenServer.whereis(Slap.Cluster.via(Streams.Cluster, ctx.n, :deleter))
       kill(deleter)
 
-      # Everything before the stored cursor is gone, and the rest is there.
       {:ok, <<stored::64>>} = SlateDB.get(ctx.db, Keys.delete_pending(sid))
       assert stored >= cursor
 
@@ -427,7 +303,6 @@ defmodule Slap.Streams.LifecycleTest do
       assert offsets != []
       assert Enum.min(offsets) >= stored
 
-      # The supervisor restarts it, and it finishes from the cursor.
       wait_until(fn -> GenServer.whereis(Slap.Cluster.via(Streams.Cluster, ctx.n, :deleter)) end)
       assert_all_deleted()
     end
@@ -435,40 +310,20 @@ defmodule Slap.Streams.LifecycleTest do
 
   # -- helpers --
 
-  defp sweep, do: for(ctx <- shards(), do: Expiry.sweep(ctx))
-
-  defp meta(path) do
-    {:ok, meta} = Read.get_meta(ctx_for(path).db, path)
-    meta
-  end
+  defp sweep, do: for(ctx <- contexts(), do: Expiry.sweep(ctx))
 
   defp rows(type) do
-    shards()
+    contexts()
     |> Enum.map(fn ctx -> ctx.db |> SlateDB.scan(prefix: <<type>>) |> Enum.count() end)
     |> Enum.sum()
   end
 
   # After the deleters run, only the stream id counter is left.
   defp assert_all_deleted do
-    for ctx <- shards() do
+    for ctx <- contexts() do
       Deleter.drain(ctx)
       assert ctx.db |> SlateDB.scan(gte: <<1>>) |> Enum.to_list() == []
     end
-  end
-
-  defp sweep_all, do: Enum.each(shards(), &Repair.sweep/1)
-
-  defp shards do
-    for n <- Streams.Cluster.local_shards() do
-      {:ok, {:local, ctx}} = Streams.Cluster.lookup(n)
-      ctx
-    end
-  end
-
-  defp kill(pid) do
-    ref = Process.monitor(pid)
-    Process.exit(pid, :kill)
-    assert_receive {:DOWN, ^ref, _, _, _}
   end
 
   # The deleter's cursor for `sid`, once it has moved.

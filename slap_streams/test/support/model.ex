@@ -1,37 +1,26 @@
 defmodule Slap.Streams.Test.Model do
   @moduledoc false
-  # A reference model of streams, written from PROTOCOL.md §4.2 and §5 as
-  # plain data transformations: no processes, no storage, no durability. The
-  # property test runs the same commands against it and against Slap.Streams,
-  # and the results must match.
-  #
-  # State: %{streams: %{path => stream}, now: ms, sealed: MapSet of
-  # placement groups}, where a stream is
-  #   %{status: :active | :gone,
-  #     meta: %{content_type, ttl_s, expires_at_ms, closed, closed_by,
-  #             last_stream_seq},
-  #     messages: [{offset, bytes}], tail, producers: %{id => {epoch, last}},
-  #     trim, forks: [path], fork_of: nil | %{path, offset, requested_offset,
-  #     sub_offset}, last_access}
-  #
-  # Expiry is lazy, as in the server: an expired stream is removed when its
-  # path is next accessed (by a request, a fork, a fork's removal, or the
-  # expiry sweep). Reads, writes and creates reset a sliding TTL; HEAD and
-  # requests between streams do not.
+  # Reference model derived from PROTOCOL.md §4.2 and §5. Expiry is checked
+  # on access and sweep. HEAD checks expiry without resetting a sliding TTL;
+  # internal retention and cleanup requests do neither.
 
   alias Slap.Streams.{ContentType, Json}
 
-  def new(now, max_fork_copy_bytes \\ 64 * 1024 * 1024),
-    do: %{streams: %{}, now: now, sealed: MapSet.new(), max_fork_copy_bytes: max_fork_copy_bytes}
+  def new(now, max_fork_depth \\ 8),
+    do: %{
+      streams: %{},
+      now: now,
+      sealed: MapSet.new(),
+      max_fork_depth: max_fork_depth,
+      next_id: 0,
+      releases: MapSet.new()
+    }
 
   def run(state, {:seal, group}), do: {:ok, %{state | sealed: MapSet.put(state.sealed, group)}}
 
   def run(state, {:advance, ms}), do: {:ok, %{state | now: state.now + ms}}
 
-  # The sweep visits every expired stream (Slap.Streams.Jobs.Expiry).
-  # The repair sweep changes nothing visible here: the model has no copies
-  # left unfinished, and forks always unregister.
-  def run(state, {:repair}), do: {:ok, state}
+  def run(state, {:repair}), do: {:ok, repair(state)}
 
   def run(state, {:invalid, _request, reason}),
     do: {{:error, {:bad_request, reason}}, state}
@@ -66,6 +55,7 @@ defmodule Slap.Streams.Test.Model do
     case get_any(state, path) do
       nil -> {{:error, :not_found}, state}
       %{status: :gone} -> {{:error, :gone}, state}
+      %{status: :pending} -> {{:error, :unavailable}, state}
       s -> {{:ok, info(s)}, state}
     end
   end
@@ -86,6 +76,95 @@ defmodule Slap.Streams.Test.Model do
     end
   end
 
+  # A copy interrupted once it captured the source's range: a retry finishes it
+  # from the capture.
+  def run(state, {:interrupt_copy, source, target}) do
+    src = get(state, source)
+    identity = {source, :latest}
+    {state, id} = retain(state, source)
+    s = copied(state, src, identity, src.tail, id)
+
+    pending =
+      Map.merge(pending(state, :copy, identity, src.id), %{
+        captured: s,
+        hold: {source, src.id, id}
+      })
+
+    {:ok, put(state, target, pending)}
+  end
+
+  def run(state, {:copy_page, target}) do
+    %{status: :pending} = p = get_any(state, target)
+    {:ok, put(state, target, %{p | since: state.now})}
+  end
+
+  def run(state, {:copy, path, path, _opts}),
+    do: {{:error, {:bad_request, :fork_of_itself}}, state}
+
+  def run(state, {:copy, source, target, opts}) do
+    identity = {source, Keyword.get(opts, :at, :latest)}
+    state = access(state, target, true)
+
+    case get_any(state, target) do
+      %{status: :active, copy_of: ^identity} = s ->
+        {{:ok, :exists, info(s)}, state}
+
+      %{status: :pending, request: ^identity, captured: s, hold: {source, src_id, id}} ->
+        s = %{s | last_access: state.now}
+        {{:ok, :created, info(s)}, state |> put(target, s) |> release({source, src_id}, id)}
+
+      %{status: :pending, kind: :copy, request: ^identity} = pending ->
+        retry_source(state, target, pending, source, &copy_stream(&1, source, target, identity))
+
+      nil ->
+        create_from_source(state, source, target, &copy_stream(&1, source, target, identity))
+
+      _ ->
+        {{:error, :conflict}, state}
+    end
+  end
+
+  defp copy_stream(state, source, target, identity) do
+    {_source, requested} = identity
+
+    case fork_source(state, source) do
+      {:ok, src} ->
+        offset = if requested == :latest, do: src.tail, else: requested
+        copy_range(state, source, target, identity, src, offset)
+
+      {:error, error} ->
+        {{:error, error}, state}
+    end
+  end
+
+  defp copy_range(state, _source, target, identity, src, offset) when offset > src.tail do
+    pending = pending(state, :copy, identity, src.id)
+    {{:error, {:bad_request, :fork_offset_beyond_source}}, put(state, target, pending)}
+  end
+
+  defp copy_range(state, source, target, identity, src, offset) do
+    {state, id} = retain(state, source)
+    state = release(state, {source, src.id}, id)
+    s = copied(state, src, identity, offset, id)
+
+    if sealed?(state, target),
+      do: {{:error, :sealed}, state},
+      else: {{:ok, :created, info(s)}, put(state, target, s)}
+  end
+
+  defp copied(state, src, identity, offset, id) do
+    trim = min(src.trim, offset)
+    meta = %{src.meta | closed_by: nil, last_stream_seq: nil}
+
+    %{
+      stream(meta, state.now, id)
+      | tail: offset,
+        trim: trim,
+        copy_of: identity,
+        messages: Enum.filter(src.messages, fn {at, _} -> at >= trim and at < offset end)
+    }
+  end
+
   # -- create (§5.1, §4.2) --
 
   defp dispatch(state, {:create, path, opts}) do
@@ -95,6 +174,9 @@ defmodule Slap.Streams.Test.Model do
 
       %{status: :gone} ->
         {{:error, :conflict}, state}
+
+      %{status: :pending} = pending ->
+        retry_pending(state, path, pending, opts)
 
       s ->
         if same_config?(s, opts),
@@ -111,6 +193,9 @@ defmodule Slap.Streams.Test.Model do
       %{status: :gone} ->
         {{:error, :gone}, state}
 
+      %{status: :pending} ->
+        {{:error, :unavailable}, state}
+
       s ->
         {result, s} = append(s, body, opts)
         {result, put(state, path, s)}
@@ -121,6 +206,7 @@ defmodule Slap.Streams.Test.Model do
     case get_any(state, path) do
       nil -> {{:error, :not_found}, state}
       %{status: :gone} -> {{:error, :gone}, state}
+      %{status: :pending} -> {{:error, :unavailable}, state}
       s when offset > s.tail -> {{:error, {:bad_request, :trim_offset_beyond_tail}}, state}
       s when offset <= s.trim -> {:ok, state}
       s -> {:ok, put(state, path, %{s | trim: offset})}
@@ -133,9 +219,52 @@ defmodule Slap.Streams.Test.Model do
     case get_any(state, path) do
       nil -> {{:error, :not_found}, state}
       %{status: :gone} -> {{:error, :gone}, state}
+      %{status: :pending} -> {{:error, :unavailable}, state}
       s -> {read_stream(s, if(offset == :now, do: s.tail, else: offset), max_bytes), state}
     end
   end
+
+  defp retry_pending(state, path, pending, opts) do
+    if pending.kind == :reference and request(opts) == pending.request do
+      retry_source(state, path, pending, opts[:forked_from], &fork(&1, path, opts))
+    else
+      {{:error, :conflict}, state}
+    end
+  end
+
+  defp retry_source(state, path, pending, source, create) do
+    state = access(state, source, false)
+
+    case get_any(state, source) do
+      %{status: :active, id: id} when id == pending.source_id ->
+        {result, next_state} = create.(delete(state, path))
+
+        case get_any(next_state, path) do
+          %{status: :pending} = next ->
+            {result, put(next_state, path, %{next | since: pending.since})}
+
+          _completed_or_cancelled ->
+            {result, next_state}
+        end
+
+      nil ->
+        {{:error, :source_not_found}, state}
+
+      _gone_or_replaced ->
+        {{:error, :source_gone}, state}
+    end
+  end
+
+  defp request(opts) do
+    opts
+    |> Map.new()
+    |> Map.put_new(:body, "")
+    |> Map.put_new(:closed, false)
+    |> Map.put_new(:fork_sub_offset, 0)
+  end
+
+  defp pending(state, kind, request, source_id),
+    do: %{status: :pending, kind: kind, request: request, source_id: source_id, since: state.now}
 
   # -- read helpers --
 
@@ -158,9 +287,12 @@ defmodule Slap.Streams.Test.Model do
      }}
   end
 
-  # The tail once everything is taken, else the end of the last message.
   defp next_offset(s, taken, available) when length(taken) == length(available), do: s.tail
-  defp next_offset(_s, taken, _available), do: taken |> List.last() |> message_end()
+
+  defp next_offset(_s, taken, available) do
+    {next, _} = Enum.at(available, length(taken))
+    min(taken |> List.last() |> message_end(), next)
+  end
 
   defp message_end({offset, bytes}), do: offset + 4 + byte_size(bytes)
 
@@ -175,10 +307,22 @@ defmodule Slap.Streams.Test.Model do
         {{:error, {:bad_request, :fork_of_itself}}, state}
 
       opts[:forked_from] != nil ->
-        fork(state, path, opts)
+        create_from_source(state, opts[:forked_from], path, &fork(&1, path, opts))
 
       true ->
         plain_create(state, path, opts)
+    end
+  end
+
+  defp create_from_source(state, source, target, create) do
+    state = access(state, source, false)
+
+    case fork_source(state, source) do
+      {:ok, _source} ->
+        if sealed?(state, target), do: {{:error, :sealed}, state}, else: create.(state)
+
+      {:error, reason} ->
+        {{:error, reason}, state}
     end
   end
 
@@ -202,12 +346,12 @@ defmodule Slap.Streams.Test.Model do
           last_stream_seq: nil
         }
 
-        s = add(stream(meta, state.now), bodies)
+        {state, id} = allocate(state)
+        s = add(stream(meta, state.now, id), bodies)
         {{:ok, :created, info(s)}, put(state, path, s)}
     end
   end
 
-  # A write that would create a stream in a sealed group fails.
   defp sealed?(state, path),
     do: MapSet.member?(state.sealed, Slap.Streams.placement_key(path))
 
@@ -221,6 +365,8 @@ defmodule Slap.Streams.Test.Model do
 
   defp same_fork?(fork, opts) do
     fork.path == opts[:forked_from] and
+      fork.source_placement_key ==
+        (opts[:source_placement_key] || Slap.Streams.placement_key(opts[:forked_from])) and
       opts[:fork_offset] in [nil, fork.requested_offset || fork.offset] and
       (opts[:fork_sub_offset] || 0) == fork.sub_offset
   end
@@ -231,30 +377,43 @@ defmodule Slap.Streams.Test.Model do
     source = opts[:forked_from]
     state = access(state, source, false)
 
-    with {:ok, src} <- fork_source(state, source),
-         :ok <- fork_content_type(opts[:content_type], src.meta.content_type),
-         {:ok, offset, prefix} <- fork_offset(src, opts),
-         :ok <-
-           if(offset > state.max_fork_copy_bytes, do: {:error, :payload_too_large}, else: :ok) do
-      forks = if path in src.forks, do: src.forks, else: [path | src.forks]
-      state = put(state, source, %{src | forks: forks})
-
-      case {messages(src.meta.content_type, opts[:body] || "", true), sealed?(state, path)} do
-        {{:error, reason}, _sealed} ->
-          {{:error, {:bad_request, reason}}, unregister(state, source, path)}
-
-        {{:ok, _bodies}, true} ->
-          {{:error, :sealed}, unregister(state, source, path)}
-
-        {{:ok, bodies}, false} ->
-          create_fork(state, path, src, opts, {offset, prefix, bodies})
-      end
-    else
+    case fork_source(state, source) do
+      {:ok, src} -> fork_range(state, path, opts, src)
       {:error, reason} -> {{:error, reason}, state}
     end
   end
 
-  defp create_fork(state, path, src, opts, {offset, prefix, bodies}) do
+  defp fork_range(state, path, opts, src) do
+    source = opts[:forked_from]
+
+    with :ok <- fork_content_type(opts[:content_type], src.meta.content_type),
+         {:ok, offset, prefix} <- fork_offset(src, opts),
+         :ok <-
+           if(offset > src.trim and src.depth >= state.max_fork_depth,
+             do: {:error, {:bad_request, :max_fork_depth_exceeded}},
+             else: :ok
+           ) do
+      case {messages(src.meta.content_type, opts[:body] || "", true), sealed?(state, path)} do
+        {{:error, reason}, _sealed} ->
+          {state, id} = retain(state, source)
+          {{:error, {:bad_request, reason}}, release(state, {source, src.id}, id)}
+
+        {{:ok, _bodies}, true} ->
+          {state, id} = retain(state, source)
+          {{:error, :sealed}, release(state, {source, src.id}, id)}
+
+        {{:ok, bodies}, false} ->
+          {state, id} = retain(state, source)
+          create_fork(state, path, src, opts, {offset, prefix, bodies, id})
+      end
+    else
+      {:error, _reason} = error ->
+        pending = pending(state, :reference, request(opts), src.id)
+        {error, put(state, path, pending)}
+    end
+  end
+
+  defp create_fork(state, path, src, opts, {offset, prefix, bodies, id}) do
     {ttl_s, expires_at_ms} = fork_expiry(opts, src)
 
     meta = %{
@@ -270,12 +429,16 @@ defmodule Slap.Streams.Test.Model do
     copied = Enum.filter(src.messages, fn {o, _} -> o >= trim and o < offset end)
 
     s = %{
-      stream(meta, state.now)
+      stream(meta, state.now, id)
       | messages: copied,
         tail: offset,
         trim: trim,
+        depth: if(trim < offset, do: src.depth + 1, else: 0),
+        origin: {opts[:forked_from], src.id},
         fork_of: %{
           path: opts[:forked_from],
+          source_placement_key:
+            opts[:source_placement_key] || Slap.Streams.placement_key(opts[:forked_from]),
           offset: offset,
           requested_offset: opts[:fork_offset],
           sub_offset: opts[:fork_sub_offset] || 0
@@ -299,6 +462,7 @@ defmodule Slap.Streams.Test.Model do
     case get_any(state, source) do
       nil -> {:error, :source_not_found}
       %{status: :gone} -> {:error, :source_gone}
+      %{status: :pending} -> {:error, :unavailable}
       s -> {:ok, s}
     end
   end
@@ -329,22 +493,31 @@ defmodule Slap.Streams.Test.Model do
 
       true ->
         after_offset = Enum.filter(src.messages, fn {o, _} -> o >= offset end)
-        sub_offset(ContentType.json?(src.meta.content_type), after_offset, offset, sub)
+        sub_offset(ContentType.json?(src.meta.content_type), after_offset, offset, sub, src.tail)
     end
   end
 
   # JSON: `sub` messages further. Other types: a prefix of the next message.
-  defp sub_offset(true, after_offset, _offset, sub) do
-    case Enum.drop(after_offset, sub - 1) do
-      [{o, b} | _] -> {:ok, o + 4 + byte_size(b), nil}
-      [] -> @overshoot
+  defp sub_offset(true, after_offset, _offset, sub, tail) do
+    case Enum.split(after_offset, sub) do
+      {taken, rest} when length(taken) == sub ->
+        next =
+          case rest do
+            [{at, _} | _] -> at
+            [] -> tail
+          end
+
+        {:ok, min(message_end(List.last(taken)), next), nil}
+
+      _ ->
+        @overshoot
     end
   end
 
-  defp sub_offset(false, [{_, b} | _], offset, sub) when byte_size(b) >= sub,
+  defp sub_offset(false, [{_, b} | _], offset, sub, _tail) when byte_size(b) >= sub,
     do: {:ok, offset, binary_part(b, 0, sub)}
 
-  defp sub_offset(false, _after_offset, _offset, _sub), do: @overshoot
+  defp sub_offset(false, _after_offset, _offset, _sub, _tail), do: @overshoot
 
   # -- lifecycle --
 
@@ -367,44 +540,74 @@ defmodule Slap.Streams.Test.Model do
       (m.ttl_s != nil and now >= last + m.ttl_s * 1000)
   end
 
-  # A stream with forks is soft-deleted; otherwise removed, and a fork is
-  # unregistered from its source.
   defp remove(state, path) do
-    s = get_any(state, path)
-
-    cond do
-      s.forks != [] ->
-        put(state, path, %{s | status: :gone, messages: []})
-
-      s.fork_of != nil ->
-        state |> delete(path) |> unregister(s.fork_of.path, path)
-
-      true ->
-        delete(state, path)
-    end
+    remove(state, path, get_any(state, path))
   end
 
-  # A soft-deleted source whose last fork goes is removed, up the chain.
-  defp unregister(state, source, fork) do
-    state = access(state, source, false)
+  defp remove(state, path, %{status: :pending, hold: {source, id, fork}}),
+    do: state |> delete(path) |> release({source, id}, fork)
 
+  defp remove(state, path, %{status: :pending}), do: delete(state, path)
+
+  defp remove(state, path, s) do
+    if s.forks != [],
+      do: put(state, path, %{s | status: :gone}),
+      else: state |> delete(path) |> release(s.origin, s.id)
+  end
+
+  defp unregister(state, {source, id, fork}) do
     case get_any(state, source) do
-      nil -> state
-      s -> drop_fork(state, source, s, List.delete(s.forks, fork))
+      %{id: ^id} = s -> drop_fork(state, source, s, List.delete(s.forks, fork))
+      _ -> state
     end
   end
 
   defp drop_fork(state, _source, %{forks: forks}, forks), do: state
 
   defp drop_fork(state, source, %{status: :gone} = s, []) do
-    state = delete(state, source)
-    if s.fork_of, do: unregister(state, s.fork_of.path, source), else: state
+    state |> delete(source) |> release(s.origin, s.id)
   end
 
   defp drop_fork(state, source, s, forks), do: put(state, source, %{s | forks: forks})
 
-  defp stream(meta, now) do
+  defp allocate(state), do: {%{state | next_id: state.next_id + 1}, state.next_id}
+
+  defp retain(state, source) do
+    {state, id} = allocate(state)
+    s = get_any(state, source)
+    {put(state, source, %{s | forks: [id | s.forks]}), id}
+  end
+
+  defp release(state, nil, _target), do: state
+
+  defp release(state, {source, id}, target),
+    do: %{state | releases: MapSet.put(state.releases, {source, id, target})}
+
+  defp repair(state) do
+    state =
+      Enum.reduce(state.streams, state, fn
+        {path, %{status: :pending, since: since}}, state when state.now - since >= 3_600_000 ->
+          remove(state, path)
+
+        _, state ->
+          state
+      end)
+
+    case MapSet.to_list(state.releases) do
+      [] ->
+        state
+
+      releases ->
+        releases
+        |> Enum.reduce(%{state | releases: MapSet.new()}, &unregister(&2, &1))
+        |> repair()
+    end
+  end
+
+  defp stream(meta, now, id) do
     %{
+      id: id,
+      origin: nil,
       status: :active,
       meta: meta,
       messages: [],
@@ -413,6 +616,8 @@ defmodule Slap.Streams.Test.Model do
       trim: 0,
       forks: [],
       fork_of: nil,
+      copy_of: nil,
+      depth: 0,
       last_access: now
     }
   end

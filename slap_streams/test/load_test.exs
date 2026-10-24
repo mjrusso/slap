@@ -63,30 +63,6 @@ defmodule Slap.Streams.LoadTest do
     end)
   end
 
-  test "a fork's copy is in flight until durable, with the write that finishes it" do
-    {:ok, :created, _} =
-      acked(fn -> Streams.create("/src", body: String.duplicate("x", 1000)) end, "/src")
-
-    src_db = ctx_for("/src").db
-    # On the other shard: the source's writes are flushed, the fork's are not.
-    fork = Enum.find(for(i <- 0..200, do: "/f#{i}"), &(ctx_for(&1).n != ctx_for("/src").n))
-    ctx = ctx_for(fork)
-    task = Task.async(fn -> Streams.create(fork, forked_from: "/src") end)
-
-    # The copy's start and its one page, and the finish.
-    wait_until(fn ->
-      :ok = SlateDB.flush(src_db)
-      ShardLoad.snapshot(ctx).inflight_requests == 3
-    end)
-
-    assert ShardLoad.snapshot(ctx).inflight_bytes > 1000
-    assert Task.yield(task, 0) == nil
-
-    :ok = SlateDB.flush(ctx.db)
-    assert {:ok, :created, %{next_offset: 1004}} = Task.await(task)
-    wait_until(fn -> ShardLoad.snapshot(ctx).inflight_bytes == 0 end)
-  end
-
   test "telemetry: append latency and load" do
     parent = self()
     id = "load-test-#{System.unique_integer()}"

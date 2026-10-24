@@ -1,6 +1,8 @@
 defmodule Slap.Streams.Store.Meta do
   @moduledoc false
 
+  alias Slap.Streams.Store.{CopyCreation, Creation, PublishedReference, ReferenceCreation}
+
   defstruct sid: nil,
             content_type: "application/octet-stream",
             created_ms: nil,
@@ -9,36 +11,23 @@ defmodule Slap.Streams.Store.Meta do
             closed: false,
             closed_by: nil,
             last_stream_seq: nil,
-            fork_of: nil,
-            forks: [],
-            copying: false,
-            soft_deleted: false
+            soft_deleted: false,
+            creation: nil,
+            registration_count: 0,
+            pin_start: nil,
+            reclaimed_before: 0
 
-  @type t :: %__MODULE__{}
-end
+  @type t :: %__MODULE__{creation: Creation.t() | nil}
 
-defmodule Slap.Streams.Store.ForkOf do
-  @moduledoc false
+  def pending?(%__MODULE__{creation: %ReferenceCreation{}}), do: true
+  def pending?(%__MODULE__{creation: %CopyCreation{}}), do: true
+  def pending?(_meta), do: false
 
-  defstruct [
-    :path,
-    :offset,
-    :requested_offset,
-    :requested_content_type,
-    :requested_ttl_s,
-    :requested_expires_at_ms,
-    sub_offset: 0
-  ]
+  def reference(%__MODULE__{creation: %PublishedReference{capture: cap}}), do: cap
+  def reference(_meta), do: nil
 
-  @type t :: %__MODULE__{
-          path: binary(),
-          offset: non_neg_integer(),
-          requested_offset: non_neg_integer() | nil,
-          sub_offset: non_neg_integer(),
-          requested_content_type: binary() | nil,
-          requested_ttl_s: non_neg_integer() | nil,
-          requested_expires_at_ms: integer() | nil
-        }
+  def depth(%__MODULE__{creation: %PublishedReference{capture: cap}}), do: cap.depth
+  def depth(_meta), do: 0
 end
 
 defmodule Slap.Streams.Store.Tail do
@@ -61,42 +50,86 @@ end
 defmodule Slap.Streams.Store.Codec do
   @moduledoc false
 
-  alias Slap.Streams.Store.{ForkOf, Meta, Producer, Tail}
+  alias Slap.Streams.Store.{
+    Capture,
+    CopyCreation,
+    CopyProgress,
+    Identity,
+    Meta,
+    Producer,
+    PublishedCopy,
+    PublishedReference,
+    ReferenceCreation,
+    Tail
+  }
 
-  @version 1
+  @nested_types %{
+    identity: Identity,
+    capture: Capture,
+    reference_pending: ReferenceCreation,
+    copy_pending: CopyCreation,
+    copy_progress: CopyProgress,
+    reference: PublishedReference,
+    copy: PublishedCopy
+  }
+  @nested_tags Map.new(@nested_types, fn {tag, module} -> {module, tag} end)
 
-  # `:safe` decoding rejects atoms this node does not have yet, and a node
-  # that takes over a shard may decode a stream's rows before it has loaded
-  # any module that names their fields. The field names of every stored
-  # struct are literals here (`atoms/0` returns them, so they are compiled
-  # in), and loading this module creates them. So a stored field may hold
-  # these structs, but no other atoms: no maps with atom keys.
-  @atoms Enum.uniq(Enum.flat_map([%Meta{}, %ForkOf{}, %Tail{}, %Producer{}], &Map.keys/1))
+  # Safe ETF decoding may run before the creation modules load. Load every
+  # stored tag and field atom without putting module names in the record.
+  @atoms Enum.uniq(
+           [:body, :forked_from, :source_placement_key, :fork_offset, :fork_sub_offset] ++
+             Map.keys(@nested_types) ++
+             Enum.flat_map(
+               [Meta, Tail, Producer | Map.values(@nested_types)],
+               &Map.keys(Map.from_struct(struct(&1)))
+             )
+         )
 
   @doc false
   def atoms, do: @atoms
 
-  @spec encode(Meta.t() | Tail.t() | Producer.t()) :: binary()
-  def encode(%Meta{fork_of: %ForkOf{} = f} = v),
-    do: pack(:meta, %{v | fork_of: Map.from_struct(f)})
+  @spec encode(Meta.t() | Tail.t() | Producer.t() | Capture.t()) :: binary()
+  def encode(%Meta{} = v), do: pack(:meta, 2, v)
+  def encode(%Tail{} = v), do: pack(:tail, 1, v)
+  def encode(%Producer{} = v), do: pack(:producer, 1, v)
+  def encode(%Capture{} = v), do: pack(:capture, 1, v)
 
-  def encode(%Meta{} = v), do: pack(:meta, v)
-  def encode(%Tail{} = v), do: pack(:tail, v)
-  def encode(%Producer{} = v), do: pack(:producer, v)
-
-  @spec decode(binary()) :: Meta.t() | Tail.t() | Producer.t()
+  @spec decode(binary()) :: Meta.t() | Tail.t() | Producer.t() | Capture.t()
   def decode(binary) do
     case :erlang.binary_to_term(binary, [:safe]) do
-      {:meta, @version, fields} -> meta(fields)
-      {:tail, @version, fields} -> struct(Tail, fields)
-      {:producer, @version, fields} -> struct(Producer, fields)
+      {:meta, 2, fields} ->
+        struct!(Meta, decode_fields(fields))
+
+      {:tail, 1, fields} ->
+        struct!(Tail, decode_fields(fields))
+
+      {:producer, 1, fields} ->
+        struct!(Producer, decode_fields(fields))
+
+      {:capture, 1, fields} ->
+        struct!(Capture, decode_fields(fields))
     end
   end
 
-  defp meta(%{fork_of: %{} = fork_of} = fields),
-    do: struct(Meta, %{fields | fork_of: struct(ForkOf, fork_of)})
+  defp pack(tag, version, value),
+    do: :erlang.term_to_binary({tag, version, encode_fields(Map.from_struct(value))})
 
-  defp meta(fields), do: struct(Meta, fields)
+  defp encode_fields(fields),
+    do: Map.new(fields, fn {key, value} -> {key, encode_value(value)} end)
 
-  defp pack(tag, struct), do: :erlang.term_to_binary({tag, @version, Map.from_struct(struct)})
+  defp encode_value(%module{} = value),
+    do: {Map.fetch!(@nested_tags, module), encode_fields(Map.from_struct(value))}
+
+  defp encode_value(fields) when is_map(fields), do: encode_fields(fields)
+  defp encode_value(value), do: value
+
+  defp decode_fields(fields),
+    do: Map.new(fields, fn {key, value} -> {key, decode_value(value)} end)
+
+  defp decode_value({tag, fields}) when is_atom(tag) and is_map(fields),
+    do: struct!(Map.fetch!(@nested_types, tag), decode_fields(fields))
+
+  defp decode_value(%_{}), do: raise(ArgumentError, "untagged stored struct")
+  defp decode_value(fields) when is_map(fields), do: decode_fields(fields)
+  defp decode_value(value), do: value
 end

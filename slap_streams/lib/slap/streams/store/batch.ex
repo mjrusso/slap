@@ -2,7 +2,7 @@ defmodule Slap.Streams.Store.Batch do
   @moduledoc false
 
   alias Slap.SlateDB
-  alias Slap.Streams.Store.{Codec, Keys, Meta, Producer, Tail}
+  alias Slap.Streams.Store.{Capture, Codec, Keys, Meta, Producer, Tail}
 
   @part_size 256 * 1024
 
@@ -18,7 +18,6 @@ defmodule Slap.Streams.Store.Batch do
       messages(sid, messages) ++ expiry(path, sid, nil, tail.expiry_key_ms)
   end
 
-  @doc "The metadata alone, as when a fork is registered or a copy finishes."
   @spec put_meta(binary(), Meta.t()) :: [SlateDB.write_op()]
   def put_meta(path, %Meta{} = meta), do: [{:put, Keys.meta(path), Codec.encode(meta)}]
 
@@ -82,31 +81,30 @@ defmodule Slap.Streams.Store.Batch do
   end
 
   @doc """
-  A soft delete (a stream with forks): the metadata stays, marked deleted
-  (410), and the stream's rows are deleted as for a logical delete. Forks
-  have their own copies.
-  """
-  @spec soft_delete(binary(), Meta.t(), integer() | nil) :: [SlateDB.write_op()]
-  def soft_delete(path, %Meta{sid: sid} = meta, expiry_key) do
-    put_meta(path, %{meta | soft_deleted: true}) ++
-      [{:put, Keys.delete_pending(sid), <<0::64>>} | repair(path, sid)] ++
-      expiry(path, sid, expiry_key, nil)
-  end
-
-  @doc "Removes the metadata of a soft-deleted stream whose last fork is gone."
-  @spec finalize(binary(), non_neg_integer()) :: [SlateDB.write_op()]
-  def finalize(path, sid), do: [{:delete, Keys.meta(path)}, {:delete, Keys.repair(sid)}]
-
-  @doc """
-  Lists the stream in the repair index (`Slap.Streams.Jobs.Repair`): a fork that
-  starts copying, or a soft-deleted stream.
+  Indexes a pending creation or a source with registrations for repair.
   """
   @spec repair(binary(), non_neg_integer()) :: [SlateDB.write_op()]
   def repair(path, sid), do: [{:put, Keys.repair(sid), path}]
 
+  def registration(%Capture{} = cap) do
+    pin =
+      if cap.start < cap.offset,
+        do: [{:put, Keys.pin(cap.source.sid, cap.start, cap.target), <<>>}],
+        else: []
+
+    [{:put, Keys.registration(cap.source.sid, cap.target), Codec.encode(cap)} | pin]
+  end
+
+  def unregister(%Capture{} = cap) do
+    [
+      {:delete, Keys.registration(cap.source.sid, cap.target)},
+      {:delete, Keys.pin(cap.source.sid, cap.start, cap.target)}
+    ]
+  end
+
   @doc """
-  Trims `sid` before `offset`: reads from earlier offsets get 410, and
-  `Slap.Streams.Jobs.Deleter` deletes the rows before it.
+  Sets the offset below which reads return `:trimmed`. The deleter uses a
+  separate bound that protects ranges registered by forks and copies.
   """
   @spec trim(non_neg_integer(), non_neg_integer()) :: [SlateDB.write_op()]
   def trim(sid, offset), do: [{:put, Keys.trim(sid), <<offset::64>>}]

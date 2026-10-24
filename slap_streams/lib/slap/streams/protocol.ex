@@ -2,22 +2,12 @@ defmodule Slap.Streams.Protocol do
   @moduledoc false
 
   alias Slap.SlateDB
-  alias Slap.Streams.{ContentType, Json, Offset, Stream}
-  alias Slap.Streams.Store.{Batch, ForkOf, Keys, Meta, Producer, Tail}
+  alias Slap.Streams.{ContentType, Json, Offset, Retention, Stream}
+  alias Slap.Streams.Store.{Batch, Keys, Meta, Producer, Tail}
 
-  @typedoc """
-  `{:reply, reply}` writes nothing. `{:write, ops, reply, stream, effects}`
-  writes `ops` in one batch, after which `stream` is the stream's state;
-  `reply` goes out once the batch is durable. `effects` run once the batch
-  is written: `:kick_deleter` wakes the shard's deleter, and
-  `{:unregister_from, source}` unregisters the stream from the source it
-  was forked from.
-  """
   @type decision ::
-          {:reply, term()}
-          | {:write, [SlateDB.write_op()], term(), Stream.t(), [effect()]}
-
-  @type effect :: :kick_deleter | {:unregister_from, binary()}
+          {:reply, term()} | {:write, [SlateDB.write_op()], term(), Stream.t(), [effect()]}
+  @type effect :: :kick_deleter | {:repair_source, struct(), struct()}
 
   # -- Reads (PROTOCOL.md §5.5, §5.6) ---------------------------------------
 
@@ -61,62 +51,35 @@ defmodule Slap.Streams.Protocol do
 
   # -- Create (PROTOCOL.md §5.1, §4.2) ---------------------------------------
 
-  @doc """
-  What a create does: `:create` or `:fork` at an absent path, `:resume_fork`
-  for a retry that finishes a fork whose copy was interrupted, or the reply
-  for a path in use. A soft-deleted stream's path cannot be created again
-  (§4.2).
-  """
-  @spec create_action(Stream.t(), map()) :: {:reply, term()} | :create | :fork | :resume_fork
-  def create_action(%Stream{status: :absent}, req),
-    do: if(req[:forked_from], do: :fork, else: :create)
+  @doc "Checks an ordinary create against the current configuration."
+  @spec create_action(Stream.t(), map()) :: {:reply, term()} | :create
+  def create_action(%Stream{status: :absent}, _req), do: :create
 
-  def create_action(%Stream{status: :gone}, _req), do: {:reply, {:error, :conflict}}
+  def create_action(%Stream{status: status}, _req) when status in [:gone, :pending],
+    do: {:reply, {:error, :conflict}}
 
-  def create_action(%Stream{status: status} = stream, req) do
-    cond do
-      not config_matches?(stream.meta, req, status) -> {:reply, {:error, :conflict}}
-      status == :copying -> :resume_fork
-      true -> {:reply, {:ok, :exists, info(stream.meta, stream.tail)}}
-    end
+  def create_action(%Stream{status: :active} = stream, req) do
+    if req[:forked_from] == nil and Meta.reference(stream.meta) == nil and
+         config_matches?(stream.meta, req),
+       do: {:reply, {:ok, :exists, info(stream.meta, stream.tail)}},
+       else: {:reply, {:error, :conflict}}
   end
 
-  # Content type, expiry and closure must match (§5.1), and for a fork the
-  # source, the requested offset and the sub-offset (§4.2), as the official
-  # server compares them.
-  #
-  # A fork whose copy was interrupted holds the values it inherited from its
-  # source, which a retry of the same request (leaving them out) would not
-  # match: while copying, the retry is compared with the original request.
-  defp config_matches?(meta, req, status) do
-    {content_type, ttl_s, expires_at_ms} = compared_config(meta, status)
-
-    ContentType.matches?(content_type, req[:content_type]) and ttl_s == req[:ttl_s] and
-      expires_at_ms == req[:expires_at_ms] and meta.closed == (req[:closed] == true) and
-      fork_matches?(meta.fork_of, req)
+  @doc false
+  @spec config_matches?(Meta.t(), map()) :: boolean()
+  def config_matches?(meta, req) do
+    ContentType.matches?(meta.content_type, req[:content_type]) and meta.ttl_s == req[:ttl_s] and
+      meta.expires_at_ms == req[:expires_at_ms] and meta.closed == (req[:closed] == true)
   end
 
-  defp compared_config(%Meta{fork_of: %ForkOf{} = f}, :copying),
-    do: {f.requested_content_type, f.requested_ttl_s, f.requested_expires_at_ms}
-
-  defp compared_config(meta, _status), do: {meta.content_type, meta.ttl_s, meta.expires_at_ms}
-
-  defp fork_matches?(nil, req), do: req[:forked_from] == nil
-
-  defp fork_matches?(fork, req) do
-    fork.path == req[:forked_from] and
-      req[:fork_offset] in [nil, fork.requested_offset || fork.offset] and
-      (req[:fork_sub_offset] || 0) == fork.sub_offset
-  end
-
-  @doc "Checks a create (not a fork) and splits its initial body into messages."
+  @doc "Validates an ordinary create and splits its initial body into messages."
   @spec create_messages(map()) :: {:ok, [binary()]} | {:error, term()}
   def create_messages(req) do
     with :ok <- check_expiry(req),
          do: split(ContentType.normalize(req[:content_type]), req[:body] || "", true)
   end
 
-  @doc "Creates the stream (not a fork) as `sid`, with `messages` from `create_messages/1`."
+  @doc "Creates an ordinary stream as `sid`, using `messages` from `create_messages/1`."
   @spec create(Stream.t(), map(), [binary()], non_neg_integer(), integer()) :: decision()
   def create(%Stream{status: :absent, path: path}, req, messages, sid, now) do
     meta = %Meta{
@@ -270,12 +233,8 @@ defmodule Slap.Streams.Protocol do
     end
   end
 
-  # A sequence gap is judged from this server's producer state, which is
-  # behind if another node has taken the shard and accepted appends there
-  # (a placement without leases, after this node was paused). Before
-  # answering one, rewrite the stream's metadata, unchanged: a fenced
-  # writer fails that write, so the request gets 503 and is retried on the
-  # shard's owner. The other errors cannot come from state that is behind.
+  # This owner's producer state may miss appends accepted by a newer owner.
+  # Require a fencing write before reporting a sequence gap.
   defp error_reply({:producer_seq_gap, _, _} = reason, stream),
     do: {:write, Batch.put_meta(stream.path, stream.meta), {:error, reason}, stream, []}
 
@@ -447,28 +406,7 @@ defmodule Slap.Streams.Protocol do
   def delete(%Stream{status: status}) when status in [:absent, :gone],
     do: {:reply, Stream.error(status)}
 
-  def delete(stream), do: remove(stream, :ok)
-
-  @doc """
-  Deletes the stream (a delete, or expiry): a soft delete if it has forks,
-  else a logical delete, after which a fork unregisters from its source.
-  """
-  @spec remove(Stream.t(), term()) :: decision()
-  def remove(%Stream{meta: %Meta{forks: [_ | _]} = meta} = stream, reply) do
-    gone = %{stream | status: :gone, meta: %{meta | soft_deleted: true}, expiry_key: nil}
-
-    {:write, Batch.soft_delete(stream.path, meta, stream.expiry_key), reply, gone,
-     [:kick_deleter]}
-  end
-
-  def remove(%Stream{meta: meta} = stream, reply) do
-    {:write, Batch.logical_delete(stream.path, stream.sid, stream.expiry_key), reply,
-     Stream.absent(stream.path), [:kick_deleter | unregister_from(meta.fork_of)]}
-  end
-
-  @doc false
-  def unregister_from(nil), do: []
-  def unregister_from(%{path: source}), do: [{:unregister_from, source}]
+  def delete(stream), do: Retention.remove(stream, :ok)
 
   @doc "Marks data before `offset` as gone (410)."
   @spec trim(Stream.t(), non_neg_integer()) :: decision()
@@ -481,7 +419,9 @@ defmodule Slap.Streams.Protocol do
         {:reply, :ok}
 
       true ->
-        {:write, Batch.trim(stream.sid, offset), :ok, %{stream | trim: offset}, [:kick_deleter]}
+        {meta, reclaim} = Retention.authorize(stream.meta, offset)
+        ops = Batch.trim(stream.sid, offset) ++ Batch.put_meta(stream.path, meta) ++ reclaim
+        {:write, ops, :ok, %{stream | trim: offset, meta: meta}, [:kick_deleter]}
     end
   end
 

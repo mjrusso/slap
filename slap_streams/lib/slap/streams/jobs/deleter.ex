@@ -12,15 +12,14 @@ defmodule Slap.Streams.Jobs.Deleter do
   @default_page 10_000
   @max_offset 0xFFFFFFFFFFFFFFFF
 
-  @doc "Runs until nothing is left to delete (for tests)."
-  def drain(ctx), do: GenServer.call(name(ctx), :drain, :infinity)
+  @doc "Runs one pass over durable deletion and trim work."
+  def drain(ctx, timeout \\ :infinity), do: GenServer.call(name(ctx), :drain, timeout)
 
   @impl true
   def init(ctx) do
     interval = Keyword.get(ctx.child_options, :deleter_interval, @default_interval)
     page = Keyword.get(ctx.child_options, :deleter_page, @default_page)
     Process.send_after(self(), :tick, interval)
-    # `trimmed`: sid => the trim point already deleted up to.
     {:ok, %{ctx: ctx, interval: interval, page: page, trimmed: %{}}}
   end
 
@@ -53,17 +52,14 @@ defmodule Slap.Streams.Jobs.Deleter do
       state
   end
 
-  # Only durable markers: a delete or trim that is not durable yet may still
-  # be lost in a crash, and then its rows must still be there. (Readers see
-  # the delete or trim only once it is durable, too.)
+  # A non-durable marker may disappear after a crash. Deleting its rows
+  # would then lose acknowledged data.
   defp pending(db, type) do
     db
     |> SlateDB.scan(prefix: Keys.type_prefix(type), durability: :remote)
     |> Enum.to_list()
   end
 
-  # Deletes the stream's messages from the cursor on, a page at a time, the
-  # new cursor in the same batch as the page, then the rest of its rows.
   defp delete_stream(state, {key, <<cursor::64>>}) do
     %{ctx: %{db: db}, page: page} = state
     sid = Keys.decode_sid(key)
@@ -80,18 +76,24 @@ defmodule Slap.Streams.Jobs.Deleter do
         write!(
           db,
           ops ++
-            producers ++ [{:delete, Keys.tail(sid)}, {:delete, Keys.trim(sid)}, {:delete, key}]
+            producers ++
+            [
+              {:delete, Keys.tail(sid)},
+              {:delete, Keys.trim(sid)},
+              {:delete, Keys.reclaim(sid)},
+              {:delete, key}
+            ]
         )
     end
   end
 
-  # The stream server owns each trim marker, so page progress stays in
-  # memory. After a restart, rescanning earlier pages finds tombstones.
+  # A stream server can advance the deletion bound while this pass runs.
+  # Keeping progress in memory prevents overwriting that newer bound.
   defp trim(state) do
     %{ctx: %{db: db}, page: page} = state
 
     trimmed =
-      for {key, <<offset::64>>} <- pending(db, 0x07), into: %{} do
+      for {key, <<offset::64>>} <- pending(db, 0x0A), into: %{} do
         sid = Keys.decode_sid(key)
         if Map.get(state.trimmed, sid) != offset, do: trim_below(db, sid, 0, offset, page)
         {sid, offset}
@@ -99,6 +101,8 @@ defmodule Slap.Streams.Jobs.Deleter do
 
     %{state | trimmed: trimmed}
   end
+
+  defp trim_below(_db, _sid, from, until, _page) when from >= until, do: :ok
 
   defp trim_below(db, sid, from, until, page) do
     case page(db, sid, from, until, page) do

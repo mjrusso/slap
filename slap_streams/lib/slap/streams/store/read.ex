@@ -3,10 +3,49 @@ defmodule Slap.Streams.Store.Read do
 
   alias Slap.SlateDB
   alias Slap.Streams.Offset
-  alias Slap.Streams.Store.{Codec, Keys, Meta, Producer, Tail}
+  alias Slap.Streams.Store.{Capture, Codec, Keys, Meta, Producer, Tail}
 
   @spec get_meta(SlateDB.t(), binary(), keyword()) :: {:ok, Meta.t() | nil} | {:error, term()}
   def get_meta(db, path, opts \\ []), do: get(db, Keys.meta(path), opts)
+
+  @doc "Identifies row ownership; only the sid allocator and seals are shared. Rejects unknown keys."
+  @spec row_owner({binary(), binary()}) :: {:stream, non_neg_integer()} | :shared
+  def row_owner({key, value}) do
+    case Keys.scope(key) do
+      :meta ->
+        case Codec.decode(value) do
+          %Meta{sid: sid} when is_integer(sid) and sid >= 0 -> {:stream, sid}
+        end
+
+      scope ->
+        scope
+    end
+  end
+
+  def get_registration(db, sid, target, opts \\ []) do
+    case get(db, Keys.registration(sid, target), opts) do
+      {:ok, %Capture{target: ^target} = registration} -> {:ok, registration}
+      {:ok, _absent_or_different_path} -> {:ok, nil}
+      error -> error
+    end
+  end
+
+  def registrations(db, sid, opts \\ []) do
+    db
+    |> SlateDB.scan(Keyword.put(opts, :prefix, Keys.registration_prefix(sid)))
+    |> Stream.map(fn {_key, value} -> Codec.decode(value) end)
+  end
+
+  def next_pin(db, sid, excluded) do
+    db
+    |> SlateDB.scan(prefix: Keys.pin_prefix(sid))
+    |> Stream.reject(fn {key, _} -> key == excluded end)
+    |> Enum.take(1)
+    |> case do
+      [{key, _}] -> Keys.pin_start(key)
+      [] -> nil
+    end
+  end
 
   @doc """
   `{path, %Meta{}}` of every stream whose path starts with `prefix`, in path
@@ -73,8 +112,8 @@ defmodule Slap.Streams.Store.Read do
       |> Enum.reduce_while({[], 0, nil}, &add_row(&1, &2, max_bytes))
 
     case result do
-      {:full, acc, {offset, bytes}} ->
-        {Enum.reverse(acc), Offset.advance(offset, byte_size(bytes))}
+      {:full, acc, {offset, bytes}, next_offset} ->
+        {Enum.reverse(acc), min(Offset.advance(offset, byte_size(bytes)), next_offset)}
 
       {acc, _total, nil} ->
         {Enum.reverse(acc), until}
@@ -96,13 +135,14 @@ defmodule Slap.Streams.Store.Read do
     end
   end
 
-  # A message is complete; stop once `max_bytes` are read.
   defp add_message(done, {acc, total}, max_bytes, next) do
     {msg, size} = finish(done)
     acc = [msg | acc]
     total = total + size
 
-    if total >= max_bytes, do: {:halt, {:full, acc, msg}}, else: {:cont, {acc, total, next}}
+    if total >= max_bytes,
+      do: {:halt, {:full, acc, msg, elem(next, 0)}},
+      else: {:cont, {acc, total, next}}
   end
 
   defp finish({offset, parts}) do
