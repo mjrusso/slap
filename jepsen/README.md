@@ -663,8 +663,8 @@ Each CI matrix job archives its `jepsen/store/` directory as
 by default), with its graphs, histories, timelines, and logs. CI attempts the
 archive and upload even when a test fails.
 
-The CI matrix runs five workloads × two placements × four isolated faults ×
-two trials: 80 trials. Each trial has 120 seconds of active operations.
+The CI matrix runs six workloads × two placements × four isolated faults ×
+two trials: 96 trials. Each trial has 120 seconds of active operations.
 
 ## The node image
 
