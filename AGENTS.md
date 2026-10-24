@@ -110,7 +110,12 @@ reason in its commit message and a test.
   (slap_cluster's placement). SlateDB's fencing is the safety net for when
   placement is wrong, not the mechanism. On the owner, one process writes
   each stream (its stream server) and each KV partition (its shard's
-  `Slap.KV.PartitionWriter` for it), all through that handle.
+  `Slap.KV.PartitionWriter` for it), all through that handle. Offline stream
+  upgrades (`Slap.Streams.Upgrade`) require exclusive handles with every
+  cluster node stopped. Check all shards before converting metadata, write
+  each stream's converted metadata in one batch with the cleanup rows it
+  needs (its pending deletion or its deletion bound), and stop on the first
+  error.
 - The data, tail and producer state of one append go in one
   `Slap.SlateDB.write/3` batch.
 - Offsets on the wire use the official server's format
@@ -135,6 +140,27 @@ reason in its commit message and a test.
   time as their KV deadline (exclusive: a write is not applied at it); the
   sweeper acts `max_clock_skew_ms` after it, and reads the record
   linearizably.
+- Forks and copies require a durable target reservation, then a durable source
+  registration. Reservation and activation writes check group seals (the rows
+  `Slap.Streams.seal/2` writes) in serializable transactions. Activation
+  publishes metadata and initial messages atomically. A fork protects its
+  original source range until final removal is durable, including while a
+  deleted intermediate fork still has descendants.
+  Trimming a fork does not shrink its source registration. Manual copies keep
+  protection until activation or cancellation is durable.
+- Registration rows, their pin index, the source's retention summary and its
+  physical deletion bound change atomically. The deletion bound only advances;
+  a new registration cannot protect rows already authorized for deletion.
+  Stream servers authorize bounds during normal operation; the offline upgrader
+  establishes them for legacy trims. Zero bounds have no reclamation entry.
+- Source registrations and their repair index (the `Keys.repair/1` rows that
+  `Slap.Streams.Jobs.Repair` scans) form the durable cleanup queue;
+  notifications only prompt checks. Identify streams by shard and sid, since
+  paths can be reused. Release protection only after the target's stream
+  server reports it terminal (`{:terminal, target}`) with a durable write,
+  which SlateDB fences if the server no longer owns the shard; a stale
+  owner's read cannot establish absence. Stream servers never synchronously
+  call one another.
 - A snapshot log's snapshot at an offset contains every entry before it,
   and anything more only if applying it again is harmless. It becomes
   current through the index's `Stream-Seq`, and only then are entries
