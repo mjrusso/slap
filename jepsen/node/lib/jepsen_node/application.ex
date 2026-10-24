@@ -1,10 +1,13 @@
 defmodule JepsenNode.Application do
   @moduledoc """
-  One node of the cluster under test: Durable Streams and KV on port 4437
-  (the placement strategy below, shards in S3; KV under `/v1/kv/`), the
-  Yjs API (`JepsenNode.YjsRouter`) on port 4438, and files
-  (`JepsenNode.FilesRouter`, bodies in the same bucket) on port 4439, and
-  snapshot logs (`JepsenNode.LogRouter`) on port 4440.
+  Runs one node of the test cluster, with shards and file bodies in S3.
+
+    * 4437: Durable Streams and KV (`/v1/kv/`).
+    * 4438: Yjs (`JepsenNode.YjsRouter`).
+    * 4439: Files (`JepsenNode.FilesRouter`).
+    * 4440: Snapshot logs (`JepsenNode.LogRouter`).
+    * 4441: Forks and copies (`JepsenNode.ForkRouter`).
+
   Configured by:
 
     * `JEPSEN_STORE` - the store URL, `s3://bucket/prefix`; the endpoint and
@@ -64,6 +67,9 @@ defmodule JepsenNode.Application do
         [
           Supervisor.child_spec({Bandit, plug: JepsenNode.LogRouter, port: 4440},
             id: :log_listener
+          ),
+          Supervisor.child_spec({Bandit, plug: JepsenNode.ForkRouter, port: 4441},
+            id: :fork_listener
           ),
           Yjs.Docs,
           {Bandit, plug: JepsenNode.YjsRouter, port: 4438},

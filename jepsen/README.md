@@ -110,6 +110,7 @@ workloads:
 | 4438 | Yjs document operations, readiness, and statistics |
 | 4439 | File operations and the final file audit |
 | 4440 | Snapshot-log operations and follower checks |
+| 4441 | Fork and copy operations, stream identities, and cleanup audit |
 
 All nodes share a RustFS object store. Each trial gets a new prefix in its
 bucket so one trial's data does not become the next trial's initial state.
