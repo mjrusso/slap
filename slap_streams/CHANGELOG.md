@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- Create forks by reference, with no limit on inherited data size. Replace
+  `:max_fork_copy_bytes` with `:max_fork_depth` (default 8; HTTP 400 when exceeded).
+- Rename `:fork_copy_grace` to `:creation_grace` for pending forks and copies.
+- Forks retain inherited data after source trim, deletion and expiry, including
+  through deleted forks. Reading that data requires the ancestor shards to be
+  available.
+- Add `Slap.Streams.copy/3` for independent copies that preserve offsets.
+  Retry the same request to resume an interrupted copy. See the
+  [copy options and expiry rules](README.md#lifecycle).
+
+### Required store upgrade
+
+Stores written by 0.4.0 and earlier require an offline metadata upgrade before
+starting this version. Stop all nodes, take a backup, and follow the
+[upgrade instructions](README.md#upgrading-existing-stream-stores).
+
 ## 0.4.0
 
 - Fix in-flight reads returning `:gone` (410) for streams that were removed

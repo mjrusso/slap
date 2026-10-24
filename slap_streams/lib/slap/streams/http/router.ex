@@ -8,9 +8,9 @@ defmodule Slap.Streams.HTTP.Router do
 
   It does not authenticate: every request is allowed. Put authentication in
   front of it, in the Plug pipeline that mounts it or in a proxy. An
-  authorization check by path must also cover the `Stream-Forked-From`
-  header of a `PUT`: creating a fork copies its source, so it reads that
-  path. With authentication, set `:private_cache`.
+  authorization check by path must cover both the target and the
+  `Stream-Forked-From` source of a `PUT`: a fork reads data from its source.
+  With authentication, set `:private_cache`.
 
   Options:
 

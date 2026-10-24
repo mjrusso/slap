@@ -304,9 +304,8 @@ headers, and security headers. For HTTP request examples, see
 The router does not authenticate requests or limit their rate. Put both in
 your application's pipeline or in a proxy in front of it. Two things to cover:
 
-- A path-based access check must also check a `PUT`'s `Stream-Forked-From`
-  header. Creating a fork copies the source stream, so the request reads the
-  source's path.
+- A path-based access check must authorize both the target path and the
+  `Stream-Forked-From` source of a `PUT`: a fork reads data from its source.
 - Set `:private_cache`, so that a CDN does not serve one user's historical
   reads to another.
 
@@ -337,51 +336,115 @@ cannot.
 
 ## Lifecycle
 
-- **Forks are copies.** When a fork is created, the source's stream server
-  checks the request (content type, offset, sub-offset, and size) and records
-  the fork. The source's messages below the fork offset are then copied to the
-  fork, keeping their offsets, followed by the fork's own first messages.
-  Requests to the fork get 503 until the copy finishes; retrying the create
-  finishes an interrupted copy. A fork whose copy would exceed
-  `:max_fork_copy_bytes` (cluster `child_options`, 64 MiB by default) gets 413.
-  A fork inherits the source's TTL or Expires-At unless it sets its own.
-- **Deletes.** Deleting a stream that has forks soft-deletes it. From then on,
-  requests to it get 410, and creating a stream at its path or a fork from it
-  gets 409. Its data is deleted at once, because each fork has its own copy. A stream
-  without forks is removed completely. If it was a fork, it is removed from
-  its source's list of forks, and a soft-deleted source with no forks left is
-  removed too. An in-flight read that detects deletion returns 410 only when
-  durable metadata marks its stream id as soft-deleted. Otherwise it returns
-  404, even if that path now names another stream. A long-poll woken by deletion
-  returns `:deleted` through the in-process API.
-- **Expiry.** Every 10 s (`:expiry_interval`), a background job finds the
-  streams whose deadline has passed and has each one's stream server check
-  it; a stream that has expired is deleted. Every request to a stream also
-  checks its expiry. For a sliding TTL, the stream's last access is stored at
-  most once per tenth of the TTL.
-- **Repair.** Two states could otherwise stay forever: a fork whose copy was
-  interrupted and never retried, and a soft-deleted source that still lists a
-  fork that no longer exists. A background job checks for both every minute
-  (`:repair_interval`). It removes a fork still copying after an hour
-  (`:fork_copy_grace`); the copy cannot be finished, because the fork's
-  initial body was only in the request. It removes stale forks from a
-  soft-deleted source's list, which lets the source be removed.
-- **Deleting messages.** Deleting a stream first writes only a deletion
-  marker. A background job then deletes the messages in pages of 10,000,
-  recording its progress with each page so that it resumes after a crash.
-- **Trim.** `Slap.Streams.trim(path, offset)` deletes the messages before
-  `offset`. Reads from an earlier offset get 410 (`:trimmed`), and
-  `offset=-1` starts at the earliest message left. The protocol has no request
-  for this, so it is available only in-process.
-- **List.** `Slap.Streams.list(prefix)` returns the paths of the streams that
-  start with `prefix` in `prefix`'s placement group, such as a Yjs document's
-  `.snapshots/`. It is available only in-process.
+- **Forks.** A fork starts with its source's durable messages before the fork
+  offset, from the source's trim point on. These messages are the fork's
+  *inherited range*. Creating a fork does not copy them, so creation time
+  does not depend on how many messages the fork inherits. (With a fork
+  sub-offset on a byte stream, it copies the first bytes of the message at the
+  fork offset.) The fork reads its inherited range from its source's storage.
+  Those reads need the source's shard to be available, and the shards of the
+  source's own sources if it is a fork; they do not start stream servers
+  there. Reads of the fork's own messages need only its shard. A fork
+  inherits TTL or Expires-At unless it sets its own.
+- **Fork depth.** A fork's depth is its source's depth plus one, or zero when
+  its inherited range is empty. Other streams, including copies, have depth
+  zero. `:max_fork_depth` in cluster `child_options` (default 8) limits it; a
+  deeper fork returns `{:error, {:bad_request, :max_fork_depth_exceeded}}`
+  (HTTP 400).
+- **Copies.** `Slap.Streams.copy/3` writes the source's messages into a new
+  stream with its own storage, at the same offsets. Use a fork when the
+  source's shards will stay available: it does not copy the inherited
+  messages. Use a copy when the new stream must not depend on its
+  source: a completed copy reads only its own shard and does not keep its
+  source's messages, and it can be forked to start a new chain of forks.
+  A copy takes time and storage proportional to the messages it copies.
+  Copies are available only in-process.
+- **Interrupted creation.** A fork or copy stays hidden until it is active.
+  Lists omit it, and HEAD, reads, appends, and forks or copies from it return
+  `:unavailable`. A copy writes pages from the calling process until its
+  `:timeout` (default 30 s), so a large copy can need several calls. When a
+  create or copy returns `{:error, :timeout}` or another error, the target
+  can stay pending with the progress made so far. Call it again with the same
+  arguments to continue; it returns `{:ok, :exists, info}` if the earlier call
+  finished after returning. Once a call has selected the inherited range,
+  retries keep it, even if the source changes or is deleted. Delete a pending
+  target to cancel its creation.
+- **Deletes.** Deleting a stream that has forks or pending copies soft-deletes
+  it: reads return 410 and creating a stream at its path returns 409, while
+  its forks and pending copies can still read their inherited ranges. A
+  deleted fork keeps its own inherited range while forks made from it exist.
+  Long-polls woken by deletion return `:deleted` through the Elixir API.
+- **Expiry.** Every 10 s (`:expiry_interval`), a background job asks each stream
+  past its deadline to check expiry and delete itself if expired. Public requests
+  also check expiry; internal retention and cleanup requests do not. Sliding-TTL
+  access times are persisted at most once per tenth of the TTL.
+- **Repair.** Every minute (`:repair_interval`), repair cancels forks pending
+  for longer than `:creation_grace` (default one hour) and copies that have
+  copied no page for that long. It also releases inherited ranges that no
+  stream needs any more. A range whose fork or copy is on an unreachable
+  shard stays until repair can check it. Repair reads durable metadata, and
+  starts a stream server only when it needs to write.
+- **Deleting messages.** Background deletion removes messages in pages of
+  10,000 rows and resumes after a crash.
+- **Trim.** `Slap.Streams.trim(path, offset)` makes reads below `offset` return
+  410 (`:trimmed`). HTTP reads from `-1` (Elixir `:start`) start at the trim
+  point. Background cleanup deletes only the messages below both the trim
+  point and the start of every inherited range that other streams hold on
+  this stream. Trimming a fork does not shrink its inherited range. Trim is
+  available only in-process.
+- **List.** `Slap.Streams.list(prefix)` returns paths starting with `prefix` in
+  its placement group, such as a Yjs document's `.snapshots/`. It is available
+  only in-process.
 - **Seal.** `Slap.Streams.seal(group)` permanently prevents new streams in a
-  placement group. Once `seal/2` returns, creating a stream or a fork in the
-  group gets `{:error, :sealed}` (409), and every stream created before is
-  durable and listed. [`slap_snapshot_log`](https://hexdocs.pm/slap_snapshot_log/) seals
-  a deleted log's group, so that a snapshot write that started before the
-  delete cannot land after it. It is available only in-process.
+  placement group. Once it returns, creating a stream, fork or copy in that
+  group returns `{:error, :sealed}` (409) without reserving the target. A fork
+  or copy that was already pending is removed when it tries to become active,
+  and that call returns `{:error, :sealed}`. Existing streams are unchanged,
+  and a retry of a creation that had already completed returns
+  `{:ok, :exists, info}`.
+  [`slap_snapshot_log`](https://hexdocs.pm/slap_snapshot_log/) seals a deleted
+  log's group to prevent pending snapshot writes from creating new streams.
+  Seal is available only in-process.
+
+## Upgrading existing stream stores
+
+Stores written by 0.4.0 and earlier need an offline upgrade before starting
+this version. In 0.4.0 and earlier, a fork copied its source's messages; the
+upgrade turns those forks into streams that are not forks. Before upgrading,
+finish or delete forks that the old version is still creating.
+
+Stop **every node using the store** and take a backup. With the new package
+installed, save this invocation as `upgrade_streams.exs`. Supply all stream
+shards using their existing paths and store configuration:
+
+```elixir
+shard_paths = ["streams/shard-000", "streams/shard-001"]
+store = {:local, "/path/to/existing/store"}
+
+dbs =
+  Enum.map(shard_paths, fn path ->
+    {:ok, db} = Slap.SlateDB.open(path, store: store)
+    db
+  end)
+
+try do
+  :ok = Slap.Streams.Upgrade.run(dbs)
+after
+  Enum.each(dbs, fn db -> :ok = Slap.SlateDB.close(db) end)
+end
+```
+
+Run `mix run --no-start upgrade_streams.exs` before restarting the cluster.
+`Slap.Streams.Upgrade.run/1` reads trusted stored ETF records; do not supply
+external input. It checks every shard before writing and converts metadata in
+durable batches. On failure, close and reopen the handles before retrying;
+converted records are skipped. Once conversion starts, use the new version or
+restore the backup before returning to the old version.
+
+The upgrade preserves message rows, offsets, trim, producer state, Stream-Seq,
+expiry and closed state. Background cleanup finishes old deletion and trim work
+after the cluster restarts. Sources no longer keep messages for forks made by
+the old version, which hold their own copies.
 
 ## Storage after deletes
 
@@ -478,6 +541,7 @@ Run these scripts from `slap_streams/` after the development setup above:
 ```sh
 mix run bench/append_latency.exs
 mix run bench/read_scaling.exs
+mix run bench/forks_and_copies.exs
 ```
 
 These measure the library in-process. `slap` runs the official [Durable
@@ -488,6 +552,10 @@ against a running server.
 
 `bench/append_latency.exs` measures durable append latency on the in-memory
 store. Set `SLAP_BENCH_FLUSH_INTERVAL` to change SlateDB's flush interval.
+
+`bench/forks_and_copies.exs` measures fork creation and copies for 1 KiB,
+64 MiB and 1 GiB prefixes, reads through chains of forks, and fork reads after
+the source is trimmed. It uses an in-memory store and prints JSON results.
 
 `bench/read_scaling.exs` times first server reads, warm random reads, and narrow
 and broad lists as stream count grows. It also times reads at the start,
