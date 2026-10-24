@@ -16,6 +16,7 @@
                          [db :as db]
                          [docker :as docker]
                          [files :as files]
+                         [fork :as fork]
                          [kv :as kv]
                          [object-store :as object-store]
                          [snapshot-log :as snapshot-log]
@@ -26,6 +27,7 @@
    :yjs    yjs/workload
    :kv     kv/workload
    :files  files/workload
+   :fork   fork/workload
    :snapshot-log snapshot-log/workload})
 
 (def default-faults
@@ -144,7 +146,7 @@
                             (gen/clients (:final-generator workload)))})))
 
 (def opt-spec
-  [[nil "--workload NAME" "append, yjs, kv, files or snapshot-log"
+  [[nil "--workload NAME" "append, yjs, kv, files, fork or snapshot-log"
     :default  :append
     :parse-fn keyword
     :validate [workloads (str "one of " (str/join ", " (map name (keys workloads))))]]

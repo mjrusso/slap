@@ -135,7 +135,7 @@ The workloads cover the eight packages at these boundaries:
 | --- | --- |
 | `slap_slatedb` | All workloads use its durable storage; ownership changes exercise fencing indirectly. |
 | `slap_cluster` | Every workload runs under both object leases and distributed placement. |
-| `slap_streams` | `append`, `snapshot-log`, and `yjs` use durable streams. |
+| `slap_streams` | `append`, `fork`, `snapshot-log`, and `yjs` use durable streams. |
 | `slap_snapshot_log` | `snapshot-log` checks snapshots, trims, follower resets, and reads; `yjs` uses it for document storage. |
 | `slap_yjs` | `yjs` checks acknowledged adds, array contents and order, and compaction. |
 | `slap_kv` | `kv` and `files` check conditional writes and final reads. |
@@ -230,6 +230,7 @@ supports.
 
 | Workload | Client operations | Main question |
 | --- | --- | --- |
+| `fork` | Fork and copy across shards; append, trim, delete, expire, retry, and read pages. | Do forks and copies keep their captured data through faults, and does cleanup finish? |
 | `append` | Append a unique integer to a stream; read its full list. | Can Elle place the observed lists in an allowed order? |
 | `kv` | Read, write, or compare and set a key. | Can Knossos explain each key as an atomic register? |
 | `files` | Read, replace, conditionally replace, or delete a file. | Do register results, body shape, and the cleanup audit agree? |
@@ -285,6 +286,59 @@ multi-stream atomic transactions; this workload does not issue those
 operations. The official
 [Durable Streams conformance suite](../slap/README.md#durable-streams-conformance-and-benchmarks)
 covers additional stream operations.
+
+### Reference forks and manual copies: the `fork` workload
+
+The node adapter on port 4441 calls `Slap.Streams` functions directly. This
+is needed for `Slap.Streams.copy/3`, which has no HTTP API.
+Each actor uses separate paths, with adjacent paths on different shards.
+Histories record request IDs, captured offsets, source and target stream IDs,
+and read pages with their cursors. Errors include a JSON code such as
+`{"error":{"code":"source_gone"}}`. HTTP 503 means an unknown outcome to
+retry; HTTP 409 means a definite failure. Unknown storage formats and unexpected cleanup errors
+return HTTP 500 with `audit_failed` and a diagnostic; these fail the test.
+
+Each scenario creates A, forks it to B, appends independently to both, forks B
+to C, and copies C to D. It trims and deletes A and B, reads C's inherited
+messages, deletes C, and reads D. The copy counts as independent only after a
+fenced audit confirms that its captured ancestors' rows have been deleted.
+It then reuses the paths and checks the replacement streams' data.
+
+A separate source has a short TTL and a fork with a later expiry. A read of the
+fork counts as expiry coverage only after HEAD confirms that the captured source
+incarnation expired. The checker compares the reported deadline and observation
+time; containers share the host clock. If the source expires before the fork
+registers, the actor retries this part on fresh paths. Cleanup includes the
+abandoned paths.
+
+After an unknown outcome, actors retry the same request even if Jepsen replaces
+the client process. The checker considers both applied and unapplied outcomes.
+Successful retries must confirm the original capture, stream IDs and deadline.
+Every returned page must have the expected messages and cursor, including pages
+returned before a later failure. Operations in each scenario run in order;
+a multi-page read is not treated as an atomic snapshot.
+
+With object leases, reads must match the scenario's current contents. With
+distributed placement, reads during faults may match an earlier stage. Recovery
+reads must match current acknowledged contents in both cases.
+
+After faults heal, recovery waits for placement to converge, retries unfinished
+operations, and reads every survivor. Its 180-second budget includes cleanup.
+Each cleanup request shares one deadline of at most 25 seconds across deletion,
+parallel shard drains and remote checks. The final audit deletes every scenario
+path, runs repair and deletion jobs, and counts remaining stream rows, excluding
+the ID allocator and group seals (rows written by `Slap.Streams.seal/2`). Both
+ancestor and final audits require a durable fencing write on each audited shard
+before accepting an empty view; an empty flush does not establish ownership.
+
+A pass requires cross-shard forks and copies, retained reads after source
+removal and expiry, independent-copy reads after ancestor reclamation, successful
+recovery reads, and zero remaining rows. Missing coverage yields `:unknown`.
+
+```sh
+just jepsen --workload fork --placement object-lease --nemesis partition --time-limit 300
+just jepsen --workload fork --placement distributed --nemesis kill --time-limit 300
+```
 
 ### KV: the `kv` register workload
 
