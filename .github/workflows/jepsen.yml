@@ -42,7 +42,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        workload: [append, yjs, kv, files, snapshot-log, fork]
+        workload: [append, yjs, kv, files, snapshot-log, fork, bank]
         placement: [object-lease, distributed]
         fault: [partition, kill, pause, object-store]
     steps:
