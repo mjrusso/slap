@@ -40,7 +40,8 @@ defmodule Slap.Streams.Store.Creation do
           ttl_s: non_neg_integer() | nil,
           expires_at_ms: integer() | nil,
           closed: boolean(),
-          body: binary()
+          body: binary(),
+          guard: map() | nil
         }
 
   @type pending ::

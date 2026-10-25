@@ -13,6 +13,7 @@ defmodule Slap.Streams.Store.Meta do
             last_stream_seq: nil,
             soft_deleted: false,
             creation: nil,
+            owner: nil,
             registration_count: 0,
             pin_start: nil,
             reclaimed_before: 0
@@ -77,7 +78,16 @@ defmodule Slap.Streams.Store.Codec do
   # Safe ETF decoding may run before the creation modules load. Load every
   # stored tag and field atom without putting module names in the record.
   @atoms Enum.uniq(
-           [:body, :forked_from, :source_placement_key, :fork_offset, :fork_sub_offset] ++
+           [
+             :body,
+             :forked_from,
+             :source_placement_key,
+             :fork_offset,
+             :fork_sub_offset,
+             :guard,
+             :identity,
+             :offset
+           ] ++
              Map.keys(@nested_types) ++
              Enum.flat_map(
                [Meta, Tail, Producer | Map.values(@nested_types)],

@@ -15,6 +15,13 @@ defmodule Slap.Streams.Reader do
     end
   end
 
+  def read_fenced(ctx, path, offset, max_bytes, timeout) do
+    deadline = deadline(timeout)
+
+    with {:ok, view} <- StreamServer.call(ctx, path, :fenced_view, remaining(deadline)),
+         do: read_view(ctx, path, view, offset, max_bytes, deadline)
+  end
+
   defp read_view(ctx, path, %Stream.View{status: :active} = view, offset, max_bytes, deadline) do
     %Stream.View{next_offset: tail} = view
 

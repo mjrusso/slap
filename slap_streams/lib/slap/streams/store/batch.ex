@@ -76,6 +76,7 @@ defmodule Slap.Streams.Store.Batch do
     [
       {:delete, Keys.meta(path)},
       {:delete, Keys.repair(sid)},
+      {:delete, Keys.work(sid)},
       {:put, Keys.delete_pending(sid), <<0::64>>}
     ] ++ expiry(path, sid, expiry_key, nil)
   end

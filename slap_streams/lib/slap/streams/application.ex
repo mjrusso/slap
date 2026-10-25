@@ -9,6 +9,11 @@ defmodule Slap.Streams.Application do
   @impl true
   def start(_type, _args) do
     Router.setup()
-    Supervisor.start_link([Streams.Metrics], strategy: :one_for_one, name: Streams.Supervisor)
+
+    Supervisor.start_link(
+      [{Registry, keys: :unique, name: Streams.Work.Registry}, Streams.Metrics],
+      strategy: :one_for_one,
+      name: Streams.Supervisor
+    )
   end
 end

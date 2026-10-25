@@ -33,7 +33,8 @@ defmodule Slap.Streams.Creation.Target do
       ttl_s: req[:ttl_s],
       expires_at_ms: req[:expires_at_ms],
       closed: req[:closed] == true,
-      body: req[:body] || ""
+      body: req[:body] || "",
+      guard: req[:guard]
     }
   end
 
@@ -47,7 +48,7 @@ defmodule Slap.Streams.Creation.Target do
   end
 
   def reservation(%Stream{status: :pending, meta: %{creation: c}}, kind, req) do
-    if kind(c) == kind and c.request == req,
+    if kind(c) == kind and request(c.request) == req,
       do: {:reply, {:ok, {:pending, c}}},
       else: {:reply, {:error, :conflict}}
   end
@@ -84,7 +85,7 @@ defmodule Slap.Streams.Creation.Target do
         target: Identity.new(ctx, path, sid)
       )
 
-    meta = %Meta{sid: sid, created_ms: now, creation: c}
+    meta = %Meta{sid: sid, created_ms: now, creation: c, owner: req[:guard]}
     stream = Stream.pending(path, meta)
 
     ops =

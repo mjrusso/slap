@@ -62,6 +62,7 @@ defmodule Slap.Streams.StoreTest do
             Keys.delete_pending(sid),
             Keys.trim(sid),
             Keys.repair(sid),
+            Keys.work(sid),
             Keys.reclaim(sid),
             Keys.witness(sid),
             Keys.registration(sid, target),
@@ -83,7 +84,7 @@ defmodule Slap.Streams.StoreTest do
       for key <- [
             <<>>,
             <<0x00, "unknown">>,
-            <<0x0F, sid::64>>,
+            <<0x10, sid::64>>,
             Keys.tail(sid) <> <<0>>,
             <<0x04, sid::64>>,
             <<0x05, sid::64>>,

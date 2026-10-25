@@ -3,9 +3,9 @@ defmodule Slap.Streams.Group do
 
   alias Slap.SlateDB
   alias Slap.SlateDB.Transaction
-  alias Slap.Streams.Store.Keys
+  alias Slap.Streams.Store.{Codec, Keys, Meta, Tail}
 
-  # Commit conflicts come from a seal, so a retry finds it.
+  # A commit conflict is an aborted transaction; delivered writes are never retried.
   @attempts 3
 
   @doc "Seals `group` on the shard of `ctx`, durably."
@@ -17,38 +17,67 @@ defmodule Slap.Streams.Group do
     end
   end
 
-  @doc """
-  Writes `ops`, which create a stream in `group`, unless the group is
-  sealed. Returns `{:ok, seq}` like `Slap.SlateDB.write/3`.
-  """
-  @spec create_write(SlateDB.t(), binary(), [SlateDB.write_op()]) ::
-          {:ok, non_neg_integer()} | {:error, :sealed | SlateDB.Error.t()}
-  def create_write(db, group, ops), do: create_write(db, group, ops, @attempts)
-
-  defp create_write(db, group, ops, attempts) do
-    with {:ok, tx} <- SlateDB.begin(db, isolation: :serializable) do
-      case Transaction.get(tx, Keys.seal(group)) do
-        {:ok, nil} -> commit(db, group, ops, tx, attempts)
-        {:ok, _sealed} -> rollback(tx, {:error, :sealed})
-        {:error, _} = error -> rollback(tx, error)
-      end
-    end
+  @doc false
+  def guarded_write(db, group, ops, guard, unsealed) do
+    request = %{group: group, ops: ops, guard: guard, unsealed: unsealed}
+    guarded_write(db, request, @attempts)
   end
 
-  defp commit(db, group, ops, tx, attempts) do
-    case Enum.reduce_while(ops, :ok, &add(tx, &1, &2)) do
-      :ok -> commit_or_retry(db, group, ops, tx, attempts)
-      {:error, _} = error -> rollback(tx, error)
-    end
-  end
+  defp guarded_write(db, request, attempts) do
+    result =
+      with {:ok, tx} <- SlateDB.begin(db, isolation: :serializable),
+           do: guarded_commit(tx, request)
 
-  defp commit_or_retry(db, group, ops, tx, attempts) do
-    case Transaction.commit(tx) do
+    case result do
       {:error, %SlateDB.Error{kind: :conflict}} when attempts > 1 ->
-        create_write(db, group, ops, attempts - 1)
+        guarded_write(db, request, attempts - 1)
 
       result ->
         result
+    end
+  end
+
+  defp guarded_commit(tx, request) do
+    with :ok <- check_seal(tx, request.group, request.unsealed),
+         :ok <- check_guard(tx, request.guard),
+         :ok <- Enum.reduce_while(request.ops, :ok, &add(tx, &1, &2)) do
+      Transaction.commit(tx)
+    else
+      error -> rollback(tx, error)
+    end
+  end
+
+  defp check_seal(_tx, _group, false), do: :ok
+
+  defp check_seal(tx, group, true) do
+    case Transaction.get(tx, Keys.seal(group)) do
+      {:ok, nil} -> :ok
+      {:ok, _sealed} -> {:error, :sealed}
+      error -> error
+    end
+  end
+
+  defp check_guard(_tx, nil), do: :ok
+
+  defp check_guard(tx, %{absent: paths}) do
+    Enum.reduce_while(paths, :ok, fn path, :ok ->
+      case Transaction.get(tx, Keys.meta(path)) do
+        {:ok, nil} -> {:cont, :ok}
+        {:ok, _existing} -> {:halt, {:error, :conflict}}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp check_guard(tx, %{identity: identity, offset: offset}) do
+    with {:ok, encoded} when encoded != nil <- Transaction.get(tx, Keys.meta(identity.path)),
+         %Meta{sid: sid, soft_deleted: false} when sid == identity.sid <- Codec.decode(encoded),
+         {:ok, encoded} when encoded != nil <- Transaction.get(tx, Keys.tail(sid)),
+         %Tail{next_offset: ^offset} <- Codec.decode(encoded) do
+      :ok
+    else
+      {:error, _} = error -> error
+      _replaced_or_advanced -> {:error, :conflict}
     end
   end
 

@@ -13,7 +13,7 @@ defmodule Slap.Streams.ModelTest do
   alias Slap.Streams
   alias Slap.Streams.Jobs.{Deleter, Expiry}
   alias Slap.Streams.{Reader, StreamServer}
-  alias Slap.Streams.Store.{CopyCreation, CopyProgress, Meta}
+  alias Slap.Streams.Store.{CopyCreation, CopyProgress, Identity, Meta}
   alias Slap.Streams.Test.{FakeClock, Model, ReadView}
 
   @commands 40
@@ -33,6 +33,51 @@ defmodule Slap.Streams.ModelTest do
     # Only generated repair commands release the model's deferred holds.
     suspend_repair()
     :ok
+  end
+
+  property "a control transition fences stale appends and component creates after TTL touches" do
+    check all(transitions <- list_of(boolean(), min_length: 2, max_length: 10), max_runs: 20) do
+      base = "/guard-model-#{System.unique_integer([:positive])}"
+      path = base <> "/.control"
+
+      {:ok, _, %{next_offset: offset}} =
+        Streams.create(path, body: "{}", content_type: "application/json", ttl_s: 10)
+
+      {:ok, view} = Streams.metadata(path)
+      identity = Identity.new(ctx_for(path), path, view.sid)
+
+      Enum.reduce(Enum.with_index(transitions), offset, fn {advance?, n}, offset ->
+        guard = %{identity: identity, offset: offset}
+
+        next =
+          if advance? do
+            {:ok, %{next_offset: next}} =
+              Streams.control_append(path, identity, offset, "{}", true, false, [])
+
+            FakeClock.advance(2_000)
+
+            assert {:error, :conflict} =
+                     Streams.control_append(path, identity, offset, "{}", true, false, [])
+
+            next
+          else
+            offset
+          end
+
+        result = Streams.create_guarded(base <> "/.child-#{n}", guard, body: "entry")
+
+        if advance? do
+          assert result == {:error, :conflict}
+        else
+          assert {:ok, :created, _} = result
+          assert :ok = Streams.delete(base <> "/.child-#{n}")
+        end
+
+        next
+      end)
+
+      assert :ok = Streams.delete(path)
+    end
   end
 
   property "an idle stream stays at its tail after a bounded wait" do

@@ -151,7 +151,12 @@ defmodule Slap.Streams do
   `:creation_grace`.
   """
   @spec create(path(), keyword()) :: {:ok, :created | :exists, info()} | {:error, error()}
-  def create(path, opts \\ []) do
+  def create(path, opts \\ []), do: create(path, opts, nil)
+
+  @doc false
+  def create_guarded(path, guard, opts), do: create(path, opts, guard)
+
+  defp create(path, opts, guard) do
     validate_options!(opts, [
       :content_type,
       :ttl_s,
@@ -172,11 +177,14 @@ defmodule Slap.Streams do
 
     with :ok <- validate_create(opts), :ok <- validate_path(path) do
       req =
-        Map.new(Keyword.drop(opts, [:timeout, :placement_key, :source_placement_key, :cluster]))
+        opts
+        |> Keyword.drop([:timeout, :placement_key, :source_placement_key, :cluster])
+        |> Map.new()
+        |> Map.put(:guard, guard)
 
       if req[:forked_from],
         do: Streams.Creation.run(path, req, :reference, opts),
-        else: request(path, {:create, req}, opts)
+        else: request(path, {:guarded, guard, nil, false, {:create, req}}, opts)
     end
   end
 
@@ -281,6 +289,62 @@ defmodule Slap.Streams do
     validate_options!(opts, [:timeout, :placement_key, :cluster])
     with :ok <- validate_offset(offset), do: request(path, {:trim, offset}, opts)
   end
+
+  @doc false
+  def metadata(path, opts \\ []) do
+    with {:ok, view} <- request(path, :read_info, opts) do
+      case view.status do
+        :absent -> {:error, :not_found}
+        _ -> {:ok, view}
+      end
+    end
+  end
+
+  @doc false
+  def metadata_fenced(path, opts \\ []) do
+    with {:ok, view} <- request(path, :fenced_view, opts) do
+      if view.status == :absent, do: {:error, :not_found}, else: {:ok, view}
+    end
+  end
+
+  @doc false
+  def read_fenced(path, offset, opts) do
+    timeout = Keyword.get(opts, :timeout, @default_timeout)
+
+    route(
+      path,
+      opts,
+      timeout,
+      {Reader, :read_fenced,
+       [path, offset, Keyword.get(opts, :max_bytes, @default_max_bytes), timeout]}
+    )
+  end
+
+  @doc false
+  def control_create(path, body, absent, work, opts) do
+    req = %{content_type: "application/json", body: body}
+    request(path, {:guarded, %{absent: absent}, work, true, {:create, req}}, opts)
+  end
+
+  @doc false
+  def control_append(path, identity, offset, body, work, unsealed, opts) do
+    guard = %{identity: identity, offset: offset}
+    req = %{body: body, content_type: "application/json"}
+    request(path, {:guarded, guard, work, unsealed, {:append, req}}, opts)
+  end
+
+  @doc false
+  def delete_identity(identity, opts),
+    do:
+      internal_identity(
+        identity,
+        {:delete_identity, identity},
+        Keyword.get(opts, :timeout, 30_000),
+        Keyword.get(opts, :cluster, Streams.Cluster)
+      )
+
+  @doc false
+  def each_local_work(fun), do: Streams.Work.each_local(fun)
 
   @doc false
   def internal(path, request, opts \\ []), do: request(path, request, opts)

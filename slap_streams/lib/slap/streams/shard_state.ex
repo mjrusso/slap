@@ -14,6 +14,7 @@ defmodule Slap.Streams.ShardState do
 
   @impl true
   def init(ctx) do
+    {:ok, _} = Registry.register(Slap.Streams.Work.Registry, {ctx.cluster, ctx.n}, ctx)
     {:ok, next} = Read.next_sid(ctx.db)
     # Nothing is reserved yet in this process: `limit == next`.
     {:ok, %{ctx: ctx, next: next, limit: next}}

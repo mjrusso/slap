@@ -86,6 +86,7 @@ defmodule Slap.Streams.Protocol do
       sid: sid,
       content_type: ContentType.normalize(req[:content_type]),
       created_ms: now,
+      owner: req[:guard],
       ttl_s: req[:ttl_s],
       expires_at_ms: req[:expires_at_ms],
       closed: req[:closed] == true

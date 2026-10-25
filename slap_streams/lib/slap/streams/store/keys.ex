@@ -42,7 +42,7 @@ defmodule Slap.Streams.Store.Keys do
   def decode_expiry(<<0x05, deadline_ms::64, sid::64>>), do: {deadline_ms, sid}
 
   @spec decode_sid(binary()) :: non_neg_integer()
-  def decode_sid(<<type, sid::64>>) when type in [0x06, 0x07, 0x08, 0x0A, 0x0C], do: sid
+  def decode_sid(<<type, sid::64>>) when type in [0x06, 0x07, 0x08, 0x0A, 0x0C, 0x0F], do: sid
 
   @spec type_prefix(0..255) :: binary()
   def type_prefix(type), do: <<type>>
@@ -70,7 +70,11 @@ defmodule Slap.Streams.Store.Keys do
   def pin_prefix(sid), do: <<0x0E, sid::64>>
   def pin_start(<<0x0E, _sid::64, start::64, _target_shard::64, _target_sid::64>>), do: start
 
+  @spec work(non_neg_integer()) :: binary()
+  def work(sid), do: <<0x0F, sid::64>>
+
   @spec scope(binary()) :: :shared | :meta | {:stream, non_neg_integer()}
+
   def scope(<<0x00, "next_sid">>), do: :shared
   def scope(<<0x09, _group::binary>>), do: :shared
   def scope(<<0x01, _path::binary>>), do: :meta
@@ -78,7 +82,7 @@ defmodule Slap.Streams.Store.Keys do
   def scope(<<0x04, sid::64, _offset::64, _part::16>>), do: {:stream, sid}
   def scope(<<0x05, _deadline::64, sid::64>>), do: {:stream, sid}
 
-  def scope(<<type, sid::64>>) when type in [0x02, 0x06, 0x07, 0x08, 0x0A, 0x0C],
+  def scope(<<type, sid::64>>) when type in [0x02, 0x06, 0x07, 0x08, 0x0A, 0x0C, 0x0F],
     do: {:stream, sid}
 
   def scope(<<0x0D, sid::64, _target_shard::64, _target_sid::64>>), do: {:stream, sid}

@@ -24,7 +24,7 @@ defmodule Slap.Streams.StreamServer do
 
   alias Slap.Streams.Creation.Target
   alias Slap.Streams.Jobs.Repair
-  alias Slap.Streams.Store.{Identity, Meta, Read, Tail}
+  alias Slap.Streams.Store.{Identity, Keys, Meta, Read, Tail}
 
   @default_idle_timeout :timer.minutes(5)
 
@@ -176,9 +176,20 @@ defmodule Slap.Streams.StreamServer do
   end
 
   @impl true
-  def handle_call(request, from, state) do
+  def handle_call({:guarded, guard, work, unsealed, request}, from, state),
+    do:
+      dispatch_call(
+        {:guarded, %{guard: guard, work: work, unsealed: unsealed}, request},
+        from,
+        state
+      )
+
+  def handle_call(request, from, state),
+    do: dispatch_call(request, from, state)
+
+  defp dispatch_call(request, from, state) do
     now = Clock.now_ms()
-    policy = lifecycle(if is_tuple(request), do: elem(request, 0), else: request)
+    policy = request_lifecycle(request)
     state = if policy.activity, do: %{state | last_active: now}, else: state
     state = %{state | request: request_info(request)}
 
@@ -192,6 +203,11 @@ defmodule Slap.Streams.StreamServer do
       {:error, error, state} -> write_failed(error, from, state)
     end
   end
+
+  defp request_lifecycle({:guarded, _policy, request}), do: request_lifecycle(request)
+
+  defp request_lifecycle(request),
+    do: lifecycle(if is_tuple(request), do: elem(request, 0), else: request)
 
   defp lifecycle(operation)
        when operation in [
@@ -210,6 +226,7 @@ defmodule Slap.Streams.StreamServer do
   defp lifecycle(operation)
        when operation in [
               :head,
+              :fenced_view,
               :source_identity,
               :register,
               :capture,
@@ -222,7 +239,14 @@ defmodule Slap.Streams.StreamServer do
   defp lifecycle(:expiry_check), do: %{activity: false, expire: true, touch: false}
 
   defp lifecycle(operation)
-       when operation in [:repair_check, :terminal, :unregister, :compact_registration],
+       when operation in [
+              :repair_check,
+              :terminal,
+              :unregister,
+              :compact_registration,
+              :delete_identity,
+              :owned_identity
+            ],
        do: %{activity: false, expire: false, touch: false}
 
   defp expire(state, false, _now), do: {:ok, state}
@@ -253,9 +277,11 @@ defmodule Slap.Streams.StreamServer do
 
   # -- Requests -------------------------------------------------------------
 
-  # Reads, head and waits use the durable view and are answered at once.
   defp handle(:read_info, _from, state),
     do: {:reply, {:ok, state.durable}, state}
+
+  defp handle(:fenced_view, from, state),
+    do: decide(fenced_reply(state.stream, 0, {:ok, Stream.view(state.stream)}), from, state)
 
   defp handle(:head, _from, state), do: {:reply, Protocol.head(state.durable), state}
 
@@ -285,30 +311,32 @@ defmodule Slap.Streams.StreamServer do
   end
 
   # Writes (and replies that depend on them) go through the live stream.
-  defp handle({:create, req}, from, state) do
-    case Protocol.create_action(state.stream, req) do
-      :create ->
-        create(req, from, state)
+  defp handle({:guarded, policy, {:create, req}}, from, state),
+    do: handle_create(req, from, state, policy)
 
-      {:reply, reply} ->
-        reply_in_order(reply, from, state)
-    end
-  end
+  defp handle({:guarded, policy, {:append, req}}, from, state),
+    do: handle_append(req, from, state, policy)
 
-  defp handle({:append, req}, from, state) do
-    bytes = byte_size(req[:body] || "")
+  defp handle({:create, req}, from, state), do: handle_create(req, from, state, %{})
+  defp handle({:append, req}, from, state), do: handle_append(req, from, state, %{})
 
-    if ShardLoad.admit?(state.load, state.inflight_bytes, bytes, state.ctx.child_options) do
-      decide(Protocol.append(state.stream, req), from, state)
-    else
-      # Backpressure. The reply depends on nothing in flight, so it goes now.
-      Streams.Telemetry.execute([:append, :rejected], %{bytes: bytes}, %{
-        shard: state.ctx.n,
-        reason: :overloaded
-      })
+  defp handle(
+         {:delete_identity, %{sid: sid}},
+         from,
+         %{stream: %{sid: sid, status: status}} = state
+       )
+       when status in [:active, :pending],
+       do: decide(Protocol.delete(state.stream), from, state)
 
-      {:reply, {:error, :overloaded}, state}
-    end
+  defp handle({:delete_identity, identity}, from, state),
+    do: decide(fenced_reply(state.stream, identity.sid, :ok), from, state)
+
+  defp handle({:owned_identity, owner}, from, state) do
+    identity =
+      if state.stream.meta != nil and state.stream.meta.owner == owner,
+        do: Identity.new(state.ctx, state.stream.path, state.stream.sid)
+
+    decide(fenced_reply(state.stream, 0, {:ok, identity}), from, state)
   end
 
   defp handle(:delete, from, state), do: decide(Protocol.delete(state.stream), from, state)
@@ -393,10 +421,45 @@ defmodule Slap.Streams.StreamServer do
   defp handle({:repair_check, sid}, from, state),
     do: decide(Retention.repair_check(state.ctx, state.stream, sid, Clock.now_ms()), from, state)
 
-  defp create(req, from, state) do
+  # A stale owner can report absence; cleanup needs a durable fencing write.
+  defp fenced_reply(stream, sid, reply),
+    do: {:write, [{:delete, Keys.witness(sid)}], reply, stream, []}
+
+  defp handle_create(req, from, state, policy) do
+    case Protocol.create_action(state.stream, req) do
+      :create ->
+        create(req, from, state, policy)
+
+      {:reply, reply} ->
+        reply_in_order(reply, from, state)
+    end
+  end
+
+  defp handle_append(req, from, state, policy) do
+    bytes = byte_size(req[:body] || "")
+
+    if ShardLoad.admit?(state.load, state.inflight_bytes, bytes, state.ctx.child_options) do
+      decide(Protocol.append(state.stream, req), from, state, policy)
+    else
+      # Backpressure. The reply depends on nothing in flight, so it goes now.
+      Streams.Telemetry.execute([:append, :rejected], %{bytes: bytes}, %{
+        shard: state.ctx.n,
+        reason: :overloaded
+      })
+
+      {:reply, {:error, :overloaded}, state}
+    end
+  end
+
+  defp create(req, from, state, policy) do
     with {:ok, messages} <- Protocol.create_messages(req),
          {:ok, sid} <- allocate_sid(state.ctx) do
-      decide(Protocol.create(state.stream, req, messages, sid, Clock.now_ms()), from, state)
+      decide(
+        Protocol.create(state.stream, req, messages, sid, Clock.now_ms()),
+        from,
+        state,
+        policy
+      )
     else
       {:error, reason} -> reply_in_order({:error, reason}, from, state)
     end
@@ -411,12 +474,15 @@ defmodule Slap.Streams.StreamServer do
 
   # -- Writes and replies ---------------------------------------------------
 
-  defp decide({:reply, reply}, from, state), do: reply_in_order(reply, from, state)
+  defp decide(decision, from, state, policy \\ %{})
 
-  defp decide({:write, _, _, _, _} = write, from, state) do
-    case commit(state, write, from) do
+  defp decide({:reply, reply}, from, state, _policy), do: reply_in_order(reply, from, state)
+
+  defp decide({:write, _, _, _, _} = write, from, state, policy) do
+    case commit(state, write, from, policy) do
       {:ok, state} -> {:noreply, state}
       {:sealed, state} -> sealed(from, state)
+      {:conflict, state} -> reply_in_order({:error, :conflict}, from, state)
       {:error, error, state} -> write_failed(error, from, state)
     end
   end
@@ -444,8 +510,10 @@ defmodule Slap.Streams.StreamServer do
 
   # Replies and effects must wait for durability: effects can initiate
   # retention cleanup.
-  defp commit(state, {:write, ops, reply, %Stream{} = stream, effects}, from) do
-    case write(state, ops, stream) do
+  defp commit(state, {:write, ops, reply, %Stream{} = stream, effects}, from, policy \\ %{}) do
+    ops = work_ops(policy[:work], stream) ++ ops
+
+    case write(state, ops, stream, policy) do
       {:ok, seq} ->
         Cluster.notify_when_durable(state.ctx, seq, :durable)
         bytes = ops_bytes(ops)
@@ -473,24 +541,43 @@ defmodule Slap.Streams.StreamServer do
       {:error, :sealed} ->
         {:sealed, state}
 
+      {:error, :conflict} ->
+        {:conflict, state}
+
       {:error, error} ->
         {:error, error, state}
     end
   end
 
-  defp write(%{stream: %Stream{status: :absent}} = state, ops, %Stream{status: status} = stream)
-       when status in [:pending, :active],
-       do: Group.create_write(state.ctx.db, Streams.placement_key(stream.path), ops)
+  defp work_ops(nil, _stream), do: []
+  defp work_ops(true, stream), do: [{:put, Keys.work(stream.sid), stream.path}]
+  defp work_ops(false, stream), do: [{:delete, Keys.work(stream.sid)}]
 
-  # A seal can arrive after reservation, so activation must check it again.
-  defp write(
-         %{stream: %Stream{status: :pending}} = state,
-         ops,
-         %Stream{status: :active} = stream
-       ),
-       do: Group.create_write(state.ctx.db, Streams.placement_key(stream.path), ops)
+  defp write(state, ops, stream, policy) do
+    guard = policy[:guard] || mutation_guard(state.stream, stream)
+    unsealed = policy[:unsealed] == true or publication?(state.stream, stream)
 
-  defp write(state, ops, _stream), do: SlateDB.write(state.ctx.db, ops)
+    if guard != nil or unsealed do
+      Group.guarded_write(state.ctx.db, Streams.placement_key(stream.path), ops, guard, unsealed)
+    else
+      SlateDB.write(state.ctx.db, ops)
+    end
+  end
+
+  # Ownership checks must remain possible after cancellation changes the guard.
+  defp mutation_guard(stream, stream), do: nil
+  defp mutation_guard(_before, %Stream{status: :pending, meta: %{owner: owner}}), do: owner
+
+  defp mutation_guard(%Stream{status: :pending, meta: %{owner: owner}}, %Stream{status: :active}),
+    do: owner
+
+  defp mutation_guard(_before, _after), do: nil
+
+  defp publication?(%Stream{status: :absent}, %Stream{status: status})
+       when status in [:pending, :active], do: true
+
+  defp publication?(%Stream{status: :pending}, %Stream{status: :active}), do: true
+  defp publication?(_before, _after), do: false
 
   defp run_effect(:kick_deleter, %{ctx: ctx}),
     do: GenServer.cast(Cluster.via(ctx.cluster, ctx.n, :deleter), :kick)
@@ -621,6 +708,8 @@ defmodule Slap.Streams.StreamServer do
     ShardLoad.add(state.load, 0, 0, map_size(waiters) - map_size(state.waiters))
     %{state | waiters: waiters}
   end
+
+  defp request_info({:guarded, _policy, request}), do: request_info(request)
 
   defp request_info({:append, req}),
     do: {:append, System.monotonic_time(), byte_size(req[:body] || "")}

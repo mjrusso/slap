@@ -6,8 +6,8 @@
       {["Slap.Streams", "Slap.Streams.*"], ["Slap.SlateDB.open", "Slap.SlateDB.close"]},
       # Stream servers write stream data and authorize retention and deletion.
       # ShardState reserves ids; Deleter applies durable deletion bounds.
-      # Group owns seals and transactional creation. Offline Upgrade requires
-      # exclusive handles with every cluster node stopped.
+      # Group orders creation and guarded control transitions against seals.
+      # Offline Upgrade requires exclusive handles with every cluster node stopped.
       {["Slap.Streams", "Slap.Streams.*"],
        [
          "Slap.SlateDB.write",
@@ -25,7 +25,7 @@
          "Slap.Streams.Upgrade"
        ]},
       # A stream is created in a group by its stream server.
-      {["Slap.Streams", "Slap.Streams.*"], ["Slap.Streams.Group.create_write"],
+      {["Slap.Streams", "Slap.Streams.*"], ["Slap.Streams.Group.guarded_write"],
        except: ["Slap.Streams.StreamServer"]},
       # Source retention decisions cannot depend on target creation or the protocol.
       {"Slap.Streams.Retention", ["Slap.Streams.Creation.*", "Slap.Streams.Protocol.*"]},

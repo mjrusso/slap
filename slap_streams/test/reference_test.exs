@@ -410,7 +410,15 @@ defmodule Slap.Streams.ReferenceTest do
     :ok = Streams.trim("/source", 9)
     for ctx <- contexts(), do: Deleter.drain(ctx)
     kill(server("/target"))
-    assert {:ok, :created, _} = Streams.create("/target", Map.to_list(c.request))
+
+    assert {:ok, :created, _} =
+             Streams.create("/target",
+               forked_from: "/source",
+               fork_offset: 0,
+               fork_sub_offset: 3,
+               body: "!"
+             )
+
     assert {:ok, %{messages: [{0, "hel"}, {7, "!"}]}} = Streams.read("/target", 0)
   end
 
