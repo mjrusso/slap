@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Serve atomic JSON KV batches at `POST /v1/kv/{partition}`. Configure batch
+  and durability admission limits through `kv: [child_options: ...]`; see
+  [Durability admission](../slap_kv/README.md#durability-admission) for defaults
+  and rejection responses.
+
 ## 0.4.0
 
 - Updates `slap_cluster`, `slap_streams`, `slap_snapshot_log`, `slap_yjs`,

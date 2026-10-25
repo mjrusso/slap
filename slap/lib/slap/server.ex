@@ -73,7 +73,7 @@ defmodule Slap.Server do
     child_allowed =
       if service == :streams,
         do: Streams.Cluster.child_option_keys(),
-        else: [:partition_writers]
+        else: KV.Cluster.child_option_keys()
 
     child_options = opts |> Keyword.get(:child_options, []) |> Keyword.validate!(child_allowed)
 

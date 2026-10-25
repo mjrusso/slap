@@ -63,6 +63,53 @@ defmodule Slap.ServerTest do
     RawHTTP.close(conn)
   end
 
+  test "serves atomic KV batches with owner-enforced limits" do
+    port =
+      start_server(
+        store: :memory,
+        kv: [
+          shards: 1,
+          child_options: [
+            max_batch_ops: 2,
+            max_batch_bytes: 32,
+            max_inflight_bytes_per_writer: 64,
+            max_inflight_bytes_per_shard: 128,
+            max_inflight_requests_per_writer: 2
+          ]
+        ]
+      )
+
+    {:ok, conn} = RawHTTP.connect(port)
+    body = ~s({"ops":[{"op":"put","key":"YQ","value":"MQ"},{"op":"put","key":"Yg","value":"Mg"}]})
+
+    assert {:ok, 200, headers, response} =
+             RawHTTP.request(
+               conn,
+               "POST",
+               "/v1/kv/p",
+               [{"content-type", "application/json"}],
+               body
+             )
+
+    assert %{"version" => version} = JSON.decode!(response)
+    assert RawHTTP.header(headers, "etag") == ~s("#{version}")
+    assert {:ok, 200, _, "1"} = RawHTTP.request(conn, "GET", "/v1/kv/p/a")
+
+    oversized =
+      ~s({"ops":[{"op":"delete","key":"YQ"},{"op":"delete","key":"Yg"},{"op":"delete","key":"Yw"}]})
+
+    assert {:ok, 413, _, _} =
+             RawHTTP.request(
+               conn,
+               "POST",
+               "/v1/kv/p",
+               [{"content-type", "application/json"}],
+               oversized
+             )
+
+    RawHTTP.close(conn)
+  end
+
   test "without :kv, /v1/kv is not found" do
     port = start_server(store: :memory, streams: [shards: 1])
     {:ok, conn} = RawHTTP.connect(port)
