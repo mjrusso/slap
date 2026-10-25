@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixes stream bodies of exactly 1 GiB being treated as empty.
 - Create forks by reference, with no limit on inherited data size. Replace
   `:max_fork_copy_bytes` with `:max_fork_depth` (default 8; HTTP 400 when exceeded).
 - Rename `:fork_copy_grace` to `:creation_grace` for pending forks and copies.

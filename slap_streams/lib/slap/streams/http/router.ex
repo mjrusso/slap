@@ -332,17 +332,13 @@ defmodule Slap.Streams.HTTP.Router do
          {:ok, producer} <- producer(conn),
          :ok <- check_body(body, close, content_type) do
       result =
-        if body == "" do
-          Streams.close(path, producer: producer, cluster: opts.cluster)
-        else
-          Streams.append(path, body,
-            content_type: content_type,
-            close: close,
-            stream_seq: header(conn, "stream-seq"),
-            producer: producer,
-            cluster: opts.cluster
-          )
-        end
+        Streams.append(path, body,
+          content_type: content_type,
+          close: close,
+          stream_seq: header(conn, "stream-seq"),
+          producer: producer,
+          cluster: opts.cluster
+        )
 
       case result do
         {:ok, r} -> respond_appended(conn, r, producer)
@@ -369,8 +365,12 @@ defmodule Slap.Streams.HTTP.Router do
   defp append_status(_result, nil), do: 204
   defp append_status(_result, _producer), do: 200
 
-  defp check_body("", true, _content_type), do: :ok
-  defp check_body("", false, _content_type), do: {:error, {:bad_request, :empty_body}}
+  # Depending on how a comparison with "" compiles, OTP 29.1.1 can find a
+  # 1 GiB binary equal to it.
+  defp check_body(body, true, _content_type) when byte_size(body) == 0, do: :ok
+
+  defp check_body(body, false, _content_type) when byte_size(body) == 0,
+    do: {:error, {:bad_request, :empty_body}}
 
   defp check_body(_body, _close, nil),
     do: {:error, {:bad_request, "Content-Type header is required"}}

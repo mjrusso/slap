@@ -127,8 +127,8 @@ defmodule Slap.Streams.Protocol do
     producer = req[:producer]
 
     cond do
-      body == "" and not close -> {:reply, {:error, {:bad_request, :empty_body}}}
-      body == "" -> close_only(producer, stream)
+      byte_size(body) == 0 and not close -> {:reply, {:error, {:bad_request, :empty_body}}}
+      byte_size(body) == 0 -> close_only(producer, stream)
       true -> append_body(req, body, close, producer, stream)
     end
   end
@@ -432,8 +432,8 @@ defmodule Slap.Streams.Protocol do
   @doc false
   def split(content_type, body, allow_empty) do
     cond do
-      # A create without a body. (An append without one never gets here.)
-      body == "" ->
+      # OTP 29.1.1 can compare a 1 GiB binary equal to an empty binary.
+      byte_size(body) == 0 ->
         {:ok, []}
 
       ContentType.json?(content_type) ->
