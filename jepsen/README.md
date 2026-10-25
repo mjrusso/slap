@@ -114,6 +114,8 @@ workloads:
 
 All nodes share a RustFS object store. Each trial gets a new prefix in its
 bucket so one trial's data does not become the next trial's initial state.
+Compose raises RustFS's file descriptor limit to 65,536 to avoid failures
+during repeated node restarts.
 The Jepsen controller sends client requests to node IP addresses. For process
 and network controls it runs commands inside the containers using
 [`docker exec`](src/jepsen/slap/docker.clj). The node configuration is in
@@ -138,7 +140,7 @@ The workloads cover the eight packages at these boundaries:
 | `slap_streams` | `append`, `fork`, `snapshot-log`, and `yjs` use durable streams. |
 | `slap_snapshot_log` | `snapshot-log` checks snapshots, trims, follower resets, and reads; `yjs` uses it for document storage. |
 | `slap_yjs` | `yjs` checks acknowledged adds, array contents and order, and compaction. |
-| `slap_kv` | `kv` and `files` check conditional writes and final reads. |
+| `slap_kv` | `bank`, `kv` and `files` check conditional writes and final reads. |
 | `slap_files` | `files` checks inline and object bodies, deletes, and cleanup. |
 | `slap` | The node release serves the stream and KV HTTP APIs. |
 
@@ -232,6 +234,7 @@ supports.
 | --- | --- | --- |
 | `fork` | Fork and copy across shards; append, trim, delete, expire, retry, and read pages. | Do forks and copies keep their captured data through faults, and does cleanup finish? |
 | `append` | Append a unique integer to a stream; read its full list. | Can Elle place the observed lists in an allowed order? |
+| `bank` | Conditional account transfers and single-page receipt audits. | Are transfers atomic, and do acknowledged receipts survive faults? |
 | `kv` | Read, write, or compare and set a key. | Can Knossos explain each key as an atomic register? |
 | `files` | Read, replace, conditionally replace, or delete a file. | Do register results, body shape, and the cleanup audit agree? |
 | `snapshot-log` | Append an integer; reconstruct a list from a snapshot and later entries. | Do lists obey the selected ordering rule, and do followers catch up? |
@@ -392,6 +395,48 @@ across two keys, scans, or all possible value sizes. If an intermediate write
 is overwritten before any read, the final value alone cannot show whether
 that intermediate version survived a crash; Jepsen only judges what this
 history made observable.
+
+### Atomic KV batches: the `bank` workload
+
+Each of 64 banks is one partition with four accounts, initially holding 1,000
+units each. A transfer reads two account versions, then sends one batch with
+conditional debit and credit puts plus an absent-only receipt. The receipt
+records the logical request ID, source, destination and amount. Unknown
+outcomes retain the complete conditional request for retries, including when
+Jepsen replaces a client. An observed overload is a definite rejection of that
+attempt; a generic 503 or transport failure is unknown. A failed retry cannot
+rule out an earlier unknown commit.
+
+Audits read accounts and receipts from one complete scan page. They reject
+foreign or duplicate keys, malformed or unexpected receipts, wrong balances,
+negative balances and nonterminal cursors. Each bank can allocate at most 500
+receipt IDs: 499 for ordinary transfers and one reserved for recovery. When
+the ordinary allowance is exhausted, the workload generates only audits and
+admission probes until recovery. An admission probe is a batch whose only
+operation is a condition check: it writes nothing, so it can test whether
+the shard accepts or rejects a request without adding rows. The four accounts
+and all possible receipts fit below the 1,000-row page limit. Multiple banks
+spread operations across shards and partition writers.
+
+With object leases, receipts acknowledged before a scan starts must be visible.
+With distributed placement, scans during faults must be internally coherent but
+may be stale. After placement converges, a new transfer must succeed, every
+bank must be read successfully, and every acknowledged receipt must be present
+in both placements. A missing recovery observation yields `:unknown`.
+
+The default `--bank-admission low` profile uses four writers per shard, a
+32 KiB writer byte cap, a 64 KiB shard byte cap, and one pending request per
+writer. Admission probes, sent in parallel, cause overloads without adding
+rows to the audit.
+A pass requires successful transfers, observed overloads, and successful
+recovery reads. `--bank-admission normal` uses the ordinary KV defaults and
+does not require overload coverage. The node receives the profile through
+`JEPSEN_KV_ADMISSION`; other workloads use ordinary limits.
+
+```sh
+just jepsen --workload bank --placement object-lease --nemesis partition --time-limit 300
+just jepsen --workload bank --bank-admission normal --nemesis none --time-limit 60
+```
 
 ### Files: the `files` workload and cleanup audit
 
@@ -663,8 +708,8 @@ Each CI matrix job archives its `jepsen/store/` directory as
 by default), with its graphs, histories, timelines, and logs. CI attempts the
 archive and upload even when a test fails.
 
-The CI matrix runs six workloads × two placements × four isolated faults ×
-two trials: 96 trials. Each trial has 120 seconds of active operations.
+The CI matrix runs seven workloads × two placements × four isolated faults ×
+two trials: 112 trials. Each trial has 120 seconds of active operations.
 
 ## The node image
 
@@ -677,6 +722,9 @@ Hex and Cargo dependencies and that NIF. The Mix and Cargo lockfiles pin
 package dependencies, and the build checks that the Mix lockfile is current.
 The Dockerfile pins its base images by digest.
 
+Release nodes retry failed startup probes in the background. Shards remain
+unavailable until the object store passes its conditional-write probe.
+
 Rebuild the image after changing any of the eight packages or `node/`. The
 containers run as root so Jepsen can manage processes and network faults.
 
@@ -686,10 +734,11 @@ A test suite can only evaluate behavior it generates and observes. This one
 uses five nodes, one shared RustFS instance, particular HTTP APIs, and the
 faults above. It does not inject clock skew; all containers share the host
 clock. Its object-store fault pauses RustFS globally; selective S3 request loss
-and partial outages are not covered. It does not issue multi-key transactions,
-arbitrary file operations, or every stream protocol operation. SlateDB fencing
-and cluster placement are exercised indirectly through the higher-level APIs,
-not by separate Jepsen clients.
+and partial outages are not covered. Only `bank` issues atomic operations
+across keys within one partition. The suite does not issue cross-partition
+transactions, arbitrary file operations, or every stream protocol operation.
+The workloads exercise SlateDB fencing and cluster placement through the
+application APIs.
 
 The suite is strongest when a workload forces a bug to become visible in a
 reply or final audit. Longer runs give faults and background processes more

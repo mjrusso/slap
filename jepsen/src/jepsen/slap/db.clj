@@ -28,6 +28,7 @@
    :JEPSEN_SHARDS        (:shards test)
    :JEPSEN_PLACEMENT     (name (:placement test))
    :JEPSEN_LEASE_TTL     (:lease-ttl test)
+   :JEPSEN_KV_ADMISSION  (if (= :bank (:workload test)) (name (:bank-admission test :low)) "normal")
    :AWS_ENDPOINT         "http://10.47.0.2:9000"
    :AWS_ALLOW_HTTP       "true"
    :AWS_REGION           "us-east-1"

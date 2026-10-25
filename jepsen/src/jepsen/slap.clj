@@ -13,6 +13,7 @@
             [jepsen.checker.timeline :as timeline]
             [jepsen.nemesis.combined :as nc]
             [jepsen.slap [append :as append]
+                         [bank :as bank]
                          [db :as db]
                          [docker :as docker]
                          [files :as files]
@@ -23,7 +24,8 @@
                          [yjs :as yjs]]))
 
 (def workloads
-  {:append append/workload
+  {:bank bank/workload
+   :append append/workload
    :yjs    yjs/workload
    :kv     kv/workload
    :files  files/workload
@@ -146,10 +148,14 @@
                             (gen/clients (:final-generator workload)))})))
 
 (def opt-spec
-  [[nil "--workload NAME" "append, yjs, kv, files, fork or snapshot-log"
+  [[nil "--workload NAME" "append, yjs, kv, bank, files, fork or snapshot-log"
     :default  :append
     :parse-fn keyword
     :validate [workloads (str "one of " (str/join ", " (map name (keys workloads))))]]
+   [nil "--bank-admission PROFILE" "Bank workload admission limits: low or normal"
+    :default :low
+    :parse-fn keyword
+    :validate [#{:low :normal} "low or normal"]]
    [nil "--nemesis FAULTS" "Comma-separated faults (partition, kill, pause, object-store), or none"
     :id       :faults
     :default  default-faults
