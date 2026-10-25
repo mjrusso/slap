@@ -76,9 +76,9 @@ defmodule Slap.Yjs.Docs do
   server's initial assigns), apply only when the server starts. The caller
   then gets the messages described in `Slap.Yjs.DocServer`, and should
   monitor the returned pid: if the server stops, join again and
-  resynchronise. `{:error, :deleted}` if the document was deleted
-  (`delete/2`). `:docs` selects a named Docs instance; `:timeout` bounds
-  loading and subscribing (default 5 s).
+  resynchronise. Pending documents return `{:error, :busy}`; deleted documents
+  return `{:error, :deleted}` (`delete/2`). `:docs` selects a named Docs instance;
+  `:timeout` bounds loading and subscribing (default 5 s).
   """
   @spec join(module(), Yjs.Store.doc(), keyword()) :: {:ok, pid()} | {:error, term()}
   def join(module, doc_id, opts \\ []) do
@@ -94,7 +94,7 @@ defmodule Slap.Yjs.Docs do
 
   defp join(name, _module, doc_id, _opts, 0) do
     case Yjs.Store.tail(doc_id, Config.get(name)) do
-      {:error, :deleted} -> {:error, :deleted}
+      {:error, reason} when reason in [:deleted, :busy] -> {:error, reason}
       _ -> {:error, :unavailable}
     end
   end
@@ -105,8 +105,8 @@ defmodule Slap.Yjs.Docs do
         :ok ->
           checked(pid, doc_id, name)
 
-        {:error, {:down, {:shutdown, :deleted}}} ->
-          {:error, :deleted}
+        {:error, {:down, {:shutdown, reason}}} when reason in [:deleted, :busy] ->
+          {:error, reason}
 
         {:error, {:down, {:slap_yjs_load_failed, reason}}} ->
           {:error, {:slap_yjs_load_failed, reason}}
@@ -204,7 +204,7 @@ defmodule Slap.Yjs.Docs do
     case DynamicSupervisor.start_child(supervisor(docs), spec) do
       {:ok, pid} -> {:ok, pid}
       {:error, {:already_started, pid}} -> {:ok, pid}
-      {:error, {:shutdown, :deleted}} -> {:error, :deleted}
+      {:error, {:shutdown, reason}} when reason in [:deleted, :busy] -> {:error, reason}
       {:error, _} = error -> error
     end
   end

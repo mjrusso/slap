@@ -9,7 +9,7 @@ defmodule Slap.Yjs.Follower do
   @backoff_max 2_000
 
   @doc "Errors worth retrying."
-  defguard transient?(reason) when reason in [:unavailable, :timeout, :overloaded]
+  defguard transient?(reason) when reason in [:unavailable, :timeout, :overloaded, :busy]
 
   @doc "Starts following `doc` from `offset` for `server`, linked to the caller."
   @spec start_link(Store.doc(), non_neg_integer(), pid(), keyword()) :: pid()

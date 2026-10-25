@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Adds `Slap.Yjs.Store.fork/3` for independently editable document branches.
+  Forking uses persisted data. Call `Slap.Yjs.DocServer.sync/2` on known servers
+  first to include their buffered updates.
+
 ## 0.4.0
 
 - Breaking change: local awareness publishers must subscribe and claim their

@@ -515,8 +515,8 @@ defmodule Slap.Yjs.DocServer do
         mark_ready(arg, state.module, doc_id)
         {:ok, reply_ready_waiters(state)}
 
-      {:error, :deleted} ->
-        {:stop, {:shutdown, :deleted}}
+      {:error, reason} when reason in [:deleted, :busy] ->
+        {:stop, {:shutdown, reason}}
 
       {:error, reason} ->
         {:stop, {:slap_yjs_load_failed, reason}}

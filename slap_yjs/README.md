@@ -285,6 +285,46 @@ Your client UI decides how to display fields such as `"user"` and `"busy"`.
 The state is renewed every 15 seconds by default; see `Slap.Yjs.Presence`
 for configuration options.
 
+## Forking documents
+
+`Slap.Yjs.Store.fork/3` creates a document that starts with another
+document's stored state. After that the two documents are independent:
+edits to one do not appear in the other.
+
+```elixir
+{:ok, _} = Slap.Yjs.Store.fork({"notes", "main"}, {"notes", "branch"})
+{:ok, branch_server} = Slap.Yjs.Docs.join(MyDocServer, {"notes", "branch"})
+```
+
+The fork is a `Slap.SnapshotLog.fork/3` of the document's snapshot log. It
+has the same results, errors and options, plus `:prefix`. In short:
+
+- It reads metadata only. The branch refers to the source's snapshot and
+  updates instead of copying them, so loading the branch needs the source's
+  shard. The branch can be joined after the source is deleted.
+- `:timeout` (default 30 s) bounds the whole call. A timeout can leave the
+  fork unfinished; call `fork/3` again with the same documents to finish it.
+  Until then, `Slap.Yjs.Docs.join/3` and loads of the branch return
+  `{:error, :busy}`. Deleting the branch cancels the fork.
+- Awareness, presence and client connections are not copied.
+
+The fork contains only what is stored. Document servers buffer updates
+before appending them (see "Batching" below), and `fork/3` does not contact
+them. To include the buffered updates of servers you know about, call
+`Slap.Yjs.DocServer.sync/2` on each of them first:
+
+```elixir
+for server <- known_document_servers do
+  :ok = Slap.Yjs.DocServer.sync(server, 10_000)
+end
+{:ok, _} = Slap.Yjs.Store.fork({"notes", "main"}, {"notes", "branch"})
+```
+
+This does not pause other writers, and updates still in transit between
+nodes can arrive after the fork. A snapshot can also contain edits beyond
+its recorded offset (see "Compaction" below), so the returned offsets do
+not identify an exact document state.
+
 ## How it works
 
 - **Layout.** `Slap.Yjs.Store` keeps a document in the reference

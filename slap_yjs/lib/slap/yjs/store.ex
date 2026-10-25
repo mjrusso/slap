@@ -12,8 +12,9 @@ defmodule Slap.Yjs.Store do
   state. `<prefix>` defaults to `/v1/stream` and can be set per call.
   Pass `prefix:` and `cluster:` to each operation to select another store.
   For `load/2`, `:timeout` bounds each `Slap.SnapshotLog.next/3` call,
-  including its waits and retries. For other operations it bounds each
-  underlying Streams call. Define a cluster module with
+  including its waits and retries. For `fork/3`, it bounds the entire
+  invocation. For other operations it bounds each underlying Streams call.
+  Define a cluster module with
   `use Slap.Streams.Cluster, otp_app: :my_app` and run one Streams cluster
   per VM.
 
@@ -152,6 +153,38 @@ defmodule Slap.Yjs.Store do
 
       {:error, _} = error ->
         error
+    end
+  end
+
+  @doc """
+  Creates the document `target`, starting with the stored state of `source`,
+  without copying it. The two documents are independent afterwards.
+
+  Returns and errors are as for `Slap.SnapshotLog.fork/3`. Options are
+  `:prefix`, `:cluster`, `:timeout` for the whole call (default 30 s), and
+  `:retries` (default 5). A timeout can leave the fork unfinished: call
+  `fork/3` again with the same documents to finish it. Until then, loads and
+  joins of `target` return `{:error, :busy}`.
+
+  The fork contains only stored updates. To include the updates that known
+  document servers have buffered, call `Slap.Yjs.DocServer.sync/2` on them
+  first; other writers keep running. Awareness, presence and client
+  connections are not copied.
+  """
+  @spec fork(doc(), doc(), keyword()) ::
+          {:ok, %{offset: non_neg_integer(), snapshot_offset: non_neg_integer() | nil}}
+          | {:error, error()}
+  def fork(source, target, opts \\ []) do
+    validate_options!(opts, [:prefix, :cluster, :timeout, :retries])
+    validate_options!(opts)
+    store_opts = Keyword.take(opts, [:prefix, :cluster, :timeout])
+
+    with :ok <- check_doc(source), :ok <- check_doc(target) do
+      SnapshotLog.fork(
+        base(source, store_opts),
+        base(target, store_opts),
+        Keyword.delete(opts, :prefix)
+      )
     end
   end
 
