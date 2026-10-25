@@ -7,35 +7,45 @@ defmodule Slap.KV do
   are no scans across partitions.
 
   Each row has a version, an integer that changes with every write to it.
-  `put/4` and `delete/3` take `if_version:` to write only if the row is at
-  that version (`:absent` for a row that must not exist), so a
-  read-modify-write can detect a concurrent change.
+  `put/4` and `delete/3` accept `if_version: version` to detect a concurrent
+  change. `put/4` also accepts `if_version: :absent` to create a missing row.
 
   A write returns once it is durable, and reads return only durable rows:
   a read never sees a write that could still be lost.
   Pass `cluster:` to use a module defined with `use Slap.KV.Cluster,
   otp_app: :my_app`. Run one KV cluster per VM.
 
-  A write may be applied after its caller has stopped waiting for it (see
-  `:timeout` below). A write with a `:deadline` is not applied after it,
-  and a read with `consistency: :linearizable` sees every write applied
-  before it: together, they let a caller find out when a write it gave up
-  on can no longer happen.
+  After `:timeout` or `:unavailable`, a write may still be applied. Give the
+  write a `:deadline`: once the deadline plus the largest difference between
+  the nodes' clocks has passed, the write can no longer be applied, and a
+  read with `consistency: :linearizable` returns a state it can no longer
+  change. The row alone shows whether the write was applied only if no
+  other writer could have changed it. To tell in every case, use `batch/3`
+  to write a receipt with the change: a row under a key unique to the
+  request, in the same partition, that nothing else deletes. After the
+  deadline, the write was applied if and only if a linearizable read finds
+  the receipt.
 
-  ## Errors shared by all calls
+  ## Errors
 
-  Invalid row data and scan bounds return `{:error, {:bad_request, reason}}`.
   Invalid control options (`:consistency`, `:with_versions`, `:timeout`,
   `:cluster`) and unknown option names raise `ArgumentError`.
 
     * `{:error, :unavailable}` - the shard is stopping, moving or has no
-      owner, or a write failed. A write that fails this way may still have
-      been applied: read the row to find out rather than retry blindly.
+      owner, or a write failed. A write may still be applied.
     * `{:error, :timeout}` - no reply within `:timeout` (default 30 s). A
       write may still be applied.
     * `{:error, :deadline_exceeded}` - a write's `:deadline` passed before
       it was applied. It was not, and will not be, applied.
-    * `{:error, {:bad_request, reason}}` - invalid row data or scan bounds.
+    * `{:error, :overloaded}` - the shard has too much work waiting for
+      durability (see `Slap.KV.Cluster`). The request was not applied.
+    * `{:error, {:bad_request, :request_too_large}}` - the request is larger
+      than the shard's limits on pending bytes. It was not applied.
+    * `{:error, {:bad_request, :batch_too_large}}` - a batch has more
+      operations or bytes than `:max_batch_ops` or `:max_batch_bytes`. It
+      was not applied.
+    * `{:error, {:bad_request, reason}}` - invalid row data, batch operations
+      or scan bounds.
   """
 
   alias Slap.KV
@@ -60,8 +70,10 @@ defmodule Slap.KV do
           :deadline_exceeded
           | :timeout
           | :unavailable
+          | :overloaded
           | {:bad_request, term()}
           | {:conflict, version() | nil}
+          | {:conflict, key(), version() | nil}
 
   @doc """
   Reads a row. Returns `{:ok, %{value: value, version: version}}`, or
@@ -82,17 +94,15 @@ defmodule Slap.KV do
     validate_control_opts!(opts)
 
     with :ok <- Keys.validate(partition, key) do
-      key = Keys.encode(partition, key)
-
       case Keyword.get(opts, :consistency, :durable) do
         :durable ->
-          route(partition, opts, {Read, :get, [key]})
+          route(partition, opts, {Read, :get, [Keys.encode(partition, key)]})
 
         :linearizable ->
           route(
             partition,
             opts,
-            {PartitionWriter, :call, [partition, {:get, key}, timeout(opts)]}
+            {PartitionWriter, :call, [partition, {:get, partition, key}, timeout(opts)]}
           )
       end
     end
@@ -121,14 +131,14 @@ defmodule Slap.KV do
          :ok <- validate_value(value),
          {:ok, condition} <- condition(opts, [:absent]),
          {:ok, deadline} <- deadline(opts) do
-      write(partition, {:put, Keys.encode(partition, key), value}, condition, deadline, opts)
+      write(partition, {:put, key, value}, condition, deadline, opts)
     end
   end
 
   @doc """
   Deletes a row. Returns `:ok` once the deletion is durable, whether or not
   the row existed. With `if_version: version` the row must be at `version`,
-  and with `deadline:` it must be applied by then (as for `put/4`).
+  and with `deadline:` it must be submitted before then (as for `put/4`).
   """
   @spec delete(partition(), key(), keyword()) :: :ok | {:error, error()}
   def delete(partition, key, opts \\ []) do
@@ -138,7 +148,51 @@ defmodule Slap.KV do
     with :ok <- Keys.validate(partition, key),
          {:ok, condition} <- condition(opts, []),
          {:ok, deadline} <- deadline(opts) do
-      write(partition, {:delete, Keys.encode(partition, key)}, condition, deadline, opts)
+      write(partition, {:delete, key}, condition, deadline, opts)
+    end
+  end
+
+  @typedoc "A batch condition: require absence or a particular row version."
+  @type batch_condition :: :absent | version()
+  @type batch_op ::
+          {:put, key(), binary()}
+          | {:put, key(), binary(), batch_condition()}
+          | {:delete, key()}
+          | {:delete, key(), version()}
+          | {:check, key(), batch_condition()}
+
+  @doc """
+  Applies a nonempty list of operations atomically within one partition.
+
+  Operations are `{:put, key, value}`, `{:delete, key}`, or either with a
+  final version condition. Puts also accept `:absent`. A
+  `{:check, key, version_or_absent}` checks without changing the row.
+  Keys must be distinct, including checks. Conditions are evaluated in
+  input order against the state before the batch. The first failure returns
+  `{:error, {:conflict, key, current_version_or_nil}}` without applying mutations.
+
+  Mutation success returns `{:ok, version}`; every put shares that version.
+  A check-only batch returns `{:ok, nil}` after a durable write confirms
+  shard ownership.
+  Options are `:deadline`, `:timeout`, and `:cluster`, as for `put/4`.
+  After `:timeout` or `:unavailable`, the batch may still be applied; check
+  its outcome as for a single write (see the module documentation) before
+  retrying.
+
+  The owning shard limits a batch's operations (default 1,000) and its
+  encoded key and value bytes (default 8 MiB), and the work waiting for
+  durability (see `Slap.KV.Cluster`). After `:overloaded` or a size error,
+  the batch was not applied.
+  """
+  @spec batch(partition(), [batch_op()], keyword()) :: {:ok, version() | nil} | {:error, error()}
+  def batch(partition, ops, opts \\ []) do
+    validate_options!(opts, [:deadline, :timeout, :cluster])
+    validate_control_opts!(opts)
+
+    with :ok <- Keys.validate_partition(partition),
+         {:ok, deadline} <- deadline(opts) do
+      request = {:batch, partition, ops, deadline}
+      route(partition, opts, {PartitionWriter, :call, [partition, request, timeout(opts)]})
     end
   end
 
@@ -156,10 +210,11 @@ defmodule Slap.KV do
       of `nil` starts at the beginning of the selected range.
     * `:with_versions` - include each row's version (default `false`).
 
-  Each page is a separate read of the durable rows: rows written between
-  pages appear in later pages if their keys come later. A binary cursor marks
-  a key position and remains valid after that row is deleted. Only `:cursor`
-  accepts `nil`; supplied `:prefix`, `:gte`, and `:lt` values must be binaries.
+  Each page reads one consistent view of the durable rows. Rows written between
+  pages can appear in later pages if their keys come later. Independent gets
+  and pages do not share a snapshot. A binary cursor marks a key position and
+  remains valid after that row is deleted. Only `:cursor` accepts `nil`; supplied
+  `:prefix`, `:gte`, and `:lt` values must be binaries.
   """
   @spec scan(partition(), keyword()) ::
           {:ok, page()} | {:error, error()}
@@ -191,7 +246,7 @@ defmodule Slap.KV do
   end
 
   defp write(partition, op, condition, deadline, opts) do
-    request = {:write, op, condition, deadline}
+    request = {:write, partition, op, condition, deadline}
     route(partition, opts, {PartitionWriter, :call, [partition, request, timeout(opts)]})
   end
 

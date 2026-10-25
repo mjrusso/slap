@@ -163,14 +163,24 @@ charges.
 - **Durability.** A write returns once SlateDB reports it durable. Reads
   (`get/3`, `scan/2`) use SlateDB's `:remote` durability: they see only
   durable rows, so they never return a write that could still be lost.
-- **Uncertain writes.** An `:unavailable` or `:timeout` reply means the
-  write may still become durable. Read the row to find out; nothing retries
-  a write on its own.
-- **Scans.** Each page is a separate read of durable rows, not a snapshot
-  across pages. Passing `cursor: nil` starts at the beginning of the selected
-  range; a returned `cursor: nil` means iteration is complete. A binary
-  cursor identifies the last key returned and remains valid after that row
-  is deleted. Supplied `:prefix`, `:gte`, and `:lt` values must be binaries.
+- **Uncertain writes.** After an `:unavailable` or `:timeout` reply, the
+  write may still be applied; nothing retries it on its own. Pass
+  `deadline:` with the write: once the deadline plus the largest difference
+  between the nodes' clocks has passed, the write can no longer be applied.
+  A read with `consistency: :linearizable` then returns a state that the
+  write can no longer change. The row alone shows whether the write was
+  applied only if no other writer could have changed it. To tell in every
+  case, write a receipt in the same batch: a row under a key unique to the
+  request, in the same partition, that nothing else deletes. After the
+  deadline, the write was applied if and only if a linearizable read finds
+  the receipt.
+- **Scans.** Each page reads one consistent view of the durable rows.
+  Pages are separate reads, so rows written between pages can appear in
+  later pages if their keys come later. Passing `cursor: nil` starts at the
+  beginning of the selected range; a returned `cursor: nil` means iteration
+  is complete. A binary cursor identifies the last key returned and remains
+  valid after that row is deleted. Supplied `:prefix`, `:gte`, and `:lt`
+  values must be binaries.
   Scan rows omit versions by default; `with_versions: true` includes them.
   There are no scans or writes across partitions.
 

@@ -24,7 +24,13 @@ defmodule Slap.KV.Test.ClusterCase do
         context[:settings] || %{}
       )
 
-    opts = [store: {:local, dir}, shards: context[:shards] || 2, settings: settings]
+    opts = [
+      store: {:local, dir},
+      shards: context[:shards] || 2,
+      settings: settings,
+      child_options: context[:child_options] || []
+    ]
+
     start_supervised!({KV.Cluster, opts})
     %{dir: dir, cluster_opts: opts}
   end

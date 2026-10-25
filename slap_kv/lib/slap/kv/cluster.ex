@@ -1,10 +1,26 @@
 defmodule Slap.KV.Cluster do
   @moduledoc """
   The shards that hold the rows, a `Slap.Cluster`. A partition's rows are
-  on shard `shard_for(partition)`. Each shard runs partition writers,
-  each the only process that writes its own
-  subset of the shard's partitions. Set
+  on shard `shard_for(partition)`. Each shard runs partition writers; each
+  partition has one writer. Set
   `child_options: [partition_writers: n]` on the cluster (default 16).
+
+  Each shard limits the work waiting for durability. The limits must be
+  positive integers. Defaults:
+
+    * `:max_inflight_bytes_per_writer` - 64 MiB.
+    * `:max_inflight_bytes_per_shard` - 256 MiB.
+    * `:max_inflight_requests_per_writer` - 1,024.
+    * `:max_batch_ops` - 1,000.
+    * `:max_batch_bytes` - 8 MiB.
+
+  The shard's owner checks a request against them before it reads or
+  writes any row. A request's size is its encoded keys (two length bytes,
+  the partition and the key) and put values; a linearizable get counts as
+  one request of zero bytes. A request counts until it is durable and
+  answered. The limits do not cover mailboxes, HTTP decoding, response
+  bodies or total BEAM and native memory. The README's "Limits on pending
+  work" describes the errors.
 
   Run one instance of this built-in cluster per VM. It can own many shards
   and participate in a cluster across VMs. The same VM can also run
@@ -32,6 +48,8 @@ defmodule Slap.KV.Cluster do
   cluster.
   """
 
+  alias Slap.KV.Admission
+
   @default_settings %{flush_interval: "10ms"}
 
   use Slap.Cluster,
@@ -40,6 +58,10 @@ defmodule Slap.KV.Cluster do
       shard_children: {Slap.KV.PartitionWriter, :child_specs, []},
       settings: @default_settings
     ]
+
+  @doc "Returns the accepted `:child_options` keys for a KV cluster."
+  @spec child_option_keys() :: [atom()]
+  def child_option_keys, do: Admission.option_keys()
 
   @doc "Defines a KV cluster under the given `:otp_app`."
   defmacro __using__(opts) do

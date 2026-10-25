@@ -159,7 +159,7 @@ defmodule Slap.KVTest do
       # Sent before its deadline, and handled after it.
       1 = :erlang.trace(writer, true, [:receive])
       pid = late.pid
-      assert_receive {:trace, ^writer, :receive, {:"$gen_call", {^pid, _}, {:write, _, _, _}}}
+      assert_receive {:trace, ^writer, :receive, {:"$gen_call", {^pid, _}, {:write, _, _, _, _}}}
       1 = :erlang.trace(writer, false, [:receive])
       Process.sleep(max(deadline - System.os_time(:millisecond) + 1, 0))
 
@@ -176,7 +176,7 @@ defmodule Slap.KVTest do
       1 = :erlang.trace(writer, true, [:receive])
       put = Task.async(fn -> KV.put("p", "k", "pending") end)
       pid = put.pid
-      assert_receive {:trace, ^writer, :receive, {:"$gen_call", {^pid, _}, {:write, _, _, _}}}
+      assert_receive {:trace, ^writer, :receive, {:"$gen_call", {^pid, _}, {:write, _, _, _, _}}}
       1 = :erlang.trace(writer, false, [:receive])
 
       # A normal read does not wait for it; a linearizable one is behind it.

@@ -1,6 +1,8 @@
 defmodule Slap.KV.DurabilityTest do
   use Slap.KV.Test.ClusterCase, async: false
 
+  import Slap.KV.Test.WriterControl, only: [pending: 2]
+
   alias Slap.Cluster.Config
   alias Slap.KV.Keys
   alias Slap.SlateDB
@@ -16,7 +18,7 @@ defmodule Slap.KV.DurabilityTest do
     end
 
     test "a write is acknowledged, and read, only once durable" do
-      put = pending_write("p", fn -> KV.put("p", "k", "v") end)
+      put = pending("p", fn -> KV.put("p", "k", "v") end)
 
       # In SlateDB's memtable, but not durable: not acknowledged, not read.
       assert Task.yield(put, 0) == nil
@@ -29,12 +31,12 @@ defmodule Slap.KV.DurabilityTest do
     end
 
     test "a conflict with a write that is not durable waits for it" do
-      put = pending_write("p", fn -> KV.put("p", "k", "first") end)
+      put = pending("p", fn -> KV.put("p", "k", "first") end)
       assert Task.yield(put, 0) == nil
 
       # The row exists in the partition writer's latest state, so this
       # conflicts; but the reply waits, since the row could still be lost.
-      create = pending_write("p", fn -> KV.put("p", "k", "second", if_version: :absent) end)
+      create = pending("p", fn -> KV.put("p", "k", "second", if_version: :absent) end)
       assert Task.yield(create, 0) == nil
 
       :ok = SlateDB.flush(ctx_for("p").db)
@@ -43,7 +45,7 @@ defmodule Slap.KV.DurabilityTest do
     end
 
     test "a linearizable read of a write that is not durable waits for it" do
-      put = pending_write("p", fn -> KV.put("p", "k", "v") end)
+      put = pending("p", fn -> KV.put("p", "k", "v") end)
       read = Task.async(fn -> KV.get("p", "k", consistency: :linearizable) end)
       assert Task.yield(read, 0) == nil
 
@@ -52,7 +54,7 @@ defmodule Slap.KV.DurabilityTest do
     end
 
     test "a new partition writer does not check against writes that are not durable yet" do
-      put = pending_write("p", fn -> KV.put("p", "k", "unacked") end)
+      put = pending("p", fn -> KV.put("p", "k", "unacked") end)
       assert Task.yield(put, 0) == nil
 
       # The partition writer dies with its write in the memtable. Its caller
@@ -64,16 +66,14 @@ defmodule Slap.KV.DurabilityTest do
       assert_receive {:trace, ^supervisor, :spawn, writer, _}
       1 = :erlang.trace(supervisor, false, [:procs])
 
-      # Trace the new partition writer's messages and condition checks.
-      # Trace messages from one process arrive in order.
+      # Trace events from one process arrive in order.
       1 = :erlang.trace(writer, true, [:receive, :call])
       :erlang.trace_pattern({SlateDB, :get_key_value, :_}, true, [])
       on_exit(fn -> :erlang.trace_pattern({SlateDB, :get_key_value, :_}, false, []) end)
 
       create = Task.async(fn -> KV.put("p", "k", "retry", if_version: :absent) end)
 
-      # The unacknowledged write was applied after all. (The conflict is
-      # confirmed by a write of its own, which needs a flush too.)
+      # The conflict needs its own durable confirmation after the initial flush.
       assert {:error, {:conflict, version}} = flush_until_reply(create, "p")
       assert {:ok, %{value: "unacked", version: ^version}} = KV.get("p", "k")
 
@@ -92,7 +92,7 @@ defmodule Slap.KV.DurabilityTest do
     end
 
     test "stopping the shard fails in-flight writes instead of acknowledging them" do
-      put = pending_write("p", fn -> KV.put("p", "k", "never acked") end)
+      put = pending("p", fn -> KV.put("p", "k", "never acked") end)
       assert Task.yield(put, 0) == nil
 
       stop_supervised!(KV.Cluster)
@@ -173,21 +173,6 @@ defmodule Slap.KV.DurabilityTest do
     end
   end
 
-  # Runs `fun` in a task and returns once `partition`'s partition writer has
-  # handled its request, so that any write it makes is in SlateDB.
-  defp pending_write(partition, fun) do
-    writer = partition_writer(partition)
-    1 = :erlang.trace(writer, true, [:receive])
-    task = Task.async(fun)
-    pid = task.pid
-    assert_receive {:trace, ^writer, :receive, {:"$gen_call", {^pid, _}, {:write, _, _, _}}}
-    1 = :erlang.trace(writer, false, [:receive])
-    # Handled after the request, which is ahead of it in the mailbox.
-    _ = :sys.get_state(writer)
-    task
-  end
-
-  # Flushes the partition's WAL until `task` replies.
   defp flush_until_reply(task, partition) do
     db = ctx_for(partition).db
 

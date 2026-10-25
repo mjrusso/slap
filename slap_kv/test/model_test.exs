@@ -1,20 +1,10 @@
 defmodule Slap.KV.ModelTest do
-  # Random command sequences against Slap.KV and a model (a map of rows):
-  # every result must match. Includes conditional writes with current,
-  # stale and unknown versions, writes with deadlines (a passed deadline is
-  # never applied), linearizable and durable reads, scans with prefixes and pages, replaced
-  # partition writers, and restarting the cluster, so state must reload from
-  # storage. (Commands run one at a time; test/durability_test.exs covers
-  # writes in flight.)
+  # Commands run serially against a model of rows; durability tests cover
+  # overlapping operations. The model learns returned versions and checks
+  # their order within each partition.
   #
-  # Versions are chosen by SlateDB, so the model learns each one from the
-  # write that returned it, and checks that it is higher than any version
-  # returned before in its partition (versions increase within a shard).
-  #
-  # Each command is chosen from the model's state and a seed; StreamData
-  # generates the seeds, so a failure shrinks to the shortest sequence of
-  # commands that fails. SLAP_KV_PROP_RUNS (default 100) sets the number of
-  # sequences; `mix test --seed N` replays a run.
+  # SLAP_KV_PROP_RUNS controls generated sequences (default 100).
+  # `mix test --seed N` replays the generated command choices.
   use Slap.KV.Test.ClusterCase, async: false
   use ExUnitProperties
 
@@ -62,16 +52,19 @@ defmodule Slap.KV.ModelTest do
     k = Enum.random(@keys)
 
     case :rand.uniform(100) do
-      n when n <= 33 ->
+      n when n <= 25 ->
+        {:batch, p, batch_ops(model, p), deadline()}
+
+      n when n <= 43 ->
         {:put, p, k, value(), condition(model, p, k, true), deadline()}
 
-      n when n <= 48 ->
+      n when n <= 55 ->
         {:delete, p, k, condition(model, p, k, false), deadline()}
 
-      n when n <= 51 ->
+      n when n <= 60 ->
         invalid_command(p, k)
 
-      n when n <= 75 ->
+      n when n <= 78 ->
         {:get, p, k, Enum.random([:durable, :linearizable])}
 
       n when n <= 93 ->
@@ -89,9 +82,29 @@ defmodule Slap.KV.ModelTest do
     Enum.random([
       {:bad_option, Enum.random([:put, :delete]), p, k},
       {:put_nil_version, p, k},
-      {:invalid_control, p, k}
+      {:invalid_control, p, k},
+      {:invalid_batch, p, Enum.random([[{:check, k, nil}], [{:put, k, "v"}, {:delete, k}], []])}
     ])
   end
+
+  defp batch_ops(model, p) do
+    @keys
+    |> Enum.take_random(:rand.uniform(4))
+    |> Enum.map(&batch_op(model, p, &1, Enum.random([:put, :delete, :check])))
+  end
+
+  defp batch_op(model, p, k, :put),
+    do: conditional({:put, k, value()}, condition(model, p, k, true))
+
+  defp batch_op(model, p, k, :delete),
+    do: conditional({:delete, k}, condition(model, p, k, false))
+
+  defp batch_op(model, p, k, :check),
+    do: {:check, k, condition(model, p, k, true) || :absent}
+
+  defp conditional(op, nil), do: op
+  defp conditional({:put, k, v}, c), do: {:put, k, v, c}
+  defp conditional({:delete, k}, c), do: {:delete, k, c}
 
   defp deadline, do: Enum.random([nil, nil, :later, :passed])
 
@@ -115,6 +128,11 @@ defmodule Slap.KV.ModelTest do
   end
 
   # -- The system under test -------------------------------------------------
+
+  defp execute({:batch, p, ops, deadline}, run, _context),
+    do: KV.batch(run <> p, ops, opts(nil, deadline))
+
+  defp execute({:invalid_batch, p, ops}, run, _context), do: KV.batch(run <> p, ops)
 
   defp execute({:put, p, k, value, condition, deadline}, run, _context),
     do: KV.put(run <> p, k, value, opts(condition, deadline))
@@ -203,6 +221,35 @@ defmodule Slap.KV.ModelTest do
   defp expect(model, {:invalid_control, _p, _k}, _actual),
     do: {:invalid_control, model}
 
+  defp expect(model, {:invalid_batch, _p, []}, _actual),
+    do: {{:error, {:bad_request, :empty_batch}}, model}
+
+  defp expect(model, {:invalid_batch, _p, [{:check, _, nil}]}, _actual),
+    do: {{:error, {:bad_request, :invalid_version}}, model}
+
+  defp expect(model, {:invalid_batch, _p, _ops}, _actual),
+    do: {{:error, {:bad_request, :duplicate_key}}, model}
+
+  defp expect(model, {:batch, _p, _ops, :passed}, _actual),
+    do: {{:error, :deadline_exceeded}, model}
+
+  defp expect(model, {:batch, p, ops, _deadline}, actual) do
+    conflict =
+      Enum.find(ops, fn op -> not holds?(model.rows[{p, elem(op, 1)}], batch_condition(op)) end)
+
+    cond do
+      conflict ->
+        key = elem(conflict, 1)
+        {{:error, {:conflict, key, version_of(model.rows[{p, key}])}}, model}
+
+      Enum.all?(ops, &(elem(&1, 0) == :check)) ->
+        {{:ok, nil}, model}
+
+      true ->
+        batch_written(model, p, ops, actual)
+    end
+  end
+
   defp expect(model, {:put, _p, _k, _value, _condition, :passed}, _actual),
     do: {{:error, :deadline_exceeded}, model}
 
@@ -243,6 +290,27 @@ defmodule Slap.KV.ModelTest do
 
   defp expect(model, {:restart_partition_writer, _}, _actual), do: {:ok, model}
   defp expect(model, {:restart}, _actual), do: {:ok, model}
+
+  defp batch_condition({:put, _, _}), do: nil
+  defp batch_condition({:put, _, _, c}), do: c
+  defp batch_condition({:delete, _}), do: nil
+  defp batch_condition({_, _, c}), do: c
+
+  defp batch_written(model, p, ops, {:ok, version} = actual) when is_integer(version) do
+    assert version > Map.get(model.max_version, p, -1)
+
+    model =
+      Enum.reduce(ops, model, fn
+        {:check, _, _}, m -> m
+        op, m when elem(op, 0) == :put -> record(m, p, elem(op, 1), {elem(op, 2), version})
+        op, m -> %{m | rows: Map.delete(m.rows, {p, elem(op, 1)})}
+      end)
+
+    {actual,
+     %{model | max_version: Map.put(model.max_version, p, version), seen: [version | model.seen]}}
+  end
+
+  defp batch_written(model, _p, _ops, _actual), do: {{:ok, :a_new_version}, model}
 
   defp written(model, p, k, value, {:ok, version} = actual) when is_integer(version) do
     if version > Map.get(model.max_version, p, -1),
