@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Finish closing shard databases when a shard process is killed or cluster
+  shutdown times out, without requiring a cluster restart.
+
 ## 0.4.0
 
 - Adds `Slap.Cluster.status/2` to report the startup probe, shard lifecycle

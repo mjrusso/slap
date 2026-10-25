@@ -2,6 +2,9 @@ defmodule Slap.Cluster.ShardChildren do
   @moduledoc """
   Starts application processes for a shard after its database opens.
 
+  A temporary, significant child stops the shard when it exits. The placement
+  strategy decides whether and where to restart the shard.
+
   A module used as `shard_children: {module, :child_specs, args}` can implement
   `validate_child_options!/1`. The cluster calls it before starting, so a
   configuration error does not leave shards retrying their startup.

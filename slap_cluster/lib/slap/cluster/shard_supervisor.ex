@@ -1,17 +1,7 @@
 defmodule Slap.Cluster.ShardSupervisor do
   @moduledoc false
-  # One per shard placed on this node:
-  #
-  #     ShardSupervisor (rest_for_one)
-  #     ├─ ShardDb        opens the database; closes it last
-  #     └─ Children       the application's shard children
-  #
-  # Children stop first (reverse start order), so they can finish or fail
-  # in-flight work while the database is still open. If ShardDb exits, the
-  # whole shard stops (it is a significant child) and the host reports it as
-  # crashed: the strategy decides whether and where the database reopens,
-  # since reopening it here could fence a node the strategy has since given
-  # the shard to.
+  # Stop application children before closing the database. Placement controls
+  # shard restarts; reopening here could fence a new owner.
 
   use Supervisor
 
@@ -22,7 +12,6 @@ defmodule Slap.Cluster.ShardSupervisor do
       id: {__MODULE__, n},
       start: {__MODULE__, :start_link, [arg]},
       type: :supervisor,
-      # The host decides whether a shard comes back, not the supervisor.
       restart: :temporary
     }
   end
@@ -53,14 +42,14 @@ defmodule Slap.Cluster.ShardSupervisor do
       %{
         id: __MODULE__.Children,
         start: {__MODULE__, :start_children, [cluster, n]},
-        type: :supervisor
+        type: :supervisor,
+        restart: :temporary,
+        significant: true
       }
     ]
   end
 
   @doc false
-  # Starts the application's children, with the context ShardDb registered
-  # just before.
   def start_children(cluster, n) do
     [{_pid, ctx}] = Registry.lookup(Slap.Cluster.registry(cluster), {:shard, n})
 
@@ -70,7 +59,7 @@ defmodule Slap.Cluster.ShardSupervisor do
         fun when is_function(fun, 1) -> fun.(ctx)
       end
 
-    Supervisor.start_link(specs, strategy: :one_for_one)
+    Supervisor.start_link(specs, strategy: :one_for_one, auto_shutdown: :any_significant)
   end
 
   defp running_child?({__MODULE__.Children, pid, :supervisor, _}) do

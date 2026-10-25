@@ -1,17 +1,10 @@
 defmodule Slap.Cluster.ShardDb do
   @moduledoc false
-  # Owns a shard's SlateDB handle: opens it, holds the shard's one durability
-  # subscription, fans it out to `notify_when_durable/3` waiters, reports a
-  # fence to the host, and closes the database when the shard stops.
-  #
-  # It is the first child of the shard supervisor (rest_for_one), so the
-  # application's children start after the database is open and stop before
-  # it is closed.
 
   use GenServer
   require Logger
 
-  alias Slap.Cluster.{Config, Shard, Telemetry}
+  alias Slap.Cluster.{Config, Database, Shard, Telemetry}
   alias Slap.SlateDB
 
   def child_spec({cluster, n, _generation, _status} = arg) do
@@ -43,8 +36,8 @@ defmodule Slap.Cluster.ShardDb do
       |> put_if(:cache, config.db_cache)
       |> put_if(:merge_operator, config.merge_operator)
 
-    case SlateDB.open(path, open_opts) do
-      {:ok, db} ->
+    case Database.open(cluster, n, path, open_opts) do
+      {:ok, db_owner, db} ->
         {:ok, subscription} = SlateDB.subscribe(db, {:shard, n})
 
         ctx = %Shard{
@@ -55,7 +48,8 @@ defmodule Slap.Cluster.ShardDb do
           generation: generation,
           child_options: config.child_options,
           status: status,
-          shard_db: self()
+          shard_db: self(),
+          db_owner: db_owner
         }
 
         # Registry replaces the entry of a previous ShardDb for this shard
@@ -77,6 +71,7 @@ defmodule Slap.Cluster.ShardDb do
            ctx: ctx,
            config: config,
            sub_ref: subscription.ref,
+           db_ref: Process.monitor(db_owner),
            waiters: :gb_trees.empty(),
            fenced: false
          }}
@@ -126,10 +121,12 @@ defmodule Slap.Cluster.ShardDb do
   def handle_info({:slap_slatedb_closed, ref, {:shard, _}, :fenced}, %{sub_ref: ref} = state),
     do: {:noreply, state}
 
-  # Only this process closes the database, in terminate/2, so any other
-  # close is unexpected. Exiting stops the shard (a significant child).
+  # Closing outside shard shutdown stops its application children too.
   def handle_info({:slap_slatedb_closed, ref, {:shard, _}, reason}, %{sub_ref: ref} = state),
     do: {:stop, {:db_closed, reason}, state}
+
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{db_ref: ref} = state),
+    do: {:stop, {:database_owner_down, reason}, state}
 
   def handle_info(:sample_lag, state) do
     %{ctx: ctx} = state
@@ -147,12 +144,10 @@ defmodule Slap.Cluster.ShardDb do
 
   @impl true
   def terminate(reason, %{ctx: ctx}) do
-    case SlateDB.close(ctx.db) do
+    case Database.close(ctx.db_owner) do
       :ok ->
         :ok
 
-      # Close found the fence: writes not yet durable are lost. None of them
-      # were reported durable, so no acknowledged write is lost.
       {:error, %SlateDB.Error{kind: :closed, reason: :fenced}} ->
         Shard.put_status(ctx.status, :fenced)
 
@@ -171,8 +166,6 @@ defmodule Slap.Cluster.ShardDb do
     })
   end
 
-  # Sends every waiter with seq <= durable its notification, lowest seq
-  # first.
   defp release(waiters, durable) do
     if :gb_trees.is_empty(waiters) do
       waiters

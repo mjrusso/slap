@@ -171,9 +171,15 @@ shards. A failed probe normally prevents startup. With `probe: :background`,
 the cluster starts without shards and retries until the probe passes.
 `ObjectLease` also requires `If-Match` support. Each shard has one database
 handle and one durability subscription.
-Application shard children stop before the handle closes. A fenced or crashed
+
+During orderly shutdown, application shard children stop before the database
+closes. If a shard process is killed or exceeds its shutdown timeout, database
+closure continues independently of the cluster. A replacement on this node
+waits for closure before opening another handle. A fenced or crashed
 database stops its shard; the placement strategy decides where to reopen it.
 Reopening without that decision could fence a new owner.
+Set `restart: :temporary, significant: true` on an application child to stop
+the shard when that child exits.
 Children that need the stop reason use `shard_status/1`; their supervisor exit
 reason is `:shutdown` even when the shard was fenced.
 

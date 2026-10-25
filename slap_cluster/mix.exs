@@ -48,7 +48,7 @@ defmodule Slap.Cluster.MixProject do
   end
 
   def application do
-    [extra_applications: [:logger]]
+    [mod: {Slap.Cluster.Application, []}, extra_applications: [:logger]]
   end
 
   def cli do

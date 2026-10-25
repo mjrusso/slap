@@ -2,10 +2,10 @@
   checks: [source_paths: ["lib"]],
   calls: [
     forbidden: [
-      # One SlateDB writer per shard: the handle ShardDb opens on the
-      # shard's owner.
+      # Database owns each shard handle until native calls drain and it closes,
+      # including after the cluster tree stops.
       {["Slap.Cluster", "Slap.Cluster.*"], ["Slap.SlateDB.open", "Slap.SlateDB.close"],
-       except: ["Slap.Cluster.ShardDb"]},
+       except: ["Slap.Cluster.Database"]},
       # slap_cluster stays generic: its shard children write, it does not.
       {["Slap.Cluster", "Slap.Cluster.*"],
        [

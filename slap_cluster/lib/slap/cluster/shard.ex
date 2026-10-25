@@ -11,7 +11,7 @@ defmodule Slap.Cluster.Shard do
     * `:generation` - the strategy's lease generation, or `nil` (`Local`).
     * `:child_options` - application settings passed to shard children.
 
-  `:status` and `:shard_db` are internal coordination fields. Use
+  `:status`, `:shard_db` and `:db_owner` are internal coordination fields. Use
   `Slap.Cluster.shard_status/1` to inspect the shard's state.
 
   A context is only valid while the shard is open on this node. When the
@@ -20,8 +20,18 @@ defmodule Slap.Cluster.Shard do
 
   alias Slap.SlateDB
 
-  @enforce_keys [:cluster, :n, :db, :registry, :generation, :child_options, :status, :shard_db]
-  defstruct [:cluster, :n, :db, :registry, :generation, :child_options, :status, :shard_db]
+  @enforce_keys [
+    :cluster,
+    :n,
+    :db,
+    :registry,
+    :generation,
+    :child_options,
+    :status,
+    :shard_db,
+    :db_owner
+  ]
+  defstruct @enforce_keys
 
   @type t :: %__MODULE__{
           cluster: module(),
@@ -31,7 +41,8 @@ defmodule Slap.Cluster.Shard do
           generation: non_neg_integer() | nil,
           child_options: keyword(),
           status: :atomics.atomics_ref(),
-          shard_db: pid()
+          shard_db: pid(),
+          db_owner: pid()
         }
 
   # The status is an atomics array shared by the host, which sets it before
