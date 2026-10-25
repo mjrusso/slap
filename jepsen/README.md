@@ -137,9 +137,9 @@ The workloads cover the eight packages at these boundaries:
 | --- | --- |
 | `slap_slatedb` | All workloads use its durable storage; ownership changes exercise fencing indirectly. |
 | `slap_cluster` | Every workload runs under both object leases and distributed placement. |
-| `slap_streams` | `append`, `fork`, `snapshot-log`, and `yjs` use durable streams. |
-| `slap_snapshot_log` | `snapshot-log` checks snapshots, trims, follower resets, and reads; `yjs` uses it for document storage. |
-| `slap_yjs` | `yjs` checks acknowledged adds, array contents and order, and compaction. |
+| `slap_streams` | `append`, `fork`, and both snapshot-log and Yjs workloads use durable streams. |
+| `slap_snapshot_log` | `snapshot-log` checks publication and follower resets; `snapshot-log-fork` checks branch capture, recovery and retained reads. Both Yjs workloads use it for storage. |
+| `slap_yjs` | `yjs` checks acknowledged additions and compaction; `yjs-fork` adds inherited deletions, snapshot state and independent branches. |
 | `slap_kv` | `bank`, `kv` and `files` check conditional writes and final reads. |
 | `slap_files` | `files` checks inline and object bodies, deletes, and cleanup. |
 | `slap` | The node release serves the stream and KV HTTP APIs. |
@@ -239,6 +239,8 @@ supports.
 | `files` | Read, replace, conditionally replace, or delete a file. | Do register results, body shape, and the cleanup audit agree? |
 | `snapshot-log` | Append an integer; reconstruct a list from a snapshot and later entries. | Do lists obey the selected ordering rule, and do followers catch up? |
 | `yjs` | Insert a unique integer into an array; read the stored array. | Are acknowledged additions retained and observed arrays consistent? |
+| `snapshot-log-fork` | Fork bounded logs across shards, compact, edit both branches, delete ancestors, and retry. | Does each branch reconstruct its fixed capture and its own suffix? |
+| `yjs-fork` | Fork persisted documents with insertions, deletions and snapshot state; join after ancestor deletion. | Do captured edits and deletion state survive, with independent target replicas? |
 
 ### Durable Streams: the `append` workload
 
@@ -568,6 +570,50 @@ without an observed lost, repeated, or reordered entry. This specifically
 exercises snapshot publication, trimming, and recovery. It does not prove
 that every future snapshot race is safe.
 
+### Snapshot-log and Yjs forks: the `snapshot-log-fork` and `yjs-fork` workloads
+
+Both workloads create A → B → C, placing each target on a different shard from
+its source. Scenarios cover published snapshots during source compaction and
+trimming, and unsnapshotted sources with overlapping appends. The controller
+records source entries, snapshot offsets, update cutoffs and each branch's own
+appends. Yjs scenarios also delete an inherited entry and include an extra edit
+in the snapshot beyond its recorded update offset.
+
+The checker reconstructs the expected branch from that history. It rejects
+missing, extra, duplicated, reordered or cross-branch entries, invalid
+cursors and changed retry captures. Unknown operations are retried with the
+same identity. Matching fork retries must return the original capture. Reads
+follow real-time order with object leases. During distributed-placement faults,
+reads may observe an earlier legal branch version. Final reads must observe the
+complete branch in both placements.
+
+Scenarios edit both branches, compact B, delete A and B, then read, edit and
+compact C. Yjs scenarios join C through the document API. A passing run requires
+both capture types, overlapping captures, chains, cross-shard placement,
+independent appends, compaction and final reads on every node. Retained-read
+coverage counts only after all ancestors have been deleted. Missing coverage
+yields `:unknown`.
+
+After faults heal, recovery resolves unfinished scenarios, restores log
+followers or document servers, and reads every survivor on every node.
+Resolution, final reads and cleanup each have a bounded recovery budget.
+The final audit deletes all scenario logs and runs the snapshot-log recovery
+sweep. On each shard it then runs the stream repair and deletion jobs until
+they finish, and makes a durable write that SlateDB fences against former
+owners. Only then does it check that no stream rows or reference pins remain.
+The control streams of cancelled logs, group seals and allocator state are
+excluded. When a log that was not created by a fork is deleted, its closed
+updates and index streams stay in place for older readers; the adapter
+deletes them. The streams of a fork must be removed by the library's own
+cleanup before the audit can pass. An incomplete audit yields `:unknown`.
+
+Run each workload with both placements and each isolated fault:
+
+```sh
+just jepsen --workload snapshot-log-fork --placement object-lease --nemesis partition --time-limit 300
+just jepsen --workload yjs-fork --placement distributed --nemesis kill --time-limit 300
+```
+
 ### Yjs: the `yjs` document workload
 
 **State under test.** One Yjs document contains an array named `set`. Each
@@ -708,8 +754,8 @@ Each CI matrix job archives its `jepsen/store/` directory as
 by default), with its graphs, histories, timelines, and logs. CI attempts the
 archive and upload even when a test fails.
 
-The CI matrix runs seven workloads × two placements × four isolated faults ×
-two trials: 112 trials. Each trial has 120 seconds of active operations.
+The CI matrix runs nine workloads × two placements × four isolated faults ×
+two trials: 144 trials. Each trial has 120 seconds of active operations.
 
 ## The node image
 

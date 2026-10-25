@@ -19,6 +19,7 @@
                          [files :as files]
                          [fork :as fork]
                          [kv :as kv]
+                         [log-fork :as log-fork]
                          [object-store :as object-store]
                          [snapshot-log :as snapshot-log]
                          [yjs :as yjs]]))
@@ -30,7 +31,9 @@
    :kv     kv/workload
    :files  files/workload
    :fork   fork/workload
-   :snapshot-log snapshot-log/workload})
+   :snapshot-log snapshot-log/workload
+   :snapshot-log-fork (partial log-fork/workload :log)
+   :yjs-fork (partial log-fork/workload :yjs)})
 
 (def default-faults
   "Clock faults are left out: containers share the host's clock."
@@ -148,7 +151,7 @@
                             (gen/clients (:final-generator workload)))})))
 
 (def opt-spec
-  [[nil "--workload NAME" "append, yjs, kv, bank, files, fork or snapshot-log"
+  [[nil "--workload NAME" "append, yjs, kv, bank, files, fork, snapshot-log, snapshot-log-fork or yjs-fork"
     :default  :append
     :parse-fn keyword
     :validate [workloads (str "one of " (str/join ", " (map name (keys workloads))))]]
