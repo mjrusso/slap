@@ -54,18 +54,6 @@ defmodule Slap.SnapshotLog.Store do
 
   def stream_opts(_base), do: []
 
-  # Creates `.updates` and `.index`, if they do not exist. A deleted log's
-  # `.updates` is closed, which a create of an open one conflicts with.
-  @spec ensure(String.t() | t(), keyword()) :: :ok | {:error, term()}
-  def ensure(base, opts \\ []) do
-    deadline = Keyword.get(opts, :deadline)
-    opts = Keyword.delete(opts, :deadline)
-    opts = Keyword.merge(stream_opts(base), opts)
-
-    with :ok <- create(path(base, :updates), @octets, opts, deadline),
-         do: create(path(base, :index), @json, opts, deadline)
-  end
-
   defp create(path, content_type, opts, deadline) do
     with {:ok, opts} <- call_opts(opts, deadline) do
       case Streams.create(path, [content_type: content_type] ++ opts) do
@@ -76,15 +64,13 @@ defmodule Slap.SnapshotLog.Store do
     end
   end
 
-  # :ok unless the log is deleted, or being deleted.
-  @spec live(String.t() | t(), integer() | :infinity | nil) :: :ok | {:error, term()}
-  def live(base, deadline \\ nil) do
+  def live(base, deadline) do
     with {:ok, opts} <- call_opts(stream_opts(base), deadline) do
       case Streams.head(path(base, :updates), opts) do
         {:ok, %{closed: true}} -> {:error, :deleted}
         {:ok, _info} -> :ok
         {:error, :not_found} -> :ok
-        {:error, _} = error -> error
+        error -> error
       end
     end
   end
@@ -92,7 +78,7 @@ defmodule Slap.SnapshotLog.Store do
   @spec state(String.t() | t(), integer() | :infinity | nil) ::
           {:ok, state()} | {:error, term()}
   def state(base, deadline \\ nil) do
-    case read_all(path(base, :index), stream_opts(base), deadline) do
+    case read_all(path(base, :index), stream_opts(base), deadline, :fenced) do
       {:ok, messages, tail} ->
         {current, deleted} = Enum.reduce(messages, {nil, nil}, &entry/2)
 
@@ -141,7 +127,7 @@ defmodule Slap.SnapshotLog.Store do
     case Streams.head(path(base, :updates), stream_opts(base)) do
       {:ok, %{closed: true}} -> {:error, :deleted}
       {:ok, %{next_offset: offset}} -> {:ok, offset}
-      {:error, _} = error -> error
+      error -> error
     end
   end
 
@@ -234,7 +220,7 @@ defmodule Slap.SnapshotLog.Store do
 
   @spec history(String.t() | t()) :: {:ok, [snapshot()]} | {:error, term()}
   def history(base) do
-    with :ok <- live(base), do: history(base, state(base))
+    history(base, state(base))
   end
 
   defp history(base, state) do
@@ -272,22 +258,9 @@ defmodule Slap.SnapshotLog.Store do
           :ok | {:error, term()}
   def trim(base, stream, offset), do: Streams.trim(path(base, stream), offset, stream_opts(base))
 
-  # Deletes the log for good, in steps that a retry repeats:
-  #
-  #   1. closes `.updates`: from here the log reads as deleted (live/1),
-  #      appends fail, waiting readers wake, and ensure/1 cannot create it
-  #      again;
-  #   2. indexes the deletion entry, if the index is unchanged since it was
-  #      read (append_if/3), so that every publication that read the index
-  #      before fails to index its snapshot, and finds the log deleted;
-  #   3. seals the placement group, so that no snapshot can be written from
-  #      here on, and every one written before is listed;
-  #   4. trims `.updates` to its tail, deletes every stored snapshot, and
-  #      trims `.index` before the deletion entry.
-  #
-  # Options: `:after_step`, a function called with :close, :index, :seal and
-  # :clean after each step completes (for tests).
-  @spec delete(String.t() | t(), keyword()) :: :ok | {:error, term()}
+  # Closing updates fences appends and wakes readers. The conditional deletion
+  # entry excludes stale snapshot publications; sealing then makes snapshot
+  # enumeration complete before cleanup.
   def delete(base, opts \\ []) do
     after_step = Keyword.get(opts, :after_step, fn _step -> :ok end)
 
@@ -403,17 +376,26 @@ defmodule Slap.SnapshotLog.Store do
   defp created_at(%{"createdAt" => ms}) when is_integer(ms), do: ms
   defp created_at(_entry), do: 0
 
-  defp read_all(path, opts, deadline), do: read_all(path, :start, [], opts, deadline)
+  defp read_all(path, opts, deadline, mode \\ :normal),
+    do: read_all(path, :start, [], opts, deadline, mode)
 
-  defp read_all(path, from, acc, opts, deadline) do
+  defp read_all(path, from, acc, opts, deadline, mode) do
     with {:ok, opts} <- call_opts(opts, deadline) do
-      case Streams.read(path, from, [max_bytes: @page_bytes] ++ opts) do
-        {:ok, %{up_to_date: true} = r} -> {:ok, Enum.reverse(acc, r.messages), r.next_offset}
-        {:ok, r} -> read_all(path, r.next_offset, Enum.reverse(r.messages, acc), opts, deadline)
-        {:error, _} = error -> error
+      case read_page(mode, path, from, [max_bytes: @page_bytes] ++ opts) do
+        {:ok, %{up_to_date: true} = r} ->
+          {:ok, Enum.reverse(acc, r.messages), r.next_offset}
+
+        {:ok, r} ->
+          read_all(path, r.next_offset, Enum.reverse(r.messages, acc), opts, deadline, mode)
+
+        {:error, _} = error ->
+          error
       end
     end
   end
+
+  defp read_page(:normal, path, from, opts), do: Streams.read(path, from, opts)
+  defp read_page(:fenced, path, from, opts), do: Streams.read_fenced(path, from, opts)
 
   defp call_opts(opts, nil), do: {:ok, opts}
   defp call_opts(opts, :infinity), do: {:ok, Keyword.put(opts, :timeout, :infinity)}

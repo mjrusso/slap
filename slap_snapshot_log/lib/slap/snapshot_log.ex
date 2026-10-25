@@ -34,11 +34,12 @@ defmodule Slap.SnapshotLog do
 
   `delete/1` deletes the log for good: its entries and snapshots go, and
   every later call on its base returns `{:error, :deleted}`, including a
-  publication or an append that started before the delete. A base cannot
-  be used again; its `.index`, an empty, closed `.updates` and a seal on
-  its placement group (`Slap.Streams.seal/2`) stay, to fence out those
-  calls. The log reads as deleted from the delete's first step, so an
-  interrupted delete acknowledges nothing more; a retry finishes it.
+  publication or an append that started before the delete. The base cannot
+  be reused: its placement group stays sealed (`Slap.Streams.seal/2`), its
+  `.control` stream stays marked deleted, and a log not created by `fork/3`
+  also keeps its deletion index and an empty, closed `.updates`. Data that
+  the log shares with its source or with its forks stays stored while any
+  of them needs it. Retry an interrupted delete to finish cleanup.
 
   ## Storage
 
@@ -47,7 +48,12 @@ defmodule Slap.SnapshotLog do
   "retained"}`, the last current) and `<base>/.snapshots/<offset>_snapshot`:
   the reference `y-durable-streams` server's layout. They share `base` as
   their placement key, so they are on one shard. `base` must be a stream
-  path with no segment that starts with `.`.
+  path with no segment that starts with `.`. Logs also have a `.control`
+  stream that records whether the log is being created, forked or deleted;
+  logs created by earlier versions may not have one. While a log is being
+  created or forked, calls on it return `{:error, :busy}`, except that
+  `append/3` and `next/3` finish a creation that another caller left
+  unfinished.
   Pass `cluster:` to use an application-owned cluster defined with
   `use Slap.Streams.Cluster, otp_app: :my_app`; run one Streams cluster per VM.
 
@@ -72,7 +78,7 @@ defmodule Slap.SnapshotLog do
   loop (default 60 s).
   """
 
-  alias Slap.SnapshotLog.{Compaction, Store}
+  alias Slap.SnapshotLog.{Compaction, Control, Lifecycle, Store}
   alias Slap.Streams
 
   @octets "application/octet-stream"
@@ -92,6 +98,9 @@ defmodule Slap.SnapshotLog do
           | :index_seq_conflict
           | :offset_beyond_tail
           | :superseded
+          | :busy
+          | :retries_exhausted
+          | :exists
 
   @doc """
   Reads the log. With `offset` nil, or an offset its entries were trimmed
@@ -130,36 +139,37 @@ defmodule Slap.SnapshotLog do
   defp validate_next_offset(_offset), do: {:error, {:bad_request, :invalid_offset}}
 
   defp read(base, nil, _opts, deadline) do
-    with :ok <- Store.ensure(base, deadline: deadline),
+    with :ok <- Lifecycle.ensure(base, deadline: deadline),
          {:ok, {offset, snapshot}} <- Store.current(base, deadline) do
       {:reset, %{snapshot: snapshot, offset: offset || 0}}
     end
   end
 
   defp read(base, offset, opts, deadline) do
-    path = Store.path(base, :updates)
-    remaining = remaining(deadline)
+    with :ok <- Lifecycle.live(base, deadline),
+         remaining when remaining > 0 <- remaining(deadline) do
+      read_opts =
+        Keyword.merge(Store.stream_opts(base),
+          max_bytes: Keyword.get(opts, :max_bytes, 1024 * 1024),
+          wait: min(Keyword.get(opts, :wait, 30_000), remaining),
+          timeout: remaining
+        )
 
-    read_opts =
-      Keyword.merge(Store.stream_opts(base),
-        max_bytes: Keyword.get(opts, :max_bytes, 1024 * 1024),
-        wait: min(Keyword.get(opts, :wait, 30_000), remaining),
-        timeout: remaining
-      )
-
-    case Streams.read(path, offset, read_opts) do
-      {:error, :trimmed} -> read(base, nil, opts, deadline)
-      result -> page(base, result, deadline)
+      case Streams.read(Store.path(base, :updates), offset, read_opts) do
+        {:error, :trimmed} -> read(base, nil, opts, deadline)
+        result -> page(base, result, deadline)
+      end
+    else
+      0 -> {:error, :timeout}
+      error -> error
     end
   end
 
-  # A read reports `closed` only with the page that reaches the tail; a
-  # deleted log's `.updates` is closed from the delete's first step, so a
-  # page short of the tail checks for it.
+  # A page before the tail cannot report closure. Recheck deletion before returning it.
   defp page(_base, {:ok, %{closed: true}}, _deadline), do: {:error, :deleted}
 
   defp page(base, {:ok, %{up_to_date: false}} = result, deadline) do
-    with :ok <- Store.live(base, deadline), do: page(result)
+    with :ok <- Lifecycle.live(base, deadline), do: page(result)
   end
 
   defp page(_base, result, _deadline), do: page(result)
@@ -239,14 +249,8 @@ defmodule Slap.SnapshotLog do
   defp validate_entry(_entry), do: {:error, {:bad_request, :invalid_entry}}
 
   defp append_valid(base, entry, opts) do
-    case do_append(base, entry, opts) do
-      # Not sent to a stream at all: safe to create the log and send.
-      {:error, :not_found} ->
-        with :ok <- Store.ensure(base, Keyword.take(opts, [:timeout])),
-             do: do_append(base, entry, opts)
-
-      result ->
-        result
+    with :ok <- Lifecycle.ensure(base, Keyword.take(opts, [:timeout])) do
+      do_append(base, entry, opts)
     end
   end
 
@@ -288,7 +292,10 @@ defmodule Slap.SnapshotLog do
 
     with :ok <- validate(base),
          :ok <- validate_snapshot(offset, bytes) do
-      Compaction.run(Store.new(base, opts), offset, bytes, opts)
+      store = Store.new(base, opts)
+
+      with :ok <- Control.check(store, Control.deadline(Keyword.get(opts, :timeout, 30_000))),
+           do: Compaction.run(store, offset, bytes, opts)
     end
   end
 
@@ -323,7 +330,7 @@ defmodule Slap.SnapshotLog do
   def snapshots(base, opts \\ []) do
     validate_options!(opts, [:cluster, :timeout])
     validate_control_opts!(opts)
-    with :ok <- validate(base), do: Store.history(Store.new(base, opts))
+    with :ok <- validate(base), do: Lifecycle.history(Store.new(base, opts))
   end
 
   @doc "The snapshot at `offset`."
@@ -335,7 +342,7 @@ defmodule Slap.SnapshotLog do
     with :ok <- validate(base),
          :ok <- validate_snapshot_offset(offset),
          store = Store.new(base, opts),
-         :ok <- Store.live(store),
+         :ok <- Lifecycle.live(store),
          do: Store.read_snapshot(store, offset)
   end
 
@@ -347,7 +354,7 @@ defmodule Slap.SnapshotLog do
   def tail(base, opts \\ []) do
     validate_options!(opts, [:cluster, :timeout])
     validate_control_opts!(opts)
-    with :ok <- validate(base), do: Store.tail(Store.new(base, opts))
+    with :ok <- validate(base), do: Lifecycle.tail(Store.new(base, opts))
   end
 
   @doc """
@@ -358,7 +365,7 @@ defmodule Slap.SnapshotLog do
   def delete(base, opts \\ []) do
     validate_options!(opts, [:cluster, :timeout])
     validate_control_opts!(opts)
-    with :ok <- validate(base), do: Store.delete(Store.new(base, opts))
+    with :ok <- validate(base), do: Lifecycle.delete(Store.new(base, opts))
   end
 
   defp validate_control_opts!(opts) do
@@ -384,6 +391,56 @@ defmodule Slap.SnapshotLog do
   defp positive_integer?(value), do: is_integer(value) and value > 0
   defp valid_timeout?(value), do: value == :infinity or nonneg_integer?(value)
   defp module?(value), do: is_atom(value) and value != nil
+
+  @doc """
+  Creates a log at `target` that starts with the source's current snapshot,
+  if any, and the entries after it, without copying them. The two logs are
+  independent afterwards.
+
+  Returns `{:ok, %{offset: offset, snapshot_offset: offset_or_nil}}`: the
+  target has the source's entries before `offset`, and its current snapshot
+  is the source's snapshot at `snapshot_offset`. Calling `fork/3` again with
+  the same source and target returns the same result, even after the source
+  is deleted or the target edited.
+
+  Options are `:cluster`, `:timeout` for the whole call (default 30 s), and
+  `:retries` (default 5): how many times to start again when a snapshot
+  published on the source trims entries the fork needs. When they run out
+  the call returns `{:error, :retries_exhausted}` and cancels the fork.
+
+  `:timeout`, `:unavailable`, `:overloaded` and `:busy` (the source is still
+  being created or forked) leave the fork unfinished: call `fork/3` again
+  with the same source and target to finish it. Until then other calls on
+  the target return `{:error, :busy}`. `delete/1` on the target cancels it.
+
+  A missing or deleted source returns `:not_found`, a target that is already
+  a log or a fork of another source `:exists`, and a sealed target group
+  `:sealed`. A fork of a fork that would exceed the Streams cluster's
+  `:max_fork_depth` returns `{:bad_request, :max_fork_depth_exceeded}`.
+
+  The source's snapshot and entries stay stored while the target needs
+  them, and reads of the target need the source's shard. Publishing
+  snapshots on the target does not release them.
+  """
+  @spec fork(base(), base(), keyword()) ::
+          {:ok, %{offset: offset(), snapshot_offset: offset() | nil}} | {:error, error()}
+  def fork(source, target, opts \\ []) do
+    validate_options!(opts, [:cluster, :timeout, :retries])
+    fork_internal(source, target, opts)
+  end
+
+  @doc false
+  def fork_internal(source, target, opts) do
+    validate_options!(opts, [:cluster, :timeout, :retries, :after_step])
+    validate_control_opts!(opts)
+    validate_option!(opts, :retries, &nonneg_integer?/1, "a non-negative integer")
+
+    with :ok <- validate(source),
+         :ok <- validate(target),
+         :ok <-
+           if(source == target, do: {:error, {:bad_request, :same_source_and_target}}, else: :ok),
+         do: Lifecycle.fork(source, target, opts)
+  end
 
   @doc "The path of the log's `:updates` or `:index` stream, or of a `{:snapshot, offset}`."
   @spec path(base(), :updates | :index | {:snapshot, offset()}) :: String.t()

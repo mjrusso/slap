@@ -5,7 +5,7 @@ defmodule Slap.SnapshotLog.Compaction do
   # Snapshots above the current offset may belong to active publications.
   # Late writes below it are removed by the next cleanup.
 
-  alias Slap.SnapshotLog.Store
+  alias Slap.SnapshotLog.{Lifecycle, Store}
 
   @type rule :: {every_ms :: pos_integer(), keep_ms :: pos_integer()}
 
@@ -44,7 +44,7 @@ defmodule Slap.SnapshotLog.Compaction do
   defp position(_pub, _state), do: :after
 
   defp within_tail(base, offset) do
-    case Store.tail(base) do
+    case Lifecycle.tail(base) do
       {:ok, tail} when offset <= tail -> :ok
       {:ok, _tail} -> {:error, :offset_beyond_tail}
       {:error, _} = error -> error

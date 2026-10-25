@@ -158,6 +158,70 @@ period for `keep_ms`. For example,
 from each hour for up to a week. `snapshots/1` lists the stored snapshots
 and `read_snapshot/2` reads one.
 
+## Forking
+
+`fork(source_base, target_base, opts)` creates a log at `target_base` that
+starts with the source's contents: its current snapshot, if any, and the
+entries after it. From then on the two logs are independent; entries
+appended to one do not appear in the other. The target uses its own base as
+its placement key, so it can be on another shard.
+
+```elixir
+{:ok, %{offset: offset, snapshot_offset: snapshot_offset}} =
+  Slap.SnapshotLog.fork("/logs/main", "/logs/branch", timeout: 30_000)
+{:ok, _} = Slap.SnapshotLog.append("/logs/branch", "branch entry")
+```
+
+`offset` is the source's tail when the fork was made, and the target has the
+source's entries before it. The target's current snapshot is the source's
+snapshot at `snapshot_offset` (`nil` if the source had none). There is no
+option to fork from an earlier offset.
+
+`fork/3` reads metadata only. The target refers to the source's snapshot and
+entries instead of copying them, and they stay stored while the target
+needs them, even after the source is deleted. Reading the target therefore
+needs the shards of the source, and of the source's own sources if it is a
+fork. Publishing a snapshot on the target trims the target's entries but
+does not release the source entries it refers to; they stay stored until
+the target is deleted.
+
+Options:
+
+- `:cluster`: the Streams cluster.
+- `:timeout`: bounds the whole call (default 30 s).
+- `:retries`: how many times to start again when a snapshot published on
+  the source during the fork trims entries the fork needs (default 5). When
+  the retries run out, the call returns `{:error, :retries_exhausted}` and
+  the fork is cancelled.
+
+`{:error, :timeout}`, `:unavailable`, `:overloaded` and `:busy` (the source
+is still being created or forked) leave the fork unfinished. Call `fork/3`
+again with the same source and target to finish it. Until then, other calls
+on the target return `{:error, :busy}`. Once the fork has finished, calling
+`fork/3` again with the same source and target returns the same result, even
+if the source has since been deleted or the target edited. `delete/1` on an
+unfinished target cancels the fork; later `fork/3` calls with that target
+return the error that cancelled it, so start again with a new target base.
+
+Other errors:
+
+- `:not_found`: the source does not exist or was deleted.
+- `:exists`: the target is already a log, or a fork of a different source.
+- `:sealed`: the target's placement group is sealed (`Slap.Streams.seal/2`).
+- `{:bad_request, :same_source_and_target}`: the source and target are the
+  same base.
+- `{:bad_request, :max_fork_depth_exceeded}`: the target would exceed the
+  Streams cluster's `:max_fork_depth` (default 8). A fork of a log not
+  created by `fork/3` has depth 1, and a fork of that fork depth 2.
+  Publishing snapshots does not reduce a fork's depth.
+
+A snapshot can contain more than the entries before its offset (see
+"Snapshots"), and the target starts with whatever the source's current
+snapshot contains. `fork/3` does not contact the processes that append to
+the source; anything they have not appended yet is not in the target.
+`slap_yjs` explains how to include a Yjs document server's buffered
+updates.
+
 ## Deleting
 
 `delete(base)` deletes the log permanently. Its entries and snapshots are
@@ -165,13 +229,17 @@ deleted, and every later call on the base returns `{:error, :deleted}`. That
 includes a `next/3` waiting at the tail, an `append/2`, and a snapshot
 publication that started before the delete.
 
-The base cannot be reused. These stay after a delete, so that those calls
-are refused:
+The base cannot be reused. A deleted log keeps these records:
 
-- `.index`, ending with a `{"deleted": true}` entry
-- an empty, closed `.updates`
 - a seal on the base's placement group (`Slap.Streams.seal/2`), so that no
   snapshot can be written there
+- its `.control` stream, marked deleted, if it has one
+- for a log not created by `fork/3`: `.index`, ending with a
+  `{"deleted": true}` entry, and an empty, closed `.updates`
+
+A log created by `fork/3` has its other streams deleted. Data it shares with
+its source, or with forks made from it, stays stored while any of those
+logs needs it.
 
 The log reads as deleted from the delete's first step. Retrying `delete/1`
 finishes an interrupted delete.
@@ -182,13 +250,20 @@ finishes an interrupted delete.
 <base>/.updates                      the entries, one message each
 <base>/.index                        JSON snapshot metadata or a deletion marker
 <base>/.snapshots/<offset>_snapshot  a snapshot
+<base>/.control                      whether the log is being created, forked or deleted
 ```
 
 Snapshot metadata contains `"snapshotOffset"`, `"createdAt"`, and `"retained"`;
-before deletion, the last snapshot entry is current. This is the reference
-`y-durable-streams` server's layout (`"retained"` is an addition). The streams
-share `base` as their placement key, so they are on one shard. `base` must be a
-stream path with no segment that starts with `.`.
+before deletion, the last snapshot entry is current. The first three
+streams are the reference `y-durable-streams` server's layout (`"retained"`
+is an addition). Logs created by earlier versions of `slap_snapshot_log`
+may have no `.control` stream; they still work.
+The streams share `base` as their placement key, so they are on one shard.
+`base` must be a stream path with no segment that starts with `.`.
+
+While a log is being created or forked, calls on it return
+`{:error, :busy}`, except that `append/3` and `next/3` finish a creation
+that another caller left unfinished.
 
 ## Tests
 

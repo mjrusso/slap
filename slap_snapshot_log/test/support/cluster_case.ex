@@ -13,17 +13,22 @@ defmodule Slap.SnapshotLog.Test.ClusterCase do
     end
   end
 
-  setup do
+  setup context do
     dir =
       Path.join(System.tmp_dir!(), "slap-snapshot-log-test-#{System.unique_integer([:positive])}")
 
     on_exit(fn -> File.rm_rf!(dir) end)
 
-    start_supervised!(
-      {Slap.Streams.Cluster, store: {:local, dir}, shards: 2, settings: %{flush_interval: "2ms"}}
-    )
+    opts = [
+      store: {:local, dir},
+      shards: 2,
+      settings: %{flush_interval: "2ms"},
+      child_options: context[:child_options] || []
+    ]
 
-    :ok
+    start_supervised!({Slap.Streams.Cluster, opts})
+
+    %{cluster_opts: opts}
   end
 
   def base, do: "/v1/stream/test/log-#{System.unique_integer([:positive])}"

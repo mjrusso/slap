@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Adds `Slap.SnapshotLog.fork/3` to create independently editable logs by
+  reference. Retry the same source and target after a timeout to resolve the
+  original capture. Pending targets, and forks from a pending source, return
+  `:busy`. Exhausted publication retries return `:retries_exhausted`. Forks
+  retain ancestor storage and use the stream reference depth limit.
+
 ## 0.4.0
 
 - Updates `slap_streams` and `slap_cluster` dependencies to 0.4.0.

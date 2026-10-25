@@ -28,7 +28,7 @@ defmodule Slap.SnapshotLog.MixProject do
   end
 
   def application do
-    [extra_applications: [:logger]]
+    [extra_applications: [:logger], mod: {Slap.SnapshotLog.Application, []}]
   end
 
   def cli do
@@ -43,6 +43,7 @@ defmodule Slap.SnapshotLog.MixProject do
       slap_dep(:slap_streams, "~> 0.4.0"),
       slap_dep(:slap_cluster, "~> 0.4.0"),
       slap_dep(:slap_slatedb, "~> 0.2.0"),
+      {:stream_data, "~> 1.4", only: [:dev, :test]},
       {:rustler, "~> 0.38", optional: true, runtime: false},
       {:credo, "~> 1.7.19", only: [:dev, :test], runtime: false},
       {:ex_slop, "~> 0.4.5", only: [:dev, :test], runtime: false},

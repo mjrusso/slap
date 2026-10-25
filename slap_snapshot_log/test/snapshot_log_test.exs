@@ -45,6 +45,39 @@ defmodule Slap.SnapshotLogTest do
     assert System.monotonic_time(:millisecond) - started < 250
   end
 
+  test "next recalculates its read timeout after a delayed liveness check" do
+    base = base()
+    {:ok, offset} = SnapshotLog.append(base, "entry")
+    path = SnapshotLog.path(base, :updates)
+    {:ok, {:local, ctx}} = Streams.Cluster.lookup(Streams.Cluster.shard_for(base))
+    [{pid, _}] = Registry.lookup(ctx.registry, {ctx.n, {:stream, path}})
+    :ok = :sys.suspend(pid, 5_000)
+    on_exit(fn -> if Process.alive?(pid), do: :sys.resume(pid, 5_000) end)
+    :erlang.trace_pattern({Streams, :read, 3}, true, [:local])
+    on_exit(fn -> :erlang.trace_pattern({Streams, :read, 3}, false, [:local]) end)
+    :erlang.trace(pid, true, [:receive])
+
+    task =
+      Task.async(fn ->
+        receive do
+          :go -> SnapshotLog.next(base, offset, timeout: 2_000, wait: 2_000)
+        end
+      end)
+
+    :erlang.trace(task.pid, true, [:call])
+    send(task.pid, :go)
+    assert_receive {:trace, ^pid, :receive, {:"$gen_call", _, :head}}, 5_000
+    :erlang.trace(pid, false, [:receive])
+    Process.send_after(self(), :resume_liveness, 1_000)
+    assert_receive :resume_liveness, 5_000
+    :ok = :sys.resume(pid, 5_000)
+
+    assert_receive {:trace, _, :call, {Streams, :read, [^path, ^offset, read_opts]}}, 5_000
+    assert read_opts[:timeout] <= 1_500
+    assert read_opts[:wait] <= read_opts[:timeout]
+    Task.await(task, 5_000)
+  end
+
   describe "next/3 and append/2" do
     test "a new log resets to no snapshot; appends are read back in pages" do
       base = base()
@@ -266,7 +299,7 @@ defmodule Slap.SnapshotLogTest do
       {:ok, tail} = SnapshotLog.append(base, "c")
 
       crash = fn name -> if name == unquote(step), do: throw(:crash), else: :ok end
-      assert catch_throw(SnapshotLog.Store.delete(base, after_step: crash)) == :crash
+      assert catch_throw(SnapshotLog.Lifecycle.delete(base, after_step: crash)) == :crash
 
       assert {:error, :deleted} = SnapshotLog.append(base, "c")
 
