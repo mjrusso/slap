@@ -128,6 +128,10 @@ reason in its commit message and a test.
   `slap_kv`), and a Yjs document server stops on an append error that is
   not transient. A process that takes over a stream or KV shard first
   waits until the writes before it are durable.
+- `slap_cluster` retains a shard handle until its native calls have drained and
+  it has closed, even if the shard owner is killed or the cluster stops. A
+  replacement waits for closure. A KV accounting failure stops the shard;
+  admission starts again only after the old handle closes.
 - A file's object body is named by an intent before it can become
   unreferenced (before it exists, for an upload), and its key is
   registered after that and before the upload. An object is deleted only
