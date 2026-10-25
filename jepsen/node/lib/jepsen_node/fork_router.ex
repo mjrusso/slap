@@ -131,6 +131,11 @@ defmodule JepsenNode.ForkRouter do
     with :ok <- cleanup([], sources, budget(req)), do: {:ok, %{reclaimed: sources}}
   end
 
+  def audit_excluding(identities, budget) do
+    groups = Enum.group_by(identities, & &1.shard, & &1.sid)
+    with :ok <- cleanup([], {:excluded, groups}, budget), do: {:ok, %{rows: 0}}
+  end
+
   defp budget(req), do: min(Map.get(req, "budget_ms", 25_000), 25_000)
 
   defp cleanup(paths, sources, budget) do
@@ -161,6 +166,12 @@ defmodule JepsenNode.ForkRouter do
       error -> error
     end
   end
+
+  defp shards({:excluded, groups}),
+    do:
+      Enum.map(Streams.Cluster.assignments(), fn {n, _} ->
+        {n, %{excluded: Map.get(groups, n, [])}}
+      end)
 
   defp shards(nil), do: Enum.map(Streams.Cluster.assignments(), fn {n, _} -> {n, nil} end)
   defp shards(sources), do: Enum.group_by(sources, & &1["shard"])
@@ -215,19 +226,27 @@ defmodule JepsenNode.ForkRouter do
   end
 
   defp count_rows(ctx, sources) do
-    sids = if sources, do: MapSet.new(sources, & &1["sid"])
+    {sids, excluded} =
+      case sources do
+        %{excluded: excluded} -> {nil, MapSet.new(excluded)}
+        nil -> {nil, MapSet.new()}
+        sources -> {MapSet.new(sources, & &1["sid"]), MapSet.new()}
+      end
 
     ctx.db
     |> SlateDB.scan(durability: :remote)
     |> Enum.count(fn row ->
       case Read.row_owner(row) do
-        {:stream, sid} -> sids == nil or MapSet.member?(sids, sid)
-        :shared -> false
+        {:stream, sid} ->
+          not MapSet.member?(excluded, sid) and (sids == nil or MapSet.member?(sids, sid))
+
+        :shared ->
+          false
       end
     end)
   end
 
-  defp within(deadline, fun) do
+  def within(deadline, fun) do
     task = Task.async(fn -> guarded(fun) end)
 
     case Task.yield(task, remaining(deadline)) || Task.shutdown(task, :brutal_kill) do

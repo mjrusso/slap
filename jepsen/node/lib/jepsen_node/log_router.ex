@@ -77,6 +77,10 @@ defmodule JepsenNode.LogRouter do
     })
   end
 
+  post "/fork/operation" do
+    JepsenNode.LogFork.call(conn, :log)
+  end
+
   match _ do
     send_resp(conn, 404, "")
   end

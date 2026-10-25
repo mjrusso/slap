@@ -181,7 +181,7 @@ defmodule JepsenNode.ForkRouterTest do
           :whole_store -> %{"action" => "audit", "paths" => []}
         end
 
-      for key <- [<<0x0F, 1::64>>, <<0x00, "unknown">>, Slap.Streams.Store.Keys.tail(1) <> <<0>>] do
+      for key <- [<<0x10, 1::64>>, <<0x00, "unknown">>, Slap.Streams.Store.Keys.tail(1) <> <<0>>] do
         assert {:ok, _} = Slap.SlateDB.put(ctx.db, key, "unknown", await_durable: true)
         conn = Plug.Test.conn(:post, "/operation", JSON.encode!(Map.put(request, "budget_ms", 100)))
         response = ForkRouter.call(conn, ForkRouter.init([]))

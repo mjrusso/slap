@@ -49,6 +49,10 @@ defmodule JepsenNode.YjsRouter do
       else: send_resp(conn, 503, "cluster not ready")
   end
 
+  post "/fork/operation" do
+    JepsenNode.LogFork.call(conn, :yjs)
+  end
+
   match _ do
     send_resp(conn, 404, "")
   end

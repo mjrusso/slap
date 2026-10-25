@@ -26,8 +26,14 @@ defmodule JepsenNode.Log.Follower do
   # One read at a time, waiting at most a second, so system messages get in.
   @impl true
   def handle_info(:follow, state) do
-    send(self(), :follow)
-    {:noreply, step(state, SnapshotLog.next(state.base, state.offset, wait: 1_000))}
+    case SnapshotLog.next(state.base, state.offset, wait: 1_000) do
+      {:error, :deleted} ->
+        {:stop, :normal, state}
+
+      result ->
+        send(self(), :follow)
+        {:noreply, step(state, result)}
+    end
   end
 
   defp step(state, {:reset, %{snapshot: snapshot, offset: offset}}) do

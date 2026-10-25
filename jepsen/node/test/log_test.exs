@@ -20,7 +20,7 @@ defmodule JepsenNode.LogTest do
 
     for child <- Log.child_specs(), do: start_supervised!(child)
     assert :ok = Slap.SnapshotLog.delete(Log.base("missing"))
-    assert {:ok, _} = DynamicSupervisor.start_child(Log.Followers, {Log.Follower, "missing"})
+    assert {:ok, _} = Registry.register(Log.Registry, "missing", nil)
     Log.put_follower("missing", [1])
 
     assert %{followers: 1, read_errors: [%{key: "missing"}]} = Log.check(["missing"])
