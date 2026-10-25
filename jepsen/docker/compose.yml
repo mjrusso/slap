@@ -21,6 +21,10 @@ x-node: &node
 services:
   rustfs:
     image: rustfs/rustfs@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     environment:
       RUSTFS_ACCESS_KEY: rustfsadmin
       RUSTFS_SECRET_KEY: rustfsadmin

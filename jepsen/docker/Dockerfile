@@ -31,6 +31,7 @@ COPY jepsen/node/mix.exs jepsen/node/mix.lock ./jepsen/node/
 
 WORKDIR /src/jepsen/node
 RUN mix deps.get --only prod --check-locked && mix deps.compile
+COPY jepsen/node/config ./config
 COPY jepsen/node/lib ./lib
 RUN mix compile --warnings-as-errors && mix release jepsen_node
 

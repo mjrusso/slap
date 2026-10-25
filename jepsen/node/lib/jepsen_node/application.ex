@@ -17,6 +17,8 @@ defmodule JepsenNode.Application do
       for KV each.
     * `JEPSEN_PLACEMENT` - `object-lease` (the default; leases in the
       bucket) or `distributed` (placement from the connected nodes).
+    * `JEPSEN_KV_ADMISSION` - `normal` (defaults) or `low` (one pending
+      request per writer, 32 KiB per writer and 64 KiB per shard).
     * `JEPSEN_LEASE_TTL` - ms, for `object-lease` (default 15,000).
   """
 
@@ -37,7 +39,10 @@ defmodule JepsenNode.Application do
     config = [
       store: {:url, System.fetch_env!("JEPSEN_STORE")},
       streams: [shards: shards, settings: %{flush_interval: "10ms"}],
-      kv: [shards: shards],
+      kv: [
+        shards: shards,
+        child_options: kv_admission(System.get_env("JEPSEN_KV_ADMISSION", "normal"))
+      ],
       port: 4437,
       ip: :any,
       strategy: strategy(System.get_env("JEPSEN_PLACEMENT", "object-lease")),
@@ -80,6 +85,17 @@ defmodule JepsenNode.Application do
         ]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: JepsenNode.Supervisor)
+  end
+
+  defp kv_admission("normal"), do: []
+
+  defp kv_admission("low") do
+    [
+      partition_writers: 4,
+      max_inflight_bytes_per_writer: 32_768,
+      max_inflight_bytes_per_shard: 65_536,
+      max_inflight_requests_per_writer: 1
+    ]
   end
 
   defp strategy("distributed"), do: {Slap.Cluster.Strategy.Distributed, []}
