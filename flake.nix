@@ -32,7 +32,7 @@
           jdk21_headless
           gnuplot
           graphviz
-        ];
+        ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.strace ];
 
         devPackages = with pkgs; [
           beam.elixir-ls
