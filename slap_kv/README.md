@@ -184,6 +184,87 @@ charges.
   Scan rows omit versions by default; `with_versions: true` includes them.
   There are no scans or writes across partitions.
 
+## Atomic batches
+
+`Slap.KV.batch/3` applies operations on distinct keys in one partition atomically:
+
+```elixir
+{:ok, version} = Slap.KV.batch("user:42", [
+  {:put, "profile", "Ada", :absent},
+  {:put, "theme", "dark"},
+  {:delete, "draft"},
+  {:check, "disabled", :absent}
+])
+```
+
+The rules for operations:
+
+- A put or delete may end with a version condition: an integer version, or,
+  for a put, `:absent`.
+- A check must have a condition: an integer version or `:absent`.
+- Each key may appear only once in a batch, so a key cannot be both checked
+  and changed. A condition of `nil` is invalid.
+- Conditions are checked in list order against the rows as they were before
+  the batch. The first one that fails returns
+  `{:error, {:conflict, key, current_version_or_nil}}`, and nothing is
+  written.
+
+A batch that puts or deletes rows returns `{:ok, version}`, and every row it
+puts gets that version. A batch of only checks returns `{:ok, nil}`; like a
+conflict, it replies only after a write of its own confirms that its node
+still owns the shard. Options are `:deadline`, `:timeout` and `:cluster`, as
+for single writes. A batch is not applied at or after its deadline. A timeout
+does not cancel the batch: after `:timeout` or `:unavailable`, resolve its
+outcome as for single writes (see [Uncertain writes](#semantics)) before
+retrying.
+
+## Limits on pending work
+
+Each shard limits how much work can wait for durability at once. A write,
+batch or linearizable get counts against the limits from the moment its
+partition writer accepts it until its result is durable and it has replied.
+A request that would exceed them is rejected before any row is read or
+written. Set the limits as
+positive integers in the cluster's `child_options`:
+
+```elixir
+child_options: [
+  partition_writers: 16,
+  max_inflight_bytes_per_writer: 64 * 1024 * 1024,
+  max_inflight_bytes_per_shard: 256 * 1024 * 1024,
+  max_inflight_requests_per_writer: 1_024,
+  max_batch_ops: 1_000,
+  max_batch_bytes: 8 * 1024 * 1024
+]
+```
+
+These are the defaults. A request's size in bytes is the sum, over its
+operations, of the encoded key (two length bytes, the partition and the key)
+and, for a put, the value. A batch counts as one request. A linearizable get
+counts as one request of zero bytes. Durable gets and scans are not limited.
+
+- A request larger than either byte limit returns
+  `{:error, {:bad_request, :request_too_large}}`, even when nothing else is
+  pending.
+- A batch with more than `max_batch_ops` operations or `max_batch_bytes`
+  bytes returns `{:error, {:bad_request, :batch_too_large}}`.
+- A request that would fit once pending work finishes returns
+  `{:error, :overloaded}`.
+
+In all three cases the request was not applied.
+
+A caller's timeout or exit does not free the work's capacity: the work is
+still pending. If a partition writer crashes, its pending writes count until
+they are durable or the shard's database closes. If it crashes while
+submitting a write to SlateDB, so that whether the write was submitted is
+unknown, the shard stops, and it accepts requests again only after its
+database has closed.
+
+These limits bound pending request bytes and counts. They do not bound
+process mailboxes, HTTP decoding, distribution queues, response bodies, or
+total BEAM or native memory. `Slap.KV.Telemetry` reports rejections and
+pending work.
+
 ## How it works
 
 - **Placement.** A partition is on shard `xxh64(partition) mod N`
@@ -244,10 +325,37 @@ row, send that value in `If-Match`. A stale version returns 412 with the
 current `ETag`.
 
 Partitions and keys are percent-encoded path segments. In scan responses,
-keys, values, and the cursor are unpadded base64url. A 503 response (with
-`Retry-After`) means that the shard was unavailable or the request timed out;
-a write may still have been applied. The router does not authenticate
-requests.
+keys, values, and the cursor are unpadded base64url. The router does not
+authenticate requests.
+
+Size errors return 413 without `Retry-After`. A 503 response with body
+`overloaded: request was not applied` is a definite rejection and includes
+`Retry-After: 1`. Other 503 responses and transport failures leave the write's
+outcome unknown.
+
+For an atomic batch, send JSON with unpadded base64url keys and values:
+
+```sh
+curl -i -X POST http://localhost:4437/v1/kv/p \
+  -H 'Content-Type: application/json' \
+  --data '{"ops":[{"op":"put","key":"YQ","value":"MQ","if_absent":true},{"op":"delete","key":"Yg"}]}'
+```
+
+Operations are `put` (key and value), `delete` (key), or `check` (key and a
+required condition). Conditions are `if_version: N` or `if_absent: true`;
+`if_absent` is allowed only for put and check. A batch is rejected if it has
+unknown fields, an operation has both conditions, or the request has an
+`If-Match` or `If-None-Match` header. The only optional
+top-level field is integer `deadline` in Unix milliseconds.
+
+Mutation success is 200 with `{"version": N}` and ETag `"N"`. Check-only success
+is 200 with `{"version": null}` and no ETag. A conflict is 412 with
+`{"key": "base64url", "version": N}` (`null` when missing). Passed batch deadlines
+return 400 with `deadline_exceeded`.
+
+The router's `max_batch_body` bounds raw JSON (16 MiB by default), separately
+from owner-enforced decoded limits. `max_value` also bounds each decoded put
+value (8 MiB by default).
 
 ## Storage
 
@@ -264,8 +372,7 @@ limit of 65,535 bytes once encoded. Deletes are SlateDB deletes
   Unconditional writes do not read. Partition writers are independent, so
   this delays only the partitions that share that writer; see
   [Benchmarks](#benchmarks).
-- **No batches, TTLs or cross-partition operations** yet.
-- **No backpressure:** a shard's writes in flight are not capped.
+- **No TTLs or cross-partition operations.**
 
 ## Benchmarks
 
@@ -283,6 +390,18 @@ cold conditional write waits for a store read and blocks its partition writer;
 increasing `partition_writers` spreads that delay across partitions. Measure
 on the intended store before changing the default of 16.
 
+`bench/durability_admission.exs` runs 64 bounded clients by default, mixing
+64 KiB puts, tiny puts, failed conditions and linearizable gets. It reports
+elapsed time, request outcomes, reserved bytes/counts, mailbox samples,
+BEAM memory and SlateDB's native buffer metrics as JSON. Native buffer gauges
+cover only the memory SlateDB reports; they are not total native allocations.
+Use an externally delayed object store to measure slow durability. The report
+also includes the result of a final write after the clients finish.
+
+```sh
+mix run bench/durability_admission.exs --store s3://bucket/benchmark --flush-interval 10ms
+```
+
 ## Tests
 
 Run from `slap_kv/` after the development setup above:
@@ -291,9 +410,10 @@ Run from `slap_kv/` after the development setup above:
 mix test          # SLAP_KV_PROP_RUNS=1000 for more model sequences
 ```
 
-The model test covers conditional writes, scans, writer replacement, and
-cluster restarts. `test/durability_test.exs` checks durable replies, pending
-writes, and fencing. Set `SLAP_KV_PROP_RUNS` to run more model sequences.
+The model test covers atomic batches, conditional writes, scans, writer
+replacement, and cluster restarts. `test/durability_test.exs` checks durable
+replies, pending writes, and fencing. Set `SLAP_KV_PROP_RUNS` to run more model
+sequences.
 
 ## License
 

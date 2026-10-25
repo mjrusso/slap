@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Add `Slap.KV.batch/3` and JSON `POST /v1/kv/{partition}` for atomic,
+  conditional operations within one partition.
+- Limit writes and linearizable reads awaiting durability by default.
+  `:request_too_large` (HTTP 413) and `:overloaded` (HTTP 503) mean the request
+  was not applied. Set limits through cluster `child_options`; see
+  [Durability admission](README.md#durability-admission) for defaults and costs.
+- Add telemetry for overloads and pending work; see `Slap.KV.Telemetry`.
+
 ## 0.4.0
 
 - `Slap.KV.scan/2` accepts `cursor: nil` to start at the beginning of the

@@ -8,6 +8,9 @@ defmodule Slap.KV.HTTP.Router do
     * `PUT /v1/kv/{partition}/{key}` - writes the request body. 204 with the
       new version as the `ETag`.
     * `DELETE /v1/kv/{partition}/{key}` - 204.
+    * `POST /v1/kv/{partition}` - an atomic JSON batch; see the README for
+      operation shapes. Returns `{"version": n}` and an ETag for mutations,
+      or `{"version": null}` without an ETag for check-only success.
     * `GET /v1/kv/{partition}?prefix=&gte=&lt=&limit=&cursor=` - a page of
       the partition's rows in key order (see `Slap.KV.scan/2`), as JSON:
       `{"rows": [{"key": k, "value": v}], "cursor": c}`, with keys, values
@@ -20,9 +23,11 @@ defmodule Slap.KV.HTTP.Router do
 
   `PUT` and `DELETE` take `If-Match: "version"`, and `PUT` takes
   `If-None-Match: *` (the row must not exist); a failed condition is 412,
-  with the current version as the `ETag` when there is a row. 503 (with
-  `Retry-After`) means the shard is unavailable or the request timed out:
-  a write may still have been applied.
+  with the current version as the `ETag` when there is a row.
+
+  A 503 response with body `overloaded: request was not applied` is a definite
+  rejection and includes `Retry-After: 1`. Other 503 responses leave the write's
+  outcome unknown. Size errors return 413 without `Retry-After`.
 
   It does not authenticate: put that in front of it.
 
@@ -31,6 +36,8 @@ defmodule Slap.KV.HTTP.Router do
     * `:prefix` - default `"/v1/kv"`.
     * `:max_value` - the largest value, in bytes (default 8 MiB; 413 above
       it).
+    * `:max_batch_body` - raw JSON batch body limit (default 16 MiB),
+      independent of decoded owner limits.
     * `:cluster` - KV cluster serving these requests (default
       `Slap.KV.Cluster`).
 
@@ -42,14 +49,25 @@ defmodule Slap.KV.HTTP.Router do
   import Plug.Conn
 
   alias Slap.KV
+  alias Slap.KV.HTTP.Batch
 
-  @defaults %{prefix: "/v1/kv", max_value: 8 * 1024 * 1024, cluster: Slap.KV.Cluster}
+  @defaults %{
+    prefix: "/v1/kv",
+    max_value: 8 * 1024 * 1024,
+    max_batch_body: 16 * 1024 * 1024,
+    cluster: Slap.KV.Cluster
+  }
 
   @impl true
   def init(opts) do
     unless Keyword.keyword?(opts), do: raise(ArgumentError, "options must be a keyword list")
     Keyword.validate!(opts, Map.keys(@defaults))
-    Map.merge(@defaults, Map.new(opts))
+    opts = Map.merge(@defaults, Map.new(opts))
+
+    unless is_integer(opts.max_batch_body) and opts.max_batch_body > 0,
+      do: raise(ArgumentError, ":max_batch_body must be a positive integer")
+
+    opts
   end
 
   @impl true
@@ -77,11 +95,9 @@ defmodule Slap.KV.HTTP.Router do
     end)
   end
 
-  defp method_label(method) when method in ["GET", "HEAD", "PUT", "DELETE"], do: method
+  defp method_label(method) when method in ["GET", "HEAD", "PUT", "DELETE", "POST"], do: method
   defp method_label(_method), do: "OTHER"
 
-  # The decoded path segments after the prefix: [partition] or
-  # [partition, key]. A malformed escape is kept as it is.
   defp segments(path, prefix) do
     with ["", rest] <- String.split(path, prefix <> "/", parts: 2),
          parts when length(parts) in 1..2 <- String.split(rest, "/") do
@@ -91,6 +107,7 @@ defmodule Slap.KV.HTTP.Router do
     end
   end
 
+  defp dispatch(conn, "POST", [partition], opts), do: batch(conn, partition, opts)
   defp dispatch(conn, "GET", [partition], opts), do: scan(conn, partition, opts)
   defp dispatch(conn, "GET", [partition, key], opts), do: get(conn, partition, key, true, opts)
   defp dispatch(conn, "HEAD", [partition, key], opts), do: get(conn, partition, key, false, opts)
@@ -136,6 +153,53 @@ defmodule Slap.KV.HTTP.Router do
     end
   end
 
+  defp batch(conn, partition, opts) do
+    with :ok <- batch_headers(conn),
+         {:ok, body, conn} <- read_value(conn, opts.max_batch_body),
+         {:ok, ops, controls} <- Batch.decode(body, opts.max_value) do
+      case KV.batch(partition, ops, [{:cluster, opts.cluster} | controls]) do
+        {:ok, nil} ->
+          json(conn, 200, %{version: nil})
+
+        {:ok, version} ->
+          conn |> put_etag(version) |> json(200, %{version: version})
+
+        {:error, {:conflict, key, version}} ->
+          json(conn, 412, %{key: encode64(key), version: version})
+
+        {:error, :deadline_exceeded} ->
+          error(conn, {:bad_request, :deadline_exceeded})
+
+        {:error, reason} ->
+          error(conn, reason)
+      end
+    else
+      {:too_large, conn} -> text(conn, 413, "batch body too large")
+      {:error, :unsupported_media_type} -> text(conn, 415, "expected application/json")
+      {:error, reason} -> error(conn, reason)
+    end
+  end
+
+  defp batch_headers(conn) do
+    case {get_req_header(conn, "if-match"), get_req_header(conn, "if-none-match")} do
+      {[], []} -> batch_content_type(get_req_header(conn, "content-type"))
+      _ -> {:error, {:bad_request, :invalid_condition}}
+    end
+  end
+
+  defp batch_content_type([type]) do
+    if type |> String.split(";", parts: 2) |> hd() |> String.trim() |> String.downcase() ==
+         "application/json",
+       do: :ok,
+       else: {:error, :unsupported_media_type}
+  end
+
+  defp batch_content_type(_types), do: {:error, :unsupported_media_type}
+
+  defp json(conn, status, body) do
+    conn |> put_resp_content_type("application/json") |> send_resp(status, JSON.encode!(body))
+  end
+
   defp scan(conn, partition, opts) do
     conn = fetch_query_params(conn)
 
@@ -177,7 +241,6 @@ defmodule Slap.KV.HTTP.Router do
     end)
   end
 
-  # `If-Match: "version"` for a put or delete; `If-None-Match: *` for a put.
   defp condition(conn, allow_absent?) do
     case {get_req_header(conn, "if-match"), get_req_header(conn, "if-none-match")} do
       {[], []} -> {:ok, []}
@@ -213,7 +276,7 @@ defmodule Slap.KV.HTTP.Router do
   end
 
   defp read_value(conn, max, acc, size) do
-    case read_body(conn) do
+    case read_body(conn, length: min(max - size + 1, 8_000_000)) do
       {:ok, chunk, conn} when size + byte_size(chunk) <= max ->
         {:ok, IO.iodata_to_binary([acc, chunk]), conn}
 
@@ -231,6 +294,16 @@ defmodule Slap.KV.HTTP.Router do
   defp error(conn, {:conflict, current}) do
     conn = if current, do: put_etag(conn, current), else: conn
     text(conn, 412, "precondition failed")
+  end
+
+  defp error(conn, {:bad_request, reason})
+       when reason in [:value_too_large, :batch_too_large, :request_too_large],
+       do: text(conn, 413, "request too large: #{reason}")
+
+  defp error(conn, :overloaded) do
+    conn
+    |> put_resp_header("retry-after", "1")
+    |> text(503, "overloaded: request was not applied")
   end
 
   defp error(conn, {:bad_request, reason}), do: text(conn, 400, "bad request: #{reason}")
