@@ -168,7 +168,13 @@ reason in its commit message and a test.
 - A snapshot log's snapshot at an offset contains every entry before it,
   and anything more only if applying it again is harmless. It becomes
   current through the index's `Stream-Seq`, and only then are entries
-  trimmed; every step of a publication can be interrupted.
+  trimmed; every step of a publication can be interrupted. Log initialization
+  and forking claim one durable control stream before creating components. A
+  fork becomes visible only after its references and index are durable;
+  component writes and publication verify the control stream's identity
+  (path, shard and sid) and tail (`Slap.SnapshotLog.Control.guard/1`).
+  Cancellation appends to the control stream before it releases reference
+  protection, so delayed writes from the cancelled operation fail that check.
 - `slap_cluster` stays generic: no stream, KV or Yjs code. Application
   behaviour goes in its shard children.
 - A change to stream behaviour extends the model-based property test
