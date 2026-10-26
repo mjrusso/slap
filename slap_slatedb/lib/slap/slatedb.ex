@@ -41,6 +41,11 @@ defmodule Slap.SlateDB do
       goes up. This lets one process write without waiting and confirm many
       writes at once.
 
+  For local stores (`{:local, directory}`), durability includes syncing file
+  contents and, on Unix, directory entries. This can increase write and open
+  latency. The filesystem and device must honor sync requests. Other platforms
+  do not sync directory entries.
+
   ## Timeouts
 
   Calls wait for their reply with no timeout by default. Pass

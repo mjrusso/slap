@@ -24,6 +24,7 @@ mod binaries;
 mod compaction_filter;
 mod db;
 mod gate;
+mod local_store;
 mod logging;
 mod merge;
 mod objstore;

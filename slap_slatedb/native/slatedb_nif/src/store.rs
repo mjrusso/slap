@@ -7,10 +7,10 @@ use rustler::NifUnitEnum;
 use slatedb::object_store::aws::{AmazonS3Builder, AmazonS3ConfigKey, S3ConditionalPut};
 use slatedb::object_store::azure::MicrosoftAzureBuilder;
 use slatedb::object_store::gcp::GoogleCloudStorageBuilder;
-use slatedb::object_store::local::LocalFileSystem;
 use slatedb::object_store::memory::InMemory;
 use slatedb::object_store::{ObjectStore, ObjectStoreScheme};
 
+use crate::local_store::LocalStore;
 use crate::probe;
 use crate::reply::{NifError, NifOutcome};
 
@@ -76,10 +76,9 @@ fn build_store(
             String::new(),
         )),
         StoreKind::Local => {
-            std::fs::create_dir_all(location)
-                .map_err(|e| NifError::invalid(format!("cannot create {location}: {e}")))?;
-            let store = LocalFileSystem::new_with_prefix(location)
-                .map_err(|e| NifError::invalid(format!("invalid local store {location}: {e}")))?;
+            let store = LocalStore::new(std::path::Path::new(location)).map_err(|e| {
+                NifError::invalid(format!("cannot open local store {location}: {e}"))
+            })?;
             Ok((Arc::new(store), String::new()))
         }
         StoreKind::Url => {
@@ -222,3 +221,7 @@ fn build_gcs_store(
     .map_err(|e| NifError::invalid(format!("cannot build GCS store for {location}: {e}")))?;
     Ok(Arc::new(store))
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "local_durability_tests.rs"]
+mod local_durability_tests;

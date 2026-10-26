@@ -269,6 +269,16 @@ Slap.SlateDB.open("my-db",
 )
 ```
 
+With `{:local, directory}`, object writes and completed uploads sync file contents
+before returning success. On Unix, object creation and deletion also sync directory
+entries, and opening a store syncs its directory and ancestors. Synchronization can
+increase write and open latency. Persistence requires a filesystem and storage
+device that honor sync requests. Other platforms do not sync directory entries.
+
+This applies to database storage and `Slap.SlateDB.ObjectStore`. Database writes
+still return before durability by default; use `await_durable: true`,
+`durable_seq/1`, or `flush/1` to wait for or confirm durability.
+
 `{:url, url, options}` builds a store for `s3://` (Amazon S3 and compatible
 stores), `az://` / `abfs://` / `azure://` (Azure Blob Storage) or `gs://`
 (Google Cloud Storage) URLs:

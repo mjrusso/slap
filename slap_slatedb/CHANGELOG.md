@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Local stores (`{:local, directory}`) now use `fsync` for object writes and
+  completed uploads. On Unix, directory changes are synced too. This improves
+  protection against OS crashes and power loss, and can increase write and
+  open latency.
+
 ## 0.2.0
 
 - Upgrade SlateDB to 0.17. Databases written by 0.16 open unchanged.

@@ -337,7 +337,11 @@ defmodule Slap.Files.SweeperTest do
     :ok = :sys.suspend(writer)
     1 = :erlang.trace(writer, true, [:receive])
     task = Task.async(fun)
-    assert_receive {:trace, ^writer, :receive, {:"$gen_call", _, {:write, _, {:put, _, _}, _, _}}}
+
+    assert_receive {:trace, ^writer, :receive,
+                    {:"$gen_call", _, {:write, _, {:put, _, _}, _, _}}},
+                   5_000
+
     1 = :erlang.trace(writer, false, [:receive])
     task
   end

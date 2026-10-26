@@ -17,6 +17,11 @@ defmodule Slap.SlateDB.ObjectStore do
   GCS, and `:memory`. The local file system only supports `:create`, and
   returns `{:error, :unsupported}` for an update.
 
+  Local stores sync file contents before PUT or upload completion returns success.
+  On Unix, they also sync directory changes for object creation and deletion.
+  This can increase latency. Persistence requires the filesystem and device to
+  honor sync requests; other platforms do not sync directory entries.
+
   An atom error means the store refused a condition or does not support it;
   `%Slap.SlateDB.Error{}` means the operation failed.
   """

@@ -118,6 +118,11 @@ defmodule Slap.SlateDB.ObjectStoreTest do
     assert ObjectStore.put(store, "a", "two", mode: {:update, v1}) == {:error, :unsupported}
     assert {:ok, ["a"]} = ObjectStore.list(store, "")
     assert File.exists?(Path.join([dir, "root", "a"]))
+    assert :ok = ObjectStore.delete(store, "a")
+    assert :ok = ObjectStore.delete(store, "a")
+    assert :ok = ObjectStore.delete(store, "never/created/object")
+    assert {:ok, nil} = ObjectStore.get(store, "a")
+    assert {:ok, []} = ObjectStore.list(store, "")
     exercise_streams(store)
   end
 
