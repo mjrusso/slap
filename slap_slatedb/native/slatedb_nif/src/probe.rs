@@ -128,17 +128,7 @@ async fn put(
         .await
 }
 
-/// Runs the five steps against a new object at `path`:
-///
-/// 1. create-if-absent succeeds;
-/// 2. create-if-absent again is refused;
-/// 3. an update with a stale ETag is refused (or not supported);
-/// 4. an update with the current ETag succeeds (or not supported);
-/// 5. delete.
-///
-/// SlateDB needs 1 and 2. 3 and 4 matter to anything that updates objects
-/// in place with `If-Match`; a store may not support them (the local file
-/// system does not), but must never accept a stale ETag.
+// Fencing needs create-if-absent; metadata GC also needs conditional updates.
 async fn run(store: &dyn ObjectStore, path: &StorePath) -> [Step; 5] {
     let created = match put(store, path, "1", PutMode::Create).await {
         Ok(result) => result,

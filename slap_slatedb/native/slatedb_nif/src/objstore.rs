@@ -102,7 +102,7 @@ enum Mode {
 /// `mode` is `:overwrite`, `:create` or `{:update, version}`. Replies
 /// `{:ok, {:ok, version}}`, `{:ok, :conflict}` (the object exists, for
 /// `:create`; it changed or is gone, for `:update`) or `{:ok, :unsupported}`
-/// (the store has no conditional updates, like the local file system).
+/// (the store has no conditional updates).
 #[rustler::nif]
 fn objstore_put<'a>(
     env: Env<'a>,

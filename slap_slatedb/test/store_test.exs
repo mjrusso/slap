@@ -72,14 +72,14 @@ defmodule Slap.SlateDB.StoreTest do
              ]
     end
 
-    test "passes on a local directory, which has no If-Match" do
+    test "passes on a local directory, including If-Match" do
       dir = Path.join(System.tmp_dir!(), "slatedb-probe-#{System.unique_integer([:positive])}")
       on_exit(fn -> File.rm_rf!(dir) end)
 
       assert {:ok, steps} = SlateDB.probe_store({:local, dir}, "probe/one")
       assert steps[:create_again] == :ok
-      assert steps[:stale_if_match] == :unsupported
-      assert steps[:current_if_match] == :unsupported
+      assert steps[:stale_if_match] == :ok
+      assert steps[:current_if_match] == :ok
       assert steps[:delete] == :ok
     end
 

@@ -237,8 +237,7 @@ The `:store` option of `open/2` selects where the database lives:
 # In memory, lost when the VM exits.
 Slap.SlateDB.open("my-db", store: :memory)
 
-# A local directory, for development: old manifest files are never deleted
-# from it, so its size only grows.
+# A local directory.
 Slap.SlateDB.open("my-db", store: {:local, "/var/lib/slatedb"})
 
 # Amazon S3, configured from AWS_REGION, AWS_ACCESS_KEY_ID and
@@ -278,6 +277,36 @@ device that honor sync requests. Other platforms do not sync directory entries.
 This applies to database storage and `Slap.SlateDB.ObjectStore`. Database writes
 still return before durability by default; use `await_durable: true`,
 `durable_seq/1`, or `flush/1` to wait for or confirm durability.
+
+Local stores support create-if-absent and ETag-conditional updates, so SlateDB
+can collect obsolete metadata. All databases and file objects under one canonical
+store root share one exclusive OS lock, even when database paths differ. The
+lock is held through publication and synchronization; reads remain concurrent.
+
+This serialization is deliberate. One exclusive mode keeps ETag checks and
+replacements together and prevents other mutations from interleaving with compound
+copy/rename operations. Independent objects also block each other, so adding
+shards can reduce write throughput.
+See [choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count)
+for local deployment guidance.
+
+All processes accessing overlapping data must use the same canonical root.
+Symlink aliases resolve to that root; overlapping parent-root and child-root
+configurations are unsupported. Stop old processes before upgrading: older Slap
+versions, raw `LocalFileSystem` clients and direct filesystem writers bypass the
+lock. Leave the internal `.slap-lock#0` file in place. Its presence does not
+indicate an active lock. Its modification time is the latest given to an
+object, which keeps versions from repeating. Conditional updates need
+microsecond modification times and return `:unsupported` without them.
+
+On Linux and macOS, opening a local store inspects its filesystem. Recognized
+network filesystems, including NFS and SMB/CIFS, are rejected. Unknown or ambiguous
+types, including FUSE and layered mounts, produce a warning once per root per
+process. Test locking and syncing on such a filesystem before using it.
+
+A write whose sync fails returns an error even if the new object is already
+visible. After a failed conditional update, read the object's current version
+before retrying.
 
 `{:url, url, options}` builds a store for `s3://` (Amazon S3 and compatible
 stores), `az://` / `abfs://` / `azure://` (Azure Blob Storage) or `gs://`

@@ -14,8 +14,10 @@ defmodule Slap.SlateDB.ObjectStore do
 
   Conditional updates (`{:update, version}`, an `If-Match` PUT) need a store
   that supports them: S3 and S3-compatible stores such as RustFS, Azure,
-  GCS, and `:memory`. The local file system only supports `:create`, and
-  returns `{:error, :unsupported}` for an update.
+  GCS, `:memory`, and local stores. Local mutations share one OS lock per
+  canonical store root, including across handles and processes. On a
+  filesystem without microsecond modification times, local updates return
+  `:unsupported`.
 
   Local stores sync file contents before PUT or upload completion returns success.
   On Unix, they also sync directory changes for object creation and deletion.
@@ -113,6 +115,10 @@ defmodule Slap.SlateDB.ObjectStore do
   if `chunks` raises or the upload fails. A process that dies during an
   upload leaves its parts behind until the store expires them (S3 needs a
   lifecycle rule for incomplete multipart uploads).
+
+  On a local store, `get/3` can briefly return an earlier version of `key`
+  just after an upload of it completes; conditional updates are not affected.
+  Use `put/4` for objects whose versions you compare.
   """
   @spec upload(t(), String.t(), Enumerable.t(), keyword()) ::
           {:ok, version()} | {:error, SlateDB.Error.t()}

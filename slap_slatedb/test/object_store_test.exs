@@ -111,18 +111,10 @@ defmodule Slap.SlateDB.ObjectStoreTest do
   end
 
   @tag :tmp_dir
-  test "on the local file system: create-if-absent, but no updates", %{tmp_dir: dir} do
+  test "on the local file system", %{tmp_dir: dir} do
     {:ok, store} = ObjectStore.open("root", store: {:local, dir})
-    assert {:ok, v1} = ObjectStore.put(store, "a", "one", mode: :create)
-    assert ObjectStore.put(store, "a", "again", mode: :create) == {:error, :conflict}
-    assert ObjectStore.put(store, "a", "two", mode: {:update, v1}) == {:error, :unsupported}
-    assert {:ok, ["a"]} = ObjectStore.list(store, "")
-    assert File.exists?(Path.join([dir, "root", "a"]))
-    assert :ok = ObjectStore.delete(store, "a")
-    assert :ok = ObjectStore.delete(store, "a")
+    exercise(store)
     assert :ok = ObjectStore.delete(store, "never/created/object")
-    assert {:ok, nil} = ObjectStore.get(store, "a")
-    assert {:ok, []} = ObjectStore.list(store, "")
     exercise_streams(store)
   end
 

@@ -497,9 +497,9 @@ defmodule Slap.SlateDB do
     * `:delete` - the object is deleted.
 
   Each step is `:ok`, `{:failed, message}`, `:skipped` (after an earlier
-  failure) or, for the two `If-Match` steps, `:unsupported`: SlateDB only
-  needs create-if-absent, and some stores (the local file system) do not
-  implement `If-Match`. A store that accepts a stale ETag fails.
+  failure) or, for the two `If-Match` steps, `:unsupported`. Fencing needs
+  create-if-absent; metadata garbage collection also needs conditional updates.
+  Local stores support both. A store that accepts a stale ETag fails.
 
   Returns `{:ok, steps}` when nothing failed, `{:error, {:probe_failed, steps}}` when a step
   failed, or `{:error, %Slap.SlateDB.Error{}}` if the store cannot be reached.

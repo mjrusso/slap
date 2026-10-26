@@ -24,6 +24,8 @@ mod binaries;
 mod compaction_filter;
 mod db;
 mod gate;
+#[cfg(unix)]
+mod local_filesystem;
 mod local_store;
 mod logging;
 mod merge;

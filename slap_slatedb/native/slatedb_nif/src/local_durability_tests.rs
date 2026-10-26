@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use futures::{stream, StreamExt, TryStreamExt};
 use slatedb::object_store::path::Path as StorePath;
-use slatedb::object_store::{Error, ObjectStore, ObjectStoreExt, PutMode, Result};
+use slatedb::object_store::{Error, ObjectStore, ObjectStoreExt, PutMode, Result, UpdateVersion};
 
 use super::{build_store, StoreKind};
 use crate::local_store::LocalStore;
@@ -39,6 +39,7 @@ enum Directories {
 #[derive(Clone, Copy, Debug)]
 enum Upload {
     Put,
+    Conditional,
     Multipart,
 }
 
@@ -69,7 +70,7 @@ fn cases() -> Vec<Case> {
         [Directories::New, Directories::Existing]
             .map(|directories| Case::Preparation(operation, directories))
     });
-    let publication = [Upload::Put, Upload::Multipart]
+    let publication = [Upload::Put, Upload::Conditional, Upload::Multipart]
         .into_iter()
         .flat_map(|upload| {
             [PublicationSync::File, PublicationSync::Parent]
@@ -111,6 +112,7 @@ fn filesystem_operations_sync_before_success() {
     let trace = run_trace(&temp, &root, "success", None);
     check_success(&trace, &root);
     check_multipart_thread(&trace);
+    check_mutation_locks(&trace, &root);
 
     for case in cases() {
         let id = format!("{case:?}");
@@ -224,6 +226,45 @@ fn check_multipart_thread(trace: &[Call]) {
     }
 }
 
+fn check_mutation_locks(trace: &[Call], root: &Path) {
+    let lock = format!("<{}>", root.join(".slap-lock#0").display());
+    let mut held = false;
+    let mut publications = 0;
+    let mut awaiting_sync = false;
+    for call in trace {
+        if call.text.starts_with("flock(")
+            && call.text.contains(&lock)
+            && call.text.ends_with("= 0")
+        {
+            held = true;
+        }
+        if call.text.starts_with("close(") && call.text.contains(&lock) {
+            assert!(!awaiting_sync, "unlocked before publication sync: {call:?}");
+            held = false;
+        }
+        if held
+            && call.text.starts_with("fsync(")
+            && !call.text.contains('#')
+            && call.text.ends_with("= 0")
+        {
+            awaiting_sync = false;
+        }
+        if ["rename", "link", "unlink"]
+            .iter()
+            .any(|name| call.text.starts_with(name))
+            && call.text.ends_with("= 0")
+        {
+            assert!(held, "publication without the root lock: {call:?}");
+            publications += 1;
+            if !call.text.starts_with("unlink") || !call.text.contains('#') {
+                awaiting_sync = true;
+            }
+        }
+    }
+    assert!(publications > 0);
+    assert!(!held);
+}
+
 fn run_trace(temp: &Path, root: &Path, case: &str, inject: Option<usize>) -> Vec<Call> {
     if temp.join("new").exists() {
         fs::remove_dir_all(temp.join("new")).unwrap();
@@ -235,7 +276,7 @@ fn run_trace(temp: &Path, root: &Path, case: &str, inject: Option<usize>) -> Vec
     let mut cmd = Command::new("strace");
     cmd.args([
         "-f", "-yy", "-s", "512", "-e",
-        "trace=openat,fsync,fdatasync,rename,renameat,renameat2,link,linkat,unlink,unlinkat,mkdir,mkdirat,write",
+        "trace=flock,close,openat,fsync,fdatasync,rename,renameat,renameat2,link,linkat,unlink,unlinkat,mkdir,mkdirat,write",
         "-o",
     ]).arg(&log);
     if let Some(nth) = inject {
@@ -319,6 +360,7 @@ fn check_success(trace: &[Call], root: &Path) {
     for (phase, key, publication) in [
         ("put", "put/a/object", "rename"),
         ("overwrite", "put/a/object", "rename"),
+        ("conditional", "put/a/object", "rename"),
         ("create", "create/a/object", "link"),
         ("multipart", "multipart/a/object", "rename"),
     ] {
@@ -441,14 +483,38 @@ fn child(root: &Path, id: &str, inject: bool) {
             Case::Preparation(operation, directories) => {
                 preparation(store.as_ref(), root, operation, directories, inject).await
             }
-            Case::Publication(upload, _) => {
-                acknowledged("attempt");
-                let operation = match upload {
-                    Upload::Put => Write::Put,
-                    Upload::Multipart => Write::Multipart,
+            Case::Publication(upload, sync) => {
+                let key = StorePath::from("value");
+                let version = if matches!(upload, Upload::Conditional) {
+                    Some(store.put(&key, "old".into()).await.unwrap())
+                } else {
+                    None
                 };
-                let result = write(store.as_ref(), operation, &StorePath::from("value")).await;
+                acknowledged("attempt");
+                let result = match upload {
+                    Upload::Put => write(store.as_ref(), Write::Put, &key).await,
+                    Upload::Multipart => write(store.as_ref(), Write::Multipart, &key).await,
+                    Upload::Conditional => store
+                        .put_opts(
+                            &key,
+                            "new".into(),
+                            PutMode::Update(UpdateVersion::from(version.unwrap())).into(),
+                        )
+                        .await
+                        .map(|_| ()),
+                };
                 finish_attempt(result, inject);
+                if inject && matches!(upload, Upload::Conditional) {
+                    let expected = if matches!(sync, PublicationSync::Parent) {
+                        "new"
+                    } else {
+                        "old"
+                    };
+                    assert_eq!(
+                        store.get(&key).await.unwrap().bytes().await.unwrap(),
+                        expected
+                    );
+                }
             }
             Case::Deletion => deletion(store.as_ref(), root, inject).await,
             Case::Opening => opening(root, inject).await,
@@ -582,6 +648,20 @@ async fn success(store: &dyn ObjectStore) {
     acknowledged("put");
     store.put(&put, "two".into()).await.unwrap();
     acknowledged("overwrite");
+    let current = store.head(&put).await.unwrap();
+    store
+        .put_opts(
+            &put,
+            "conditional".into(),
+            PutMode::Update(UpdateVersion {
+                e_tag: current.e_tag,
+                version: current.version,
+            })
+            .into(),
+        )
+        .await
+        .unwrap();
+    acknowledged("conditional");
     let create = StorePath::from("create/a/object");
     store
         .put_opts(&create, "one".into(), PutMode::Create.into())
@@ -618,4 +698,12 @@ async fn success(store: &dyn ObjectStore) {
         .await
         .unwrap();
     acknowledged("delete-batch");
+    let source = StorePath::from("source");
+    let copied = StorePath::from("copy/a/object");
+    let renamed = StorePath::from("rename/a/object");
+    store.put(&source, "source".into()).await.unwrap();
+    store.copy(&source, &copied).await.unwrap();
+    store.rename(&copied, &renamed).await.unwrap();
+    store.rename_if_not_exists(&renamed, &copied).await.unwrap();
+    acknowledged("copy-rename");
 }
