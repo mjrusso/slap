@@ -16,9 +16,7 @@
 # many times to write and delete it. By default the store is a temporary
 # directory; SOAK_URL (such as s3://bucket/soak, configured by AWS_*
 # variables) uses object storage, and then SOAK_SIZE_CMD, a shell command,
-# must print the size of the store's files in bytes. On a local directory
-# old manifests cannot be collected, so neither can the files they name:
-# use object storage to see the space come back.
+# must print the size of the store's files in bytes.
 
 Slap.SlateDB.set_log_level(String.to_atom(System.get_env("SOAK_LOG", "error")))
 Logger.configure(level: String.to_atom(System.get_env("SOAK_LOG", "warning")))
@@ -42,10 +40,12 @@ settings = %{
       include_size_threshold: "1000.0"
     }
   },
-  # The local file system cannot collect old manifests.
-  garbage_collector_options:
-    if(url, do: %{manifest_options: gc}, else: %{})
-    |> Map.merge(%{wal_options: gc, compacted_options: gc})
+  garbage_collector_options: %{
+    manifest_options: gc,
+    compactions_options: gc,
+    wal_options: gc,
+    compacted_options: gc
+  }
 }
 
 {:ok, _} = Slap.Streams.Cluster.start_link(store: store, shards: 1, settings: settings)

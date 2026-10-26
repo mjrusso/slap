@@ -94,7 +94,7 @@ In an application that depends on `slap_streams`, run this in `iex -S mix`
 with a fresh local directory. The in-process API is `Slap.Streams`:
 
 ```elixir
-iex> {:ok, _} = Slap.Streams.Cluster.start_link(store: {:local, "/tmp/slap-streams"}, shards: 8); :ok
+iex> {:ok, _} = Slap.Streams.Cluster.start_link(store: {:local, "/tmp/slap-streams"}, shards: 1); :ok
 :ok
 
 iex> {:ok, :created, %{next_offset: 0}} = Slap.Streams.create("/chat/1", content_type: "application/json"); :created
@@ -119,15 +119,14 @@ to its supervision tree, with the cluster first:
 
 ```elixir
 children = [
-  {Slap.Streams.Cluster, store: {:local, "/tmp/slap-streams"}, shards: 8},
+  {Slap.Streams.Cluster, store: {:local, "/tmp/slap-streams"}, shards: 1},
   {Bandit, plug: Slap.Streams.HTTP.Router, port: 4437}
 ]
 ```
 
-Bandit serves the router at `/v1/stream/`. A `{:local, dir}` store is for
-development, because it never deletes old manifests (see
-[Storage after deletes](#storage-after-deletes)); [Using S3](#using-s3)
-describes the alternative.
+Bandit serves the router at `/v1/stream/`. For local storage, see
+[choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count).
+[Using S3](#using-s3) describes remote storage.
 
 To use an application-owned cluster module:
 
@@ -136,7 +135,7 @@ defmodule MyApp.StreamsCluster do
   use Slap.Streams.Cluster, otp_app: :my_app
 end
 
-children = [{MyApp.StreamsCluster, store: {:local, "/tmp/slap-streams"}, shards: 8}]
+children = [{MyApp.StreamsCluster, store: {:local, "/tmp/slap-streams"}, shards: 1}]
 ```
 
 Add these children to your supervision tree. Once it is running, pass the
@@ -450,9 +449,8 @@ the old version, which hold their own copies.
 
 Deleting rows writes tombstones. SlateDB reclaims their space only after
 compaction and garbage collection; old sorted runs and checkpoints can delay
-reclamation. The local file store does not collect old manifests, so use an
-object store when reclaiming deleted data matters. `bench/storage_soak.exs`
-measures this behavior.
+reclamation. `bench/storage_soak.exs` measures storage reclamation on local and
+remote stores.
 
 ## Several nodes
 
