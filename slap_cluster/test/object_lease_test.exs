@@ -28,19 +28,18 @@ defmodule Slap.Cluster.ObjectLeaseTest do
     end
 
     @tag :tmp_dir
-    test "refuses a store without conditional updates", %{tmp_dir: dir} do
-      Process.flag(:trap_exit, true)
+    test "claims and writes shards on a local store", %{tmp_dir: dir} do
+      start_supervised!(
+        {TestCluster,
+         store: {:local, dir},
+         shards: 2,
+         shard_children: {Counter, :child_specs, [self()]},
+         strategy: {ObjectLease, lease_ttl: 1_500}}
+      )
 
-      assert {:error,
-              {:shutdown, {:failed_to_start_child, Slap.Cluster.Probe, {:unsupported, reason}}}} =
-               TestCluster.start_link(
-                 store: {:local, dir},
-                 shards: 2,
-                 shard_children: {Counter, :child_specs, [self()]},
-                 strategy: {ObjectLease, lease_ttl: 1_500}
-               )
-
-      assert reason =~ "has no conditional updates"
+      assert :ok = TestCluster.await_ready(10_000)
+      assert TestCluster.local_shards() == [0, 1]
+      assert {:ok, 1} = Counter.increment(TestCluster, "local")
     end
   end
 

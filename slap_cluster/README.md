@@ -97,7 +97,7 @@ processes for each shard:
 ```elixir
 config :my_app, MyApp.Cluster,
   store: {:local, "/tmp/my-app-cluster"},
-  shards: 8,
+  shards: 1,
   shard_children: {MyApp.ShardChildren, :child_specs, []}
 ```
 
@@ -187,8 +187,25 @@ When a child calls `notify_when_durable/3`, the shard compares the write's
 sequence number with SlateDB's current durable sequence number, not with the
 last durability message it handled. A write that is already durable is reported
 at once, even if that message is still in the shard's mailbox. `shard_for/1`
-uses `xxh64(key) mod shards`; changing the shard count or hash moves existing
-keys.
+uses `xxh64(key) mod shards`; the shard count and hash must stay fixed for
+existing data.
+
+## Choosing the shard count
+
+For a new, lightly loaded, single-node deployment on local storage, start with
+one shard and measure your workload. Fewer active shards reduce database and
+background-task overhead and can improve batching. Additional shards can help
+read concurrency or CPU-intensive workloads.
+
+With `{:local, directory}`, mutations across every database and file object under
+that canonical store root share one OS lock, held through synchronization.
+Adding shards under the same root does not add concurrent object publication.
+See [local-store behavior](https://hexdocs.pm/slap_slatedb/readme.html#object-stores)
+for filesystem requirements and upgrade precautions.
+
+The shard count is fixed for existing data. Choose a lower count for a fresh
+store, or migrate logical data into a new store. Changing `:shards` in place does
+not relocate existing records and can make them inaccessible.
 
 ## Several nodes
 
@@ -228,10 +245,10 @@ atoms, so peers must be discovered or configured before routing to them.
 
 - **`Local`** runs all shards on one node. The node must restart to recover
   from a failure.
-- **`ObjectLease`** uses an object store with `If-Match` (S3, RustFS, GCS or
-  Azure) and roughly synchronised clocks. Failover takes about one lease
-  TTL. A node cut off from the bucket stops its shards before its leases
-  expire.
+- **`ObjectLease`** uses an object store with `If-Match` (S3, RustFS, GCS,
+  Azure, or a local store shared on one host) and roughly synchronised clocks.
+  Failover takes about one lease TTL. A node cut off from the store stops its
+  shards before its leases expire.
 - **`Distributed`** uses distributed Erlang without leases. A dead node's
   shards move after `:settle` (2 s); an unresponsive node also requires
   `net_ticktime`. A partition can let both sides open a shard. SlateDB
@@ -240,8 +257,9 @@ atoms, so peers must be discovered or configured before routing to them.
 - **`Static`** uses a fixed list of nodes. A failed node must return before
   its shards are available again.
 
-`ObjectLease` requires clocks within `:max_clock_skew_ms` (1 s by default); the
-local file store cannot provide `If-Match`. Lower `net_ticktime` with
+`ObjectLease` requires clocks within `:max_clock_skew_ms` (1 s by default).
+Local stores provide `If-Match` for cooperating processes on one host; network
+filesystem mounts remain unsupported. Lower `net_ticktime` with
 `Distributed` if failure detection must be faster.
 
 ## Tests

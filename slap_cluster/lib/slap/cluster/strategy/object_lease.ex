@@ -23,9 +23,9 @@ defmodule Slap.Cluster.Strategy.ObjectLease do
   ## Requirements
 
     * **A store with conditional updates** (`If-Match`): S3 and S3-compatible
-      stores such as RustFS, Azure, GCS. The local file system only has
-      create-if-absent, so it cannot be used (cluster startup fails);
-      one node on a local directory should use `Local`.
+      stores such as RustFS, Azure, GCS, or a local store shared by cooperating
+      processes on one host. Network filesystem mounts are unsupported for local
+      stores. A single node can use `Local` without lease overhead.
     * **Clocks within about `:max_clock_skew_ms`** (default 1 s): expiry times are
       wall-clock times written by the owner and read by the others. A node
       only treats a lease as expired `:max_clock_skew_ms` after its expiry time.

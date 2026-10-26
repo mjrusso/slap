@@ -38,7 +38,8 @@ defmodule Slap.Cluster do
     * `:store` - required. A store, as for `Slap.SlateDB.open/2`. Shard `n` is the
       database `<path>/shard-00n` in it.
     * `:shards` - required. The number of shards. Fixed for the life of the
-      data: `shard_for/1` depends on it.
+      data: `shard_for/1` depends on it. See the README's "Choosing the shard
+      count" section for local-storage guidance.
     * `:path` - the path of the shards in the store (default `""`).
     * `:settings` - SlateDB settings for every shard, as for
       `Slap.SlateDB.open/2`. SlateDB's `flush_interval` defaults to 100 ms,
