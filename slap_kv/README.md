@@ -89,7 +89,7 @@ In an application that depends on `slap_kv`, run this in `iex -S mix`
 with a fresh local directory:
 
 ```elixir
-iex> {:ok, _} = Slap.KV.Cluster.start_link(store: {:local, "/tmp/slap-kv"}, path: "kv", shards: 8); :ok
+iex> {:ok, _} = Slap.KV.Cluster.start_link(store: {:local, "/tmp/slap-kv"}, path: "kv", shards: 1); :ok
 :ok
 
 iex> {:ok, v1} = Slap.KV.put("user:42", "profile", "Ada", if_version: :absent); :ok
@@ -106,6 +106,8 @@ iex> :ok = Slap.KV.delete("user:42", "profile", if_version: v2)
 :ok
 ```
 
+For local storage, see [choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count).
+
 An application can define its own cluster module and pass it to KV calls
 and the HTTP router:
 
@@ -114,7 +116,7 @@ defmodule MyApp.KVCluster do
   use Slap.KV.Cluster, otp_app: :my_app
 end
 
-children = [{MyApp.KVCluster, store: {:local, "/tmp/slap-kv"}, shards: 8}]
+children = [{MyApp.KVCluster, store: {:local, "/tmp/slap-kv"}, shards: 1}]
 ```
 
 Add these children to your supervision tree. Once it is running, pass the
