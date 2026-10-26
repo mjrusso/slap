@@ -89,7 +89,7 @@ directory:
 ```elixir
 iex> store = {:local, "/tmp/slap-files"}
 {:local, "/tmp/slap-files"}
-iex> {:ok, _} = Slap.KV.Cluster.start_link(store: store, path: "kv", shards: 8); :ok
+iex> {:ok, _} = Slap.KV.Cluster.start_link(store: store, path: "kv", shards: 1); :ok
 :ok
 iex> {:ok, _} = Slap.Files.start_link(store: store, path: "files"); :ok
 :ok
@@ -114,6 +114,8 @@ iex> {:ok, %{files: files, cursor: nil}} = Slap.Files.list("doc-42"); length(fil
 iex> :ok = Slap.Files.delete(ref, if_version: v2)
 :ok
 ```
+
+For local storage, see [choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count).
 
 In an application, put both processes in its supervision tree in the same
 order. `Slap.Files.stream/1` returns the metadata and a lazy body stream.
