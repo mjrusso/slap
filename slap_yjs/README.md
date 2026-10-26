@@ -80,10 +80,12 @@ supervision tree, in this order:
 
 ```elixir
 children = [
-  {Slap.Streams.Cluster, store: {:local, "/tmp/slap-yjs"}, shards: 8},
+  {Slap.Streams.Cluster, store: {:local, "/tmp/slap-yjs"}, shards: 1},
   Slap.Yjs.Docs
 ]
 ```
+
+For local storage, see [choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count).
 
 For an application-owned Streams cluster, use the pattern in the
 `slap_streams` README and pass `cluster: MyApp.StreamsCluster` when starting
