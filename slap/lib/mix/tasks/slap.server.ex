@@ -49,8 +49,9 @@ defmodule Mix.Tasks.Slap.Server do
   it with a name and a shared cookie, for example `elixir --name
   a@127.0.0.1 --cookie slap -S mix slap.server --streams --store
   s3:s3://bucket/streams --placement distributed --peers
-  b@127.0.0.1,c@127.0.0.1`. `object-lease` needs an S3 store;
-  `--peers` requires a placement other than `local`.
+  b@127.0.0.1,c@127.0.0.1`. This task accepts `object-lease` only with an
+  S3 store, although `Slap.Cluster.Strategy.ObjectLease` also supports local
+  stores. `--peers` requires a placement other than `local`.
   """
 
   use Mix.Task

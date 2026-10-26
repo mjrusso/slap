@@ -192,7 +192,9 @@ elixir -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- 
   --streams --kv --store s3:s3://my-bucket/my-app
 ```
 
-`--store local:DIR` keeps the data in a local directory.
+`--store local:DIR` keeps the data in a local directory. See
+[choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count)
+for local-storage guidance; existing data requires its original shard count.
 
 To keep an IEx prompt while the server runs:
 
@@ -254,8 +256,9 @@ Pass `--help` to the server command to list the options: the store, the
 listener address, each service's shard count and flush interval, the long-poll
 and SSE timeouts, a pid file, and the placement (`local`, `object-lease`,
 `distributed` or `static`) for running as one node of a cluster.
-`object-lease` requires an S3 store; `--peers` requires a placement other than
-`local`.
+The server accepts `object-lease` only with an S3 store, although the
+`ObjectLease` strategy in `slap_cluster` also supports local stores. `--peers`
+requires a placement other than `local`.
 
 Each service has its own shards: in a store, the streams' shards are under
 `streams/` and KV's under `kv/`, each with its own leases when the placement

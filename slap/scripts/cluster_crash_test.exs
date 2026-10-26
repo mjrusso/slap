@@ -24,7 +24,8 @@
 #         [--placement distributed|object-lease]
 #         [--base-port 4550]
 #
-# object-lease needs an S3 store (the local file system has no If-Match).
+# Local-store processes must share the same canonical root on one host.
+# `mix slap.server` accepts object-lease only with an S3 store.
 
 Code.require_file("../bench/support/raw_http.exs", __DIR__)
 alias Slap.Bench.RawHTTP
