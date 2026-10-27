@@ -1,11 +1,13 @@
 # `:slow` tests take ~15 seconds; run them with `mix test --include slow`.
-# `:s3` tests need an S3-compatible server; they run when
-# SLAP_TEST_S3_ENDPOINT is set (see the README).
+# `:s3` tests need an S3-compatible server configured with
+# SLAP_TEST_S3_ENDPOINT (see the README).
 # `:azure` tests need Azurite; they run when SLAP_TEST_AZURITE is set.
 # `:crash` tests kill a writer VM (about 10 seconds); run them with
 # `mix test --include crash`.
+# `:stress` tests require scheduler overlap; run locally with
+# `mix test --include stress:local`.
 exclude =
-  [:slow, :crash] ++
+  [:slow, :crash, :stress] ++
     if(System.get_env("SLAP_TEST_S3_ENDPOINT"), do: [], else: [:s3]) ++
     if(System.get_env("SLAP_TEST_AZURITE"), do: [], else: [:azure])
 
