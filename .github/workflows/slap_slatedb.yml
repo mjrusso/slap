@@ -9,6 +9,12 @@ on:
     paths:
       - "slap_slatedb/**"
       - ".github/workflows/slap_slatedb*.yml"
+  workflow_dispatch:
+    inputs:
+      stress:
+        description: Run clone and writer overlap stress tests
+        type: boolean
+        default: false
 
 defaults:
   run:
@@ -121,7 +127,7 @@ jobs:
           docker run -d --name azurite -p 10000:10000 \
             mcr.microsoft.com/azure-storage/azurite:3.37.0 \
             azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck --loose
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             curl -s -o /dev/null http://127.0.0.1:9000/ && curl -s -o /dev/null http://127.0.0.1:10000/ && break
             sleep 1
           done
@@ -145,7 +151,9 @@ jobs:
         with:
           workspaces: slap_slatedb/native/slatedb_nif
       - run: mix deps.get
-      # The :s3 and :azure tests run because their environment variables are
-      # set. They cover fencing, durability subscriptions and the crash test
-      # on S3.
-      - run: mix test --include slow --include crash
+      # Environment variables enable the :s3 and :azure tests.
+      - name: Tests including clone and checkpoint collection on RustFS
+        run: mix test --include slow --include crash
+      - name: Clone and writer overlap stress tests
+        if: github.event_name == 'workflow_dispatch' && inputs.stress
+        run: mix test test/clone_gc_test.exs --only stress
