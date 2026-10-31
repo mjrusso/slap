@@ -143,8 +143,30 @@ defmodule Slap.Files.Config do
   def partition(%__MODULE__{namespace: namespace}, family, suffix),
     do: "files-ns:#{Base.url_encode64(namespace, padding: false)}:#{family}:#{suffix}"
 
-  def object_prefix(%__MODULE__{namespace: namespace}, bucket),
-    do: "objects/ns/#{Base.url_encode64(namespace, padding: false)}/#{bucket}/"
+  @families %{"record" => :record, "intent" => :intent, "object" => :object}
+
+  def parse_partition("files-ns:" <> rest) do
+    case String.split(rest, ":", parts: 3) do
+      [encoded, family, suffix] when is_map_key(@families, family) ->
+        case Base.url_decode64(encoded, padding: false) do
+          {:ok, namespace} ->
+            {:ok, %{namespace: namespace, family: Map.fetch!(@families, family), suffix: suffix}}
+
+          :error ->
+            {:error, :malformed_files_partition}
+        end
+
+      _ ->
+        {:error, :malformed_files_partition}
+    end
+  end
+
+  def parse_partition(_partition), do: {:error, :not_files_partition}
+
+  def object_prefix(%__MODULE__{namespace: namespace}),
+    do: "objects/ns/#{Base.url_encode64(namespace, padding: false)}/"
+
+  def object_prefix(config, bucket), do: object_prefix(config) <> "#{bucket}/"
 
   @doc false
   # Wall-clock milliseconds, for deadlines; tests replace the clock.

@@ -17,7 +17,7 @@ defmodule Slap.Files.Intent do
   # would have found it. A rewrite is conditional, so it cannot recreate
   # an intent that is gone.
 
-  alias Slap.Files.{Config, Deadline, Scan}
+  alias Slap.Files.{Codec, Config, Deadline, Scan}
   alias Slap.KV
 
   @buckets 64
@@ -113,21 +113,21 @@ defmodule Slap.Files.Intent do
   end
 
   defp write(intent, if_version, opts \\ []) do
-    value = {:intent, 1, Map.take(intent, [:ref, :keys, :due_ms, :taken])}
+    value = Codec.encode(:intent, Map.take(intent, [:ref, :keys, :due_ms, :taken]))
     opts = [if_version: if_version] ++ Config.route_opts(intent.config) ++ opts
 
     Deadline.result(
       KV.put(
         partition(intent.bucket, intent.config),
         intent.id,
-        :erlang.term_to_binary(value),
+        value,
         opts
       )
     )
   end
 
   defp decode(bucket, id, value, version, config) do
-    {:intent, 1, fields} = :erlang.binary_to_term(value, [:safe])
+    fields = Codec.decode(:intent, value)
 
     struct!(
       %__MODULE__{

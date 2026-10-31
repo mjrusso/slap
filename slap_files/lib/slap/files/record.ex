@@ -4,7 +4,7 @@ defmodule Slap.Files.Record do
   # the ref's id. It exists exactly while the file does, and holds the
   # file's metadata and body: {:inline, bytes} or {:object, key}.
 
-  alias Slap.Files.{Config, Deadline, File}
+  alias Slap.Files.{Codec, Config, Deadline, File}
   alias Slap.KV
 
   @type t :: %{
@@ -83,10 +83,7 @@ defmodule Slap.Files.Record do
 
   defp partition(partition, config), do: Config.partition(config, :record, partition)
 
-  defp encode(record), do: :erlang.term_to_binary({:file, 1, record})
+  defp encode(record), do: Codec.encode(:file, record)
 
-  defp decode(binary) do
-    {:file, 1, record} = :erlang.binary_to_term(binary, [:safe])
-    record
-  end
+  defp decode(binary), do: Codec.decode(:file, binary)
 end

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Adds read-only inspection of file metadata and object previews for
+  [Slap Inspect](https://hexdocs.pm/slap_inspect/).
+
 ## 0.4.0
 
 - `Slap.Files.list/2` accepts `cursor: nil` to start at the beginning of the

@@ -2,6 +2,25 @@
   checks: [source_paths: ["lib"]],
   calls: [
     forbidden: [
+      # Inspection must not write records, open intents, or upload or delete
+      # objects.
+      {"Slap.Files.Introspect",
+       [
+         "Slap.Files.put",
+         "Slap.Files.delete",
+         "Slap.Files.Record.put",
+         "Slap.Files.Record.delete",
+         "Slap.Files.Body.*",
+         "Slap.KV.put",
+         "Slap.KV.delete",
+         "Slap.KV.batch",
+         "Slap.Files.Intent.*",
+         "Slap.Files.Sweeper.*",
+         "Slap.Files.Object.*",
+         "Slap.SlateDB.ObjectStore.put",
+         "Slap.SlateDB.ObjectStore.upload",
+         "Slap.SlateDB.ObjectStore.delete"
+       ]},
       # Records and registrations are Slap.KV rows; files never use a
       # SlateDB database directly.
       {["Slap.Files", "Slap.Files.*"],
