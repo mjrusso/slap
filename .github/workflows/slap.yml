@@ -51,11 +51,28 @@ jobs:
             ~/.mix/*.plt.hash
           key: plt-slap-${{ runner.os }}-otp29-elixir1.20-${{ hashFiles('slap/mix.exs', 'slap/mix.lock', 'slap_*/mix.exs') }}
           restore-keys: plt-slap-${{ runner.os }}-otp29-elixir1.20-
+      - name: Start RustFS for inspection tests
+        working-directory: .
+        run: |
+          docker run -d --name rustfs -p 9000:9000 \
+            -e RUSTFS_ACCESS_KEY=rustfsadmin -e RUSTFS_SECRET_KEY=rustfsadmin \
+            rustfs/rustfs@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
+          s3() { curl -sf -o /dev/null --aws-sigv4 "aws:amz:us-east-1:s3" \
+            --user rustfsadmin:rustfsadmin "$@" http://127.0.0.1:9000/slap-inspection; }
+          for i in $(seq 1 30); do
+            s3 -X PUT || true; s3 -I && break; sleep 1
+          done
+          s3 -I
       - run: mix check
+        env:
+          SLAP_TEST_S3_ENDPOINT: http://127.0.0.1:9000
+          SLAP_TEST_S3_BUCKET: slap-inspection
       - name: Root README library examples
         run: mix run scripts/readme_test.exs ../README.md
       - name: Package README library examples
         run: mix run scripts/readme_test.exs README.md
+      - name: Kitchen sink demo
+        run: mix run examples/kitchen_sink.exs --ticks 6 --interval 10
 
   mix-install:
     name: Without a Mix project
