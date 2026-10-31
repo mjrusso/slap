@@ -2,8 +2,20 @@
 
 ## Unreleased
 
-- Finish closing shard databases when a shard process is killed or cluster
-  shutdown times out, without requiring a cluster restart.
+- A cluster refuses to start when `:shards` differs from the shard count its
+  store was created with. Before, it started, and records whose keys now route
+  to a different shard read as missing. A store created by 0.4.0 or earlier
+  is checked against `:shards` on its first start; see
+  [Choosing the shard count](README.md#choosing-the-shard-count). With
+  `probe: :background`, a mismatch stops the cluster.
+- When a shard process is killed or the cluster's shutdown times out, the
+  shard's database now finishes closing, and a replacement shard on the same
+  node waits for the close before opening the database. Previously the close
+  stopped partway, and a replacement could open the database while the old
+  handle was still running.
+- `Slap.Cluster.Strategy.ObjectLease` works with a local store
+  (`{:local, directory}`) shared by processes on one host. Previously the
+  cluster refused to start. Network filesystem mounts are not supported.
 
 ## 0.4.0
 

@@ -22,6 +22,11 @@ defmodule Slap.Cluster.Hash do
     rem(xxh64(key), shards)
   end
 
+  @doc false
+  # Recorded in each store's layout (see Slap.Cluster.Layout): change it
+  # with `shard_for/2`.
+  def name, do: "xxh64"
+
   @doc "XXH64 of `data` with `seed`, as an unsigned 64-bit integer."
   @spec xxh64(binary(), non_neg_integer()) :: non_neg_integer()
   def xxh64(data, seed \\ 0) when is_binary(data) do

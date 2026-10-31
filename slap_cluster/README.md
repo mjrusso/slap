@@ -208,9 +208,17 @@ Adding shards under the same root does not add concurrent object publication.
 See [local-store behavior](https://hexdocs.pm/slap_slatedb/readme.html#object-stores)
 for filesystem requirements and upgrade precautions.
 
-The shard count is fixed for existing data. Choose a lower count for a fresh
-store, or migrate logical data into a new store. Changing `:shards` in place does
-not relocate existing records and can make them inaccessible.
+A store's shard count cannot change. A key's shard depends on the count, and
+records are not moved when the count changes, so with a new count many records
+would be looked up on the wrong shard and read as missing. To prevent this, a
+cluster records its shard count in `<path>/_cluster/layout` when it first
+starts, and refuses to start on that path with a different `:shards`. To change
+the count, start a cluster on a new `:path` and copy the data into it.
+
+A store created by `slap_cluster` 0.4.0 or earlier has no `_cluster/layout`. On
+its first start, the cluster checks that the store's existing shard databases
+match `:shards`. If they do, it records the count; otherwise it refuses to
+start. An empty store is recorded as new.
 
 ## Several nodes
 

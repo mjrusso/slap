@@ -39,7 +39,7 @@ defmodule Slap.ClusterTest do
   # test compiles without it (its tests are excluded then).
   @telemetry :telemetry
 
-  alias Slap.Cluster.{Config, Hash, Host}
+  alias Slap.Cluster.{Config, Hash, Host, Probe}
   alias Slap.Cluster.Test.{Cluster, Counter, GatedChild, ThreeTupleStrategy}
   alias Slap.SlateDB
 
@@ -162,7 +162,7 @@ defmodule Slap.ClusterTest do
     test "a store that ignores conditional writes stops the cluster from starting" do
       Process.flag(:trap_exit, true)
 
-      assert {:error, {:shutdown, {:failed_to_start_child, Slap.Cluster.Probe, reason}}} =
+      assert {:error, {:shutdown, {:failed_to_start_child, Probe, reason}}} =
                Cluster.start_link(store: :memory_ignoring_preconditions, shards: 2)
 
       assert {:probe_failed, steps} = reason
@@ -180,6 +180,76 @@ defmodule Slap.ClusterTest do
       )
 
       assert Cluster.local_shards() == []
+    end
+  end
+
+  describe "shard layout" do
+    setup do
+      Process.flag(:trap_exit, true)
+      %{dir: tmp_dir()}
+    end
+
+    defp start_layout(dir, shards, opts \\ []),
+      do: Cluster.start_link([store: {:local, dir}, shards: shards, shard_children: nil] ++ opts)
+
+    defp start_and_stop(dir, shards) do
+      {:ok, pid} = start_layout(dir, shards)
+      Supervisor.stop(pid)
+    end
+
+    defp refused(dir, shards) do
+      assert {:error, {:shutdown, {:failed_to_start_child, Probe, reason}}} =
+               start_layout(dir, shards)
+
+      reason
+    end
+
+    test "a store written with one shard count refuses another", %{dir: dir} do
+      start_and_stop(dir, 4)
+
+      assert %{"version" => 1, "shards" => 4, "hash" => "xxh64"} =
+               JSON.decode!(File.read!(Path.join(dir, "_cluster/layout")))
+
+      for shards <- [1, 8] do
+        assert {:layout_mismatch, %{configured: %{shards: ^shards}, stored: %{shards: 4}}} =
+                 refused(dir, shards)
+      end
+
+      start_and_stop(dir, 4)
+    end
+
+    test "a store without a layout record gets one if its shards match", %{dir: dir} do
+      start_and_stop(dir, 4)
+      layout = Path.join(dir, "_cluster/layout")
+      File.rm!(layout)
+
+      for shards <- [1, 8] do
+        assert {:layout_mismatch, %{configured: %{shards: ^shards}, stored: :unrecorded}} =
+                 refused(dir, shards)
+      end
+
+      refute File.exists?(layout)
+      start_and_stop(dir, 4)
+      assert %{"shards" => 4} = JSON.decode!(File.read!(layout))
+    end
+
+    test "a store without a layout record is refused when the shard name width changes",
+         %{dir: dir} do
+      # Written with 1000 shards, shard-000 to shard-999. Only the shards the
+      # check looks for are created.
+      for name <- ["shard-000", "shard-999"] do
+        {:ok, db} = SlateDB.open(name, store: {:local, dir})
+        :ok = SlateDB.close(db)
+      end
+
+      assert {:layout_mismatch, %{configured: %{shards: 1001}, stored: :unrecorded}} =
+               refused(dir, 1001)
+    end
+
+    test "a background start stops on a mismatch instead of retrying", %{dir: dir} do
+      start_and_stop(dir, 4)
+      {:ok, pid} = start_layout(dir, 1, probe: :background)
+      assert_receive {:EXIT, ^pid, :shutdown}, 5_000
     end
   end
 

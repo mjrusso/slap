@@ -169,13 +169,19 @@ defmodule Slap.Cluster.Config do
   end
 
   @doc false
-  # The database path of shard `n`: `<path>/shard-000` and so on. The width
-  # grows with the shard count, and never changes for a given count.
+  # The database path of shard `n`: `<path>/shard-000` and so on.
   def shard_path(%__MODULE__{path: path, shards: shards}, n) do
-    width = max(3, shards |> Kernel.-(1) |> Integer.to_string() |> byte_size())
-    name = "shard-" <> String.pad_leading(Integer.to_string(n), width, "0")
+    name = shard_name(n, shard_width(shards))
     if path == "", do: name, else: Path.join(path, name)
   end
+
+  @doc false
+  def shard_name(n, width), do: "shard-" <> String.pad_leading(Integer.to_string(n), width, "0")
+
+  @doc false
+  # The digits in a shard's name. They grow with the shard count, and never
+  # change for a given count.
+  def shard_width(shards), do: max(3, shards |> Kernel.-(1) |> Integer.to_string() |> byte_size())
 
   @doc false
   def probe_path(%__MODULE__{path: path}) do

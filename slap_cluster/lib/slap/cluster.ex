@@ -27,7 +27,8 @@ defmodule Slap.Cluster do
 
   and add `MyApp.Cluster` to the application's supervision tree. On start
   it checks that the store honours conditional writes (see
-  `Slap.SlateDB.probe_store/3`), then the strategy opens the shards. With the
+  `Slap.SlateDB.probe_store/3`) and that the store's data was written with
+  the configured shard count, then the strategy opens the shards. With the
   default `Slap.Cluster.Strategy.Local`, startup attempts every shard before
   `start_link/1` returns; failed opens retry in the background. With
   `probe: :background`, it can return before any shard opens. Use
@@ -38,8 +39,9 @@ defmodule Slap.Cluster do
     * `:store` - required. A store, as for `Slap.SlateDB.open/2`. Shard `n` is the
       database `<path>/shard-00n` in it.
     * `:shards` - required. The number of shards. Fixed for the life of the
-      data: `shard_for/1` depends on it. See the README's "Choosing the shard
-      count" section for local-storage guidance.
+      data: `shard_for/1` depends on it. The first start records it in
+      `<path>/_cluster/layout`, and a later start with another count fails.
+      See the README's "Choosing the shard count" section.
     * `:path` - the path of the shards in the store (default `""`).
     * `:settings` - SlateDB settings for every shard, as for
       `Slap.SlateDB.open/2`. SlateDB's `flush_interval` defaults to 100 ms,
