@@ -28,12 +28,25 @@ defmodule Slap.Yjs.Frame do
   @spec parse(binary()) :: {:ok, [binary()]} | {:error, :truncated | :invalid}
   def parse(binary) when is_binary(binary), do: parse(binary, [])
 
-  defp parse(<<>>, acc), do: {:ok, Enum.reverse(acc)}
-
   defp parse(binary, acc) do
+    case next(binary) do
+      {:ok, update, rest} -> parse(rest, [update | acc])
+      :done -> {:ok, Enum.reverse(acc)}
+      error -> error
+    end
+  end
+
+  @doc """
+  Reads the first frame of `binary`: `{:ok, update, rest}`, `:done` for an
+  empty binary, or an error as for `parse/1`.
+  """
+  @spec next(binary()) :: {:ok, binary(), binary()} | :done | {:error, :truncated | :invalid}
+  def next(<<>>), do: :done
+
+  def next(binary) do
     with {:ok, size, rest} <- read_varuint(binary) do
       case rest do
-        <<update::binary-size(^size), rest::binary>> -> parse(rest, [update | acc])
+        <<update::binary-size(^size), rest::binary>> -> {:ok, update, rest}
         _ -> {:error, :truncated}
       end
     end

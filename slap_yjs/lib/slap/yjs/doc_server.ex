@@ -142,6 +142,7 @@ defmodule Slap.Yjs.DocServer do
 
   alias Slap.Yjs
   alias Slap.Yjs.DocServer.{Appends, Awareness, Compaction, Sync}
+  alias Slap.Yjs.Updates
   alias Yex.DocServer.{State, Worker}
 
   # The origin of the updates read from the store: applied, broadcast, not
@@ -560,11 +561,7 @@ defmodule Slap.Yjs.DocServer do
   defp apply_stored(_doc, []), do: :ok
 
   defp apply_stored(doc, updates) do
-    Yex.Doc.transaction(doc, @stored, fn ->
-      for update <- updates, do: :ok = Yex.apply_update(doc, update)
-      {:ok, pending} = Yex.Doc.prune_pending(doc)
-      if pending, do: :ok = Yex.apply_update(doc, pending)
-    end)
+    :ok = Updates.apply(doc, updates, @stored)
   end
 
   # Applying stored updates may integrate pending ones. yrs sends their

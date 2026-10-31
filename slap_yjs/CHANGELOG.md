@@ -9,9 +9,14 @@
   `%Yex.Buffer{data: bytes}`; update code that expects byte lists. Buffers in
   text formatting attributes and embeds still read as lists after
   synchronization.
-- Adds `Slap.Yjs.Store.fork/3` for independently editable document branches.
-  Forking uses persisted data. Call `Slap.Yjs.DocServer.sync/2` on known servers
-  first to include their buffered updates.
+- Adds `Slap.Yjs.Store.fork/3`, which creates an independently editable
+  document from another document's stored state without copying it. Call
+  `Slap.Yjs.DocServer.sync/2` on known document servers first to include
+  their buffered updates.
+- `Slap.Yjs.Docs.join/3` returns `{:error, :busy}` for a document that is
+  still being forked.
+- Adds Yjs inspection to Slap Inspect: update frames, reconstructed document
+  content and retained history.
 
 ## 0.4.0
 
