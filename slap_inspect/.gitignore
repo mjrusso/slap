@@ -1,0 +1,6 @@
+/_build/
+/deps/
+/doc/
+/slap-inspect
+erl_crash.dump
+/bench/results/
