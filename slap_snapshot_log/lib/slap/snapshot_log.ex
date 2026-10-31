@@ -444,7 +444,10 @@ defmodule Slap.SnapshotLog do
 
   @doc "The path of the log's `:updates` or `:index` stream, or of a `{:snapshot, offset}`."
   @spec path(base(), :updates | :index | {:snapshot, offset()}) :: String.t()
-  def path(base, stream) do
+  def path(base, stream) when stream in [:updates, :index], do: component_path(base, stream)
+  def path(base, {:snapshot, _offset} = stream), do: component_path(base, stream)
+
+  defp component_path(base, stream) do
     validate!(base)
     Store.path(base, stream)
   end

@@ -8,6 +8,7 @@ defmodule Slap.SnapshotLog.Store do
   @json "application/json"
   @page_bytes 1024 * 1024
   @missing [:not_found, :gone]
+  @component_suffixes [control: "/.control", updates: "/.updates", index: "/.index"]
 
   @enforce_keys [:base]
   defstruct [:base, :cluster, :timeout]
@@ -37,11 +38,35 @@ defmodule Slap.SnapshotLog.Store do
           deleted: non_neg_integer() | nil
         }
 
+  def path(base, :control), do: base_path(base) <> "/.control"
   def path(base, :updates), do: base_path(base) <> "/.updates"
   def path(base, :index), do: base_path(base) <> "/.index"
 
   def path(base, {:snapshot, offset}),
-    do: base_path(base) <> "/.snapshots/#{Offset.encode(offset)}_snapshot"
+    do: snapshots_prefix(base) <> "#{Offset.encode(offset)}_snapshot"
+
+  @doc "The base and component of a path that `path/2` returns, or `:error`."
+  def parse_path(path) do
+    Enum.find_value(@component_suffixes, fn {component, suffix} ->
+      if String.ends_with?(path, suffix),
+        do: {:ok, String.replace_suffix(path, suffix, ""), component}
+    end) || parse_snapshot_path(path)
+  end
+
+  defp parse_snapshot_path(path) do
+    with [base, name] <- :binary.split(path, "/.snapshots/"),
+         {:ok, offset} <- snapshot_offset(name),
+         do: {:ok, base, {:snapshot, offset}},
+         else: (_ -> :error)
+  end
+
+  defp snapshot_offset(name) do
+    with true <- String.ends_with?(name, "_snapshot"),
+         {:ok, offset} when is_integer(offset) <-
+           Offset.parse(String.replace_suffix(name, "_snapshot", "")),
+         do: {:ok, offset},
+         else: (_ -> :error)
+  end
 
   defp snapshots_prefix(base), do: base_path(base) <> "/.snapshots/"
 
@@ -80,7 +105,10 @@ defmodule Slap.SnapshotLog.Store do
   def state(base, deadline \\ nil) do
     case read_all(path(base, :index), stream_opts(base), deadline, :fenced) do
       {:ok, messages, tail} ->
-        {current, deleted} = Enum.reduce(messages, {nil, nil}, &entry/2)
+        {current, deleted} =
+          messages
+          |> Enum.map(fn {offset, json} -> {offset, parse_index_entry(json)} end)
+          |> index_state()
 
         {:ok, %{current: current, index_tail: tail, deleted: deleted}}
 
@@ -153,16 +181,12 @@ defmodule Slap.SnapshotLog.Store do
     prefix = snapshots_prefix(base)
 
     with {:ok, paths} <- Streams.list(prefix, stream_opts(base)) do
-      {:ok, Enum.flat_map(paths, &snapshot_offset(&1, prefix))}
-    end
-  end
-
-  defp snapshot_offset(path, prefix) do
-    name = String.replace_prefix(path, prefix, "")
-
-    case name |> String.replace_suffix("_snapshot", "") |> Offset.parse() do
-      {:ok, offset} when is_integer(offset) -> [offset]
-      _ -> []
+      {:ok,
+       for(
+         path <- paths,
+         {:ok, offset} <- [snapshot_offset(String.replace_prefix(path, prefix, ""))],
+         do: offset
+       )}
     end
   end
 
@@ -336,23 +360,43 @@ defmodule Slap.SnapshotLog.Store do
     end
   end
 
-  # An unreadable entry is skipped: the previous one stays current.
-  defp entry({index_offset, json}, {current, deleted}) do
+  @doc """
+  The current entry and the first deletion offset of index entries
+  `{index_offset, parse_index_entry(json)}`, in index order. An unreadable
+  entry is skipped: the previous one stays current.
+  """
+  @spec index_state([{non_neg_integer(), {:ok, map()} | :deleted | :error}]) ::
+          {entry() | nil, non_neg_integer() | nil}
+  def index_state(entries), do: Enum.reduce(entries, {nil, nil}, &index_entry/2)
+
+  defp index_entry({index_offset, {:ok, entry}}, {_current, deleted}),
+    do: {Map.put(entry, :index_offset, index_offset), deleted}
+
+  defp index_entry({index_offset, :deleted}, {current, deleted}),
+    do: {current, deleted || index_offset}
+
+  defp index_entry({_index_offset, :error}, acc), do: acc
+
+  @spec parse_index_entry(binary()) ::
+          {:ok, %{offset: non_neg_integer(), created_at: integer(), retained: [snapshot()]}}
+          | :deleted
+          | :error
+  def parse_index_entry(json) do
     case JSON.decode(json) do
-      {:ok, %{"deleted" => true}} -> {current, deleted || index_offset}
-      {:ok, decoded} -> snapshot_entry(decoded, index_offset, {current, deleted})
-      {:error, _} -> {current, deleted}
+      {:ok, %{"deleted" => true}} -> :deleted
+      {:ok, decoded} -> snapshot_entry(decoded)
+      {:error, _} -> :error
     end
   end
 
-  defp snapshot_entry(decoded, index_offset, {current, deleted}) do
+  defp snapshot_entry(decoded) do
     case decode_snapshot(decoded) do
       [snapshot] ->
         retained = Enum.flat_map(List.wrap(decoded["retained"]), &decode_snapshot/1)
-        {Map.merge(snapshot, %{retained: retained, index_offset: index_offset}), deleted}
+        {:ok, Map.put(snapshot, :retained, retained)}
 
       [] ->
-        {current, deleted}
+        :error
     end
   end
 

@@ -4,7 +4,8 @@ defmodule Slap.SnapshotLog.Control do
   alias Slap.SnapshotLog.Store
   alias Slap.Streams
 
-  def path(store), do: store.base <> "/.control"
+  def path(store), do: Store.path(store, :control)
+
   def deadline(:infinity), do: :infinity
   def deadline(timeout), do: System.monotonic_time(:millisecond) + timeout
   def remaining(:infinity), do: :infinity
@@ -26,15 +27,9 @@ defmodule Slap.SnapshotLog.Control do
 
       {:ok, %{messages: messages, next_offset: offset} = view} ->
         {_at, body} = List.last(messages)
-        record = JSON.decode!(body)
+        {:ok, control} = parse(body)
 
-        {:ok,
-         %{
-           record: record,
-           state: decode_state(record),
-           identity: identity(view, path(store), store),
-           offset: offset
-         }}
+        {:ok, Map.merge(control, %{identity: identity(view, path(store), store), offset: offset})}
 
       {:error, :not_found} ->
         {:ok, nil}
@@ -44,16 +39,25 @@ defmodule Slap.SnapshotLog.Control do
     end
   end
 
-  defp decode_state(%{"kind" => "ordinary", "status" => "ready"}), do: :ordinary
-  defp decode_state(%{"kind" => "ordinary", "status" => "cancelled"}), do: :ordinary_deleted
-  defp decode_state(%{"kind" => "initialization", "status" => "pending"}), do: :initializing
+  @states %{
+    {"ordinary", "ready"} => :ordinary,
+    {"ordinary", "cancelled"} => :ordinary_deleted,
+    {"initialization", "pending"} => :initializing,
+    {"initialization", "cancelled"} => :initialization_cancelled,
+    {"fork", "pending"} => :forking,
+    {"fork", "ready"} => :forked,
+    {"fork", "cancelled"} => :fork_cancelled
+  }
 
-  defp decode_state(%{"kind" => "initialization", "status" => "cancelled"}),
-    do: :initialization_cancelled
-
-  defp decode_state(%{"kind" => "fork", "status" => "pending"}), do: :forking
-  defp decode_state(%{"kind" => "fork", "status" => "ready"}), do: :forked
-  defp decode_state(%{"kind" => "fork", "status" => "cancelled"}), do: :fork_cancelled
+  @doc "A control record and its state, or `:error` if `json` is not one."
+  def parse(json) do
+    with {:ok, %{"kind" => kind, "status" => status} = record} <- JSON.decode(json),
+         {:ok, state} <- Map.fetch(@states, {kind, status}) do
+      {:ok, %{record: record, state: state}}
+    else
+      _ -> :error
+    end
+  end
 
   def check(store, deadline) do
     with {:ok, control} <- read(store, deadline), do: access(control)

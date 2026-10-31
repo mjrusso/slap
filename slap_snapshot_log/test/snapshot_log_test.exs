@@ -247,6 +247,10 @@ defmodule Slap.SnapshotLogTest do
       assert %{"snapshotOffset" => encoded, "createdAt" => ms} = JSON.decode!(entry)
       assert encoded == Offset.encode(at) and is_integer(ms)
       assert SnapshotLog.path(base, {:snapshot, at}) =~ ~r"/\.snapshots/\d{16}_\d{16}_snapshot$"
+
+      for stream <- [:control, :snapshot, {:snapshot}] do
+        assert_raise FunctionClauseError, fn -> SnapshotLog.path(base, stream) end
+      end
     end
   end
 

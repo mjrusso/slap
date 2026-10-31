@@ -278,6 +278,8 @@ defmodule Slap.SnapshotLog.ForkTest do
   test "a durable cancellation is discovered and cleaned without another target request", %{
     cluster_opts: opts
   } do
+    :ok = Application.stop(:slap_snapshot_log)
+    on_exit(fn -> Application.ensure_all_started(:slap_snapshot_log) end)
     source = base()
     target = other_shard(source)
     {:ok, _} = SnapshotLog.append(source, "a")
@@ -295,7 +297,6 @@ defmodule Slap.SnapshotLog.ForkTest do
     deadline = Control.deadline(5_000)
     {:ok, control} = Control.read(store, deadline)
     assert {:ok, _} = Fork.cancel(store, control, :busy, deadline)
-    :ok = Application.stop(:slap_snapshot_log)
     stop_supervised!(Streams.Cluster)
     start_supervised!({Streams.Cluster, opts})
     :ok = Application.start(:slap_snapshot_log)

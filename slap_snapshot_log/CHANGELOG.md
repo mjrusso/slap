@@ -2,11 +2,16 @@
 
 ## Unreleased
 
-- Adds `Slap.SnapshotLog.fork/3` to create independently editable logs by
-  reference. Retry the same source and target after a timeout to resolve the
-  original capture. Pending targets, and forks from a pending source, return
-  `:busy`. Exhausted publication retries return `:retries_exhausted`. Forks
-  retain ancestor storage and use the stream reference depth limit.
+- Requires the offline Streams store upgrade for stores written by
+  `slap_streams` 0.4.0 and earlier; see the
+  [upgrade instructions](../slap_streams/README.md#upgrading-existing-stream-stores).
+- Adds `Slap.SnapshotLog.fork/3`, which creates a log that starts with
+  another log's snapshot and entries without copying them. If a fork times
+  out, call `fork/3` again with the same source and target to finish it.
+- Calls on a log that is still being created or forked return
+  `{:error, :busy}`, except `append/3` and `next/3`, which finish an
+  interrupted creation.
+- Adds read-only snapshot-log inspection to Slap Inspect.
 
 ## 0.4.0
 
