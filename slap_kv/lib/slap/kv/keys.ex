@@ -57,6 +57,14 @@ defmodule Slap.KV.Keys do
     key
   end
 
+  def parse(<<0, 0>>), do: {:ok, %{kind: :confirm}}
+
+  def parse(<<size::16, partition::binary-size(size), key::binary>>)
+      when size > 0 and byte_size(key) > 0,
+      do: {:ok, %{kind: :row, partition: partition, key: key}}
+
+  def parse(_key), do: {:error, :malformed_key}
+
   @spec validate(term(), term()) :: :ok | {:error, {:bad_request, atom()}}
   def validate(partition, _key) when not is_binary(partition) or partition == "",
     do: {:error, {:bad_request, :invalid_partition}}

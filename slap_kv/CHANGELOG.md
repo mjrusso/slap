@@ -2,13 +2,20 @@
 
 ## Unreleased
 
-- Add `Slap.KV.batch/3` and JSON `POST /v1/kv/{partition}` for atomic,
-  conditional operations within one partition.
-- Limit writes and linearizable reads awaiting durability by default.
-  `:request_too_large` (HTTP 413) and `:overloaded` (HTTP 503) mean the request
-  was not applied. Set limits through cluster `child_options`; see
-  [Durability admission](README.md#durability-admission) for defaults and costs.
-- Add telemetry for overloads and pending work; see `Slap.KV.Telemetry`.
+- Adds `Slap.KV.batch/3` and JSON `POST /v1/kv/{partition}`, which apply
+  several puts, deletes and condition checks within one partition
+  atomically.
+- By default, each shard now limits how many writes and linearizable reads,
+  and how many bytes of them, can wait for durability. A request over the
+  limits fails with `{:error, :overloaded}` (HTTP 503), or with
+  `{:error, {:bad_request, :request_too_large}}` (HTTP 413) if it could never
+  fit; in both cases it was not applied. Set the limits in the cluster's
+  `child_options`; see
+  [Limits on pending work](README.md#limits-on-pending-work).
+- Adds telemetry events for rejected requests and for pending work; see
+  `Slap.KV.Telemetry`.
+- Adds read-only partition inspection for
+  [Slap Inspect](https://hexdocs.pm/slap_inspect/).
 
 ## 0.4.0
 

@@ -2,6 +2,19 @@
   checks: [source_paths: ["lib"]],
   calls: [
     forbidden: [
+      # Inspection is read-only and bypasses partition writers and write
+      # admission.
+      {"Slap.KV.Introspect",
+       [
+         "Slap.KV.put",
+         "Slap.KV.delete",
+         "Slap.KV.batch",
+         "Slap.KV.PartitionWriter.*",
+         "Slap.KV.Admission.*",
+         "Slap.KV.Request.*",
+         "Slap.KV.get",
+         "Slap.KV.scan"
+       ]},
       # Handle lifetime belongs to slap_cluster, including drainage after crashes.
       {["Slap.KV", "Slap.KV.*"], ["Slap.SlateDB.open", "Slap.SlateDB.close"]},
       # Each partition is written by its shard's partition writer only.
