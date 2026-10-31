@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Requires the offline Streams store upgrade for stores written by
+  `slap_streams` 0.4.0 and earlier; see the
+  [upgrade instructions](../slap_streams/README.md#upgrading-existing-stream-stores).
+- Breaking change: upgrades y_ex to 0.13. Buffer values now read as
+  `%Yex.Buffer{data: bytes}`; update code that expects byte lists. Buffers in
+  text formatting attributes and embeds still read as lists after
+  synchronization.
 - Adds `Slap.Yjs.Store.fork/3` for independently editable document branches.
   Forking uses persisted data. Call `Slap.Yjs.DocServer.sync/2` on known servers
   first to include their buffered updates.
