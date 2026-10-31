@@ -11,7 +11,11 @@ defmodule Slap.SlateDB.Options do
   @log_levels [:debug, :info, :warning, :error, :none]
 
   @read_keys [:durability, :dirty, :cache_blocks]
+  # Accepted only by `get_range/3`, which always returns a preview.
+  @preview_keys [:max_value_bytes, :value_range]
   @scan_keys @read_keys ++ [:read_ahead_bytes, :max_fetch_tasks, :order]
+  # Accepted only by `preview_iterator/2`, whose rows always carry sizes.
+  @limit_keys [:max_key_bytes, :max_value_bytes]
   @range_keys [:gte, :gt, :lte, :lt, :prefix, :batch_size]
   # Handled by `Slap.SlateDB.Native.timeout/1`, not passed to the NIF.
   @call_keys [:timeout]
@@ -118,15 +122,38 @@ defmodule Slap.SlateDB.Options do
 
   # Read options as the map the NIF expects. Every key is present; `nil`
   # means "use SlateDB's default".
-  def read(opts) do
-    opts = Keyword.validate!(opts, @read_keys ++ @call_keys)
-    Map.new(@read_keys, &{&1, check(&1, Keyword.get(opts, &1))})
+  def read(opts), do: read(opts, [])
+
+  # The cap is what makes the read return a preview, so nil is not allowed.
+  def read_range(opts) do
+    case Keyword.get(opts, :max_value_bytes) do
+      max when is_integer(max) and max >= 0 ->
+        read(opts, @preview_keys)
+
+      _ ->
+        raise ArgumentError, "get_range/3 requires :max_value_bytes, a nonnegative integer"
+    end
+  end
+
+  defp read(opts, extra) do
+    opts = Keyword.validate!(opts, @read_keys ++ extra ++ @call_keys)
+    Map.new(@read_keys ++ @preview_keys, &{&1, check(&1, Keyword.get(opts, &1))})
   end
 
   # Scan options as `{range, prefix, options}`, where `range` is
   # `{lower, lower_inclusive, upper, upper_inclusive}`.
-  def scan(opts) do
-    opts = Keyword.validate!(opts, @range_keys ++ @scan_keys ++ @call_keys)
+  def scan(opts), do: scan(opts, [])
+
+  # A limit is what makes the NIF return sized rows, so one is required.
+  def preview_scan(opts) do
+    if Enum.all?(@limit_keys, &is_nil(Keyword.get(opts, &1))),
+      do: raise(ArgumentError, "preview_iterator/2 requires :max_key_bytes or :max_value_bytes")
+
+    scan(opts, @limit_keys)
+  end
+
+  defp scan(opts, extra) do
+    opts = Keyword.validate!(opts, @range_keys ++ @scan_keys ++ extra ++ @call_keys)
     {lower, lower_inclusive} = bound(opts, :gte, :gt, "lower")
     {upper, upper_inclusive} = bound(opts, :lte, :lt, "upper")
 
@@ -136,7 +163,7 @@ defmodule Slap.SlateDB.Options do
         other -> raise ArgumentError, ":prefix must be a binary, got: #{inspect(other)}"
       end
 
-    scan_opts = Map.new(@scan_keys, &{&1, check(&1, Keyword.get(opts, &1))})
+    scan_opts = Map.new(@scan_keys ++ @limit_keys, &{&1, check(&1, Keyword.get(opts, &1))})
     {{lower, lower_inclusive, upper, upper_inclusive}, prefix, scan_opts}
   end
 
@@ -162,6 +189,14 @@ defmodule Slap.SlateDB.Options do
   defp check(:durability, value) when value in [:memory, :remote], do: value
   defp check(:order, value) when value in [:asc, :desc], do: value
   defp check(key, value) when key in [:dirty, :cache_blocks] and is_boolean(value), do: value
+
+  defp check(key, value)
+       when key in [:max_key_bytes, :max_value_bytes] and is_integer(value) and value >= 0,
+       do: value
+
+  defp check(:value_range, {offset, length})
+       when is_integer(offset) and offset >= 0 and is_integer(length) and length >= 0,
+       do: {offset, length}
 
   defp check(:read_ahead_bytes, value) when is_integer(value) and value >= 0, do: value
   defp check(:max_fetch_tasks, value) when is_integer(value) and value > 0, do: value

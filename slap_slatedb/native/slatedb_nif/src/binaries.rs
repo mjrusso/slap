@@ -71,6 +71,11 @@ pub(crate) fn bin<'a>(env: Env<'a>, data: &Bytes) -> Term<'a> {
             .make_binary(env, |res| res.0.as_ref())
             .encode(env);
     }
+    copy_bin(env, data)
+}
+
+/// Copies a bounded preview without retaining the row's backing allocation.
+pub(crate) fn copy_bin<'a>(env: Env<'a>, data: &[u8]) -> Term<'a> {
     let mut out = NewBinary::new(env, data.len());
     out.as_mut_slice().copy_from_slice(data);
     out.into()

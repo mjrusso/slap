@@ -263,6 +263,26 @@ defmodule Slap.SlateDB do
   def get(%__MODULE__{} = db, key, opts \\ []), do: Read.get(db, key, opts)
 
   @doc """
+  Reads part of the value for `key`, as
+  `{:ok, %{value: bytes, value_size: full_size, offset: offset}}`, or
+  `{:ok, nil}` when the key is not found. `value_size` is the full value's
+  byte size. A range that starts past the end of the value returns empty
+  bytes and the requested offset. SlateDB still loads the full row; this bounds only the
+  bytes copied into the BEAM.
+
+  ## Options
+
+    * `:max_value_bytes` (required) - copy at most this many bytes. A
+      nonnegative integer; also caps the length of `:value_range`.
+    * `:value_range` - the byte range `{offset, length}` to copy, with a
+      zero-based offset and nonnegative length. Defaults to the whole value.
+    * `:durability`, `:dirty`, `:cache_blocks`, `:timeout` - as for `get/3`.
+  """
+  @spec get_range(t(), binary(), keyword()) ::
+          {:ok, Slap.SlateDB.Read.preview() | nil} | {:error, SlateDB.Error.t()}
+  def get_range(%__MODULE__{} = db, key, opts), do: Read.get_range(db, key, opts)
+
+  @doc """
   Reads the current row for `key` with its metadata.
 
   Returns `{:ok, nil}` when the key is not found, or `{:ok, row}` where `row`
@@ -480,6 +500,22 @@ defmodule Slap.SlateDB do
   @spec iterator(t(), keyword()) :: {:ok, Iterator.t()} | {:error, SlateDB.Error.t()}
   # ex_dna:disable-for-next-line
   def iterator(%__MODULE__{} = db, opts \\ []), do: Iterator.open(db, opts)
+
+  @doc """
+  Opens a `Slap.SlateDB.Iterator` whose rows are
+  `{key, value, version, key_size, value_size}`: the key and value cut to
+  the limits below, with their full sizes. Takes `iterator/2`'s options
+  except `:with_versions`. SlateDB still loads whole rows in native memory;
+  the limits bound only the bytes copied into the BEAM.
+
+  ## Options
+
+    * `:max_key_bytes`, `:max_value_bytes` - nonnegative limits on the key
+      and value bytes copied. At least one is required; each applies
+      independently.
+  """
+  @spec preview_iterator(t(), keyword()) :: {:ok, Iterator.t()} | {:error, SlateDB.Error.t()}
+  def preview_iterator(%__MODULE__{} = db, opts), do: Iterator.open_preview(db, opts)
 
   @doc """
   Checks that a store honours conditional writes, which SlateDB's writer

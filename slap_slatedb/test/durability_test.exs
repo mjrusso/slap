@@ -4,7 +4,7 @@ defmodule Slap.SlateDB.DurabilityTest do
   @moduletag :capture_log
 
   alias Slap.SlateDB
-  alias Slap.SlateDB.Transaction
+  alias Slap.SlateDB.{Iterator, Transaction}
 
   # The WAL flush timer fires once right after open, and that first tick can
   # come late when the machine is busy. Let it pass, so the next write waits
@@ -245,10 +245,21 @@ defmodule Slap.SlateDB.DurabilityTest do
       {:ok, _} = SlateDB.put(db, "k", "v")
       assert {:ok, "v"} = SlateDB.get(db, "k")
       assert {:ok, nil} = SlateDB.get(db, "k", durability: :remote)
+      assert {:ok, nil} = SlateDB.get_range(db, "k", durability: :remote, max_value_bytes: 1)
+
+      assert {:ok, iter} =
+               SlateDB.preview_iterator(db, prefix: "k", durability: :remote, max_value_bytes: 1)
+
+      assert {:ok, []} = Iterator.next_batch(iter)
+
       assert Enum.to_list(SlateDB.scan(db, prefix: "k", durability: :remote)) == []
 
       :ok = SlateDB.flush(db)
       assert {:ok, "v"} = SlateDB.get(db, "k", durability: :remote)
+
+      assert {:ok, %{value: "v", value_size: 1}} =
+               SlateDB.get_range(db, "k", durability: :remote, max_value_bytes: 1)
+
       assert {:ok, %{value: "v"}} = SlateDB.get_key_value(db, "k", durability: :remote)
       assert Enum.to_list(SlateDB.scan(db, prefix: "k", durability: :remote)) == [{"k", "v"}]
     end

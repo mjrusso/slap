@@ -8,7 +8,7 @@ use slatedb::bytes::Bytes;
 use tokio::sync::Mutex;
 
 use crate::atoms;
-use crate::binaries::{bin, to_bytes};
+use crate::binaries::{bin, copy_bin, to_bytes};
 use crate::db::{DbResource, SnapshotResource};
 use crate::gate::Gate;
 use crate::options::{ReadOpts, ScanOpts};
@@ -106,11 +106,24 @@ fn read_get<'a>(
     opts: ReadOpts,
     reply_ref: Term<'a>,
 ) -> Term<'a> {
+    // `get_range/3` always sets `max_value_bytes`; `get/3` sets neither option.
+    let max_value_bytes = opts.max_value_bytes;
+    let value_range = opts.value_range;
     let opts = opts.build();
     spawn_reply_with(env, reply_ref, key_arg(key), |key| async move {
         let value = with_handle!(target, |handle| handle.get_with_options(key, &opts).await?);
-        let encode: Encode =
-            Box::new(move |env| (atoms::ok(), value.map(|v| bin(env, &v))).encode(env));
+        let encode: Encode = Box::new(move |env| {
+            let value = value.map(|v| match max_value_bytes {
+                Some(max) => {
+                    let (offset, length) = value_range.unwrap_or((0, v.len()));
+                    let start = offset.min(v.len());
+                    let end = start.saturating_add(length.min(max)).min(v.len());
+                    (copy_bin(env, &v[start..end]), v.len(), offset).encode(env)
+                }
+                None => bin(env, &v).encode(env),
+            });
+            (atoms::ok(), value).encode(env)
+        });
         Ok(encode)
     })
 }
@@ -161,6 +174,8 @@ pub(crate) struct IteratorResource {
     /// Holding the target keeps what it reads from open.
     target: ReadTarget,
     iter: Mutex<slatedb::DbIterator>,
+    max_key_bytes: Option<usize>,
+    max_value_bytes: Option<usize>,
 }
 
 fn row_version(seq: u64, transaction: bool) -> Option<u64> {
@@ -184,6 +199,8 @@ fn read_scan<'a>(
 ) -> Term<'a> {
     let range = (bound(range.0, range.1), bound(range.2, range.3));
     let prefix = prefix.map(to_bytes);
+    let max_key_bytes = opts.max_key_bytes;
+    let max_value_bytes = opts.max_value_bytes;
     let opts = opts.build();
     spawn_reply(env, reply_ref, async move {
         let iter = with_handle!(target, |handle| match prefix {
@@ -196,6 +213,8 @@ fn read_scan<'a>(
         Ok(ok_with(ResourceArc::new(IteratorResource {
             target,
             iter: Mutex::new(iter),
+            max_key_bytes,
+            max_value_bytes,
         })))
     })
 }
@@ -212,6 +231,9 @@ fn iterator_next_batch<'a>(
     spawn_reply(env, reply_ref, async move {
         let transaction = matches!(&iter.target, ReadTarget::Transaction(_));
         let _open = iter.target.gate().enter().await?;
+        let max_key_bytes = iter.max_key_bytes;
+        let max_value_bytes = iter.max_value_bytes;
+        let bounded = max_key_bytes.is_some() || max_value_bytes.is_some();
         let mut guard = iter.iter.lock().await;
         let mut rows = Vec::with_capacity(max.min(1024) as usize);
         for _ in 0..max {
@@ -224,8 +246,13 @@ fn iterator_next_batch<'a>(
             let rows: Vec<Term<'_>> = rows
                 .iter()
                 .map(|(k, v, seq)| {
-                    if with_versions {
-                        (bin(env, k), bin(env, v), row_version(*seq, transaction)).encode(env)
+                    let version = row_version(*seq, transaction);
+                    if bounded {
+                        let key = preview(env, k, max_key_bytes);
+                        let value = preview(env, v, max_value_bytes);
+                        (key, value, version, k.len(), v.len()).encode(env)
+                    } else if with_versions {
+                        (bin(env, k), bin(env, v), version).encode(env)
                     } else {
                         (bin(env, k), bin(env, v)).encode(env)
                     }
@@ -235,6 +262,13 @@ fn iterator_next_batch<'a>(
         });
         Ok(encode)
     })
+}
+
+fn preview<'a>(env: rustler::Env<'a>, data: &Bytes, max: Option<usize>) -> Term<'a> {
+    match max {
+        None => bin(env, data),
+        Some(max) => copy_bin(env, &data[..data.len().min(max)]),
+    }
 }
 
 #[rustler::nif]

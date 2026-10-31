@@ -35,6 +35,8 @@ pub(crate) struct ReadOpts {
     durability: Option<Durability>,
     dirty: Option<bool>,
     cache_blocks: Option<bool>,
+    pub(crate) max_value_bytes: Option<usize>,
+    pub(crate) value_range: Option<(usize, usize)>,
 }
 
 impl ReadOpts {
@@ -62,6 +64,8 @@ pub(crate) struct ScanOpts {
     read_ahead_bytes: Option<usize>,
     max_fetch_tasks: Option<usize>,
     order: Option<Order>,
+    pub(crate) max_key_bytes: Option<usize>,
+    pub(crate) max_value_bytes: Option<usize>,
 }
 
 impl ScanOpts {

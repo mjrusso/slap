@@ -4,7 +4,7 @@ defmodule Slap.SlateDB.Iterator do
 
   Most code should use the streams from `Slap.SlateDB.scan/2`,
   `Slap.SlateDB.Snapshot.scan/2` and `Slap.SlateDB.Transaction.scan/2` instead. Use
-  this module when you need `seek/2`.
+  this module when you need `seek/2` or `Slap.SlateDB.preview_iterator/2`.
 
   An iterator is not safe to share between processes that read from it at the
   same time. Calls are serialized, so the rows each process sees will
@@ -23,13 +23,21 @@ defmodule Slap.SlateDB.Iterator do
 
   @doc false
   # Opens an iterator on a handle that can read (see `Slap.SlateDB.Read`).
-  def open(%{resource: resource}, opts) do
+  def open(handle, opts) do
+    with_versions = Keyword.get(opts, :with_versions, false)
+    if not is_boolean(with_versions), do: raise(ArgumentError, ":with_versions must be boolean")
+    start(handle, opts, Options.scan(Keyword.delete(opts, :with_versions)), with_versions)
+  end
+
+  @doc false
+  # See `Slap.SlateDB.preview_iterator/2`. The NIF ignores `with_versions`
+  # for an iterator with byte limits.
+  def open_preview(handle, opts), do: start(handle, opts, Options.preview_scan(opts), true)
+
+  defp start(%{resource: resource}, opts, {range, prefix, scan_opts}, with_versions) do
     if Keyword.has_key?(opts, :batch_size),
       do: raise(ArgumentError, ":batch_size belongs to scan/2; pass the size to next_batch/3")
 
-    with_versions = Keyword.get(opts, :with_versions, false)
-    if not is_boolean(with_versions), do: raise(ArgumentError, ":with_versions must be boolean")
-    {range, prefix, scan_opts} = Options.scan(Keyword.delete(opts, :with_versions))
     call = &Native.read_scan(resource, range, prefix, scan_opts, &1)
 
     with {:ok, resource} <- Native.call(call, Native.timeout(opts)) do
@@ -40,11 +48,18 @@ defmodule Slap.SlateDB.Iterator do
   @doc """
   Returns up to `max` rows as `{key, value}` tuples. An iterator opened with
   `with_versions: true` returns `{key, value, version}` tuples. The version
-  is nil for a transaction's uncommitted writes. Returns `{:ok, []}` when
-  the iterator is done. `:timeout` applies to this batch fetch.
+  is nil for a transaction's uncommitted writes. An iterator from
+  `Slap.SlateDB.preview_iterator/2` returns
+  `{key, value, version, key_size, value_size}` tuples. Returns `{:ok, []}`
+  when iteration finishes. `:timeout` applies to this batch fetch.
   """
+  @type row ::
+          {binary(), binary()}
+          | {binary(), binary(), non_neg_integer() | nil}
+          | {binary(), binary(), non_neg_integer() | nil, non_neg_integer(), non_neg_integer()}
+
   @spec next_batch(t(), pos_integer(), keyword()) ::
-          {:ok, [{binary(), binary()} | {binary(), binary(), non_neg_integer() | nil}]}
+          {:ok, [row()]}
           | {:error, SlateDB.Error.t()}
   def next_batch(
         %__MODULE__{resource: iter, with_versions: with_versions},

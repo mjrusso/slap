@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add `get_range/3`, which reads at most `:max_value_bytes` of a value
+  (optionally from `:value_range`) and returns the value's full size.
+- Add `preview_iterator/2`, an iterator that cuts keys and values to
+  `:max_key_bytes` and `:max_value_bytes` and returns rows as
+  `{key, value, version, key_size, value_size}`, with the full sizes.
+- Both bound only the bytes copied into the BEAM; SlateDB still loads full
+  rows in native memory.
 - Fix repeated metadata garbage collection on local stores by supporting
   ETag-conditional updates. Local mutations serialize per store root. Stop old
   processes before upgrading, and use the same root in every process accessing
