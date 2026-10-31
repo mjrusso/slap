@@ -45,9 +45,13 @@ defmodule Slap.Streams.JsonTest do
   end
 
   # Any JSON value, with strings full of the characters that delimit JSON.
+  # StreamData's float/0 makes this property take about 30 seconds, close to
+  # ExUnit's 60-second timeout. A mantissa times a power of ten is much faster
+  # to generate, and still covers decimal and exponent notation.
   defp json do
     string = one_of([string(:printable), member_of(["s,[]{}\"\\", ""])])
-    leaf = one_of([integer(), float(), boolean(), constant(nil), string])
+    float = map(tuple({integer(), integer(-300..300)}), fn {m, e} -> m * :math.pow(10, e) end)
+    leaf = one_of([integer(), float, boolean(), constant(nil), string])
 
     tree(leaf, fn child ->
       pairs = list_of(tuple({string, child}), max_length: 4)
