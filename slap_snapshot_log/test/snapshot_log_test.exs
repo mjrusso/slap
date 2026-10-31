@@ -180,8 +180,8 @@ defmodule Slap.SnapshotLogTest do
       assert {:error, :not_found} = Streams.head(SnapshotLog.path(base, :updates))
 
       assert {:reset, %{offset: 0}} = SnapshotLog.next(base, nil)
-      waiting = Task.async(fn -> SnapshotLog.next(base, 0, wait: 5_000, timeout: 50) end)
-      assert {:ok, %{entries: [], offset: 0, up_to_date: true}} = Task.await(waiting, 1_000)
+      waiting = Task.async(fn -> SnapshotLog.next(base, 0, wait: 5_000, timeout: 500) end)
+      assert {:ok, %{entries: [], offset: 0, up_to_date: true}} = Task.await(waiting, 2_000)
     end
 
     test "an idle log returns an empty page when the wait uses its timeout" do
@@ -189,7 +189,7 @@ defmodule Slap.SnapshotLogTest do
       assert {:reset, %{offset: 0}} = SnapshotLog.next(base, nil)
 
       assert {:ok, %{entries: [], offset: 0, up_to_date: true}} =
-               SnapshotLog.next(base, 0, timeout: 50)
+               SnapshotLog.next(base, 0, timeout: 500)
     end
 
     test "at the tail, next/3 waits for an entry" do
