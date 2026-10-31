@@ -1,7 +1,7 @@
 # Mix recipes run in every project, in dependency order, or in the one given
 # (for example `just test slap_yjs`). Run them in `nix develop`.
 
-projects := "slap_slatedb slap_cluster slap_streams slap_snapshot_log slap_yjs slap_kv slap_files slap"
+projects := "slap_slatedb slap_cluster slap_streams slap_snapshot_log slap_yjs slap_kv slap_files slap_inspect slap"
 
 default:
     @just --list

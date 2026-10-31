@@ -10,7 +10,7 @@ changes, for example `feat(slap_streams): add stream storage`. Use
 `chore(repo)` for repository tooling and shared files. Keep each commit focused
 on one package or one infrastructure concern.
 
-This repository holds eight Mix projects, each with its own dependencies,
+This repository holds nine Mix projects, each with its own dependencies,
 checks and CI workflow:
 
 - `slap_slatedb/`: Elixir bindings for SlateDB (a Rust NIF).
@@ -26,12 +26,16 @@ checks and CI workflow:
   depends on `slap_cluster` and `slap_slatedb` by path.
 - `slap_files/`: files with bodies inline in `slap_kv` records or as
   objects in a store; depends on `slap_kv` and what it depends on, by path.
-- `slap/`: depends on the other seven packages by path. It provides the
+- `slap_inspect/`: read-only TUI and CLI for browsing Slap data; has no
+  dependency on the server libraries or the SlateDB NIF.
+- `slap/`: depends on the seven server libraries by path, and on
+  `slap_inspect` by path in tests only. It provides the
   standalone server (`mix slap.server`) for streams and KV and holds the
   Durable Streams conformance suite, benchmarks, crash tests, and cluster
   tests.
 
-The path dependencies above are selected by `SLAP_LOCAL_DEPS=1`. With the
+The path dependencies above, except `slap`'s test-only one on
+`slap_inspect`, are selected by `SLAP_LOCAL_DEPS=1`. With the
 variable unset or set to `0`, the packages use versioned Hex dependencies.
 Each project's `mix.lock` is committed, as `mix deps.get` writes it with
 `SLAP_LOCAL_DEPS=1`. With `0`, `mix deps.get` adds the `slap_*` packages from
@@ -40,7 +44,8 @@ Hex to it; do not commit those entries (`git restore` the file).
 `jepsen/` holds the Jepsen suite (Clojure, Leiningen) and `jepsen/node/`, the
 Mix project each Jepsen node runs; see `jepsen/README.md`. Build the node
 image from the repository root with `jepsen/docker/Dockerfile`. Rebuild it
-(`just jepsen-up`) after changing any of the eight projects or `jepsen/node/`.
+(`just jepsen-up`) after changing `slap`, any of the seven server
+libraries, or `jepsen/node/`.
 
 ## Environment
 

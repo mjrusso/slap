@@ -53,12 +53,17 @@ of `slap_files`.
 > - [slap_snapshot_log](https://hexdocs.pm/slap_snapshot_log/): an append-only
 >   log of changes that can be condensed into snapshots
 >
-> Complete distribution:
+> Server distribution:
 >
-> - [slap](https://hexdocs.pm/slap/): all Slap libraries and a standalone HTTP
->   server for evaluating and benchmarking `slap_streams` and `slap_kv`
+> - [slap](https://hexdocs.pm/slap/): all Slap server libraries and a standalone
+>   HTTP server for evaluating and benchmarking `slap_streams` and `slap_kv`
 >
-> The `slap` package pulls in all seven libraries. If you only need a
+> Inspection:
+>
+> - [slap_inspect](https://hexdocs.pm/slap_inspect/): a read-only TUI and CLI
+>   for browsing Slap data
+>
+> The `slap` package pulls in all seven server libraries. If you only need a
 > subset, add those packages directly.
 <!-- /slap-preamble -->
 

@@ -6,8 +6,11 @@ Hex. The `projects` list in the `justfile` is in dependency order:
 
 ```
 slap_slatedb, slap_cluster, slap_streams, slap_snapshot_log, slap_yjs,
-slap_kv, slap_files, slap
+slap_kv, slap_files, slap_inspect, slap
 ```
+
+`slap_inspect` has no `slap_*` dependencies. `slap` uses it only in tests, by
+path; Hex leaves dependencies that are not for `:prod` out of a package.
 
 The `just` recipes below run in `nix develop`, from the repository root.
 

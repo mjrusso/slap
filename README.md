@@ -69,9 +69,8 @@ same **placement group** on one shard.
 
 ## Packages
 
-Slap is eight Mix packages, each published separately to Hex. The `slap`
-package depends on the other seven. Applications can instead depend only on
-the packages they use:
+Applications can depend on individual server libraries or on `slap`, which
+includes all seven:
 
 | Package                         | Provides                                                                                                      | Hex                                                                                                                                                                                        |
 |---------------------------------|---------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -92,7 +91,10 @@ The services are built on these packages, which you can also use directly:
 
 | Package                                            | Provides                                                                                 | Hex                                                                                                                                                                |
 |----------------------------------------------------|------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [`slap`](slap/README.md#try-the-standalone-server) | All Slap libraries and a standalone HTTP server (`mix slap.server`) for Streams and KV. | [![Hex](https://img.shields.io/hexpm/v/slap.svg)](https://hex.pm/packages/slap) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap) |
+| [`slap`](slap/README.md#try-the-standalone-server) | All Slap server libraries and a standalone HTTP server (`mix slap.server`) for Streams and KV. | [![Hex](https://img.shields.io/hexpm/v/slap.svg)](https://hex.pm/packages/slap) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap) |
+
+For read-only terminal and JSON inspection of a running cluster, install
+[`slap_inspect`](slap_inspect/README.md) separately.
 
 ## Usage Examples
 
@@ -121,6 +123,8 @@ Then run the examples below, in order, in this IEx session.
 > walkthrough](slap_streams/README.md#using-s3) runs a Streams cluster on S3.
 
 The [`slap` README](slap/README.md#try-the-libraries) has additional examples.
+The [kitchen sink demo](slap/README.md#kitchen-sink-demo) updates in-memory
+data and prints inspector commands.
 
 ### SlateDB Bindings
 
