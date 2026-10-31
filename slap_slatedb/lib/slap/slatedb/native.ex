@@ -14,23 +14,30 @@ defmodule Slap.SlateDB.Native do
   # Prebuilt NIFs are attached to the GitHub release for this version (see
   # RELEASING.md at the repository root), and checked against the checksum
   # file.
-  # SLAP_SLATEDB_BUILD=1 builds the NIF from source with rustler instead. The
-  # targets must match the release workflow's build matrix.
+  # SLAP_SLATEDB_BUILD=1 builds the NIF from source with rustler instead.
+  # Otherwise the option is omitted: RustlerPrecompiled reads the app's
+  # `:force_build` config only when the option is absent, so passing `false`
+  # would override that config. The targets must match the release workflow's
+  # build matrix.
+  force_build =
+    if System.get_env("SLAP_SLATEDB_BUILD") in ["1", "true"], do: [force_build: true], else: []
+
   use RustlerPrecompiled,
-    otp_app: :slap_slatedb,
-    crate: "slatedb_nif",
-    base_url: "https://github.com/mjrusso/slap/releases/download/slap_slatedb-v#{version}",
-    version: version,
-    force_build: System.get_env("SLAP_SLATEDB_BUILD") in ["1", "true"],
-    targets: ~w(
-      aarch64-apple-darwin
-      x86_64-apple-darwin
-      aarch64-unknown-linux-gnu
-      x86_64-unknown-linux-gnu
-      aarch64-unknown-linux-musl
-      x86_64-unknown-linux-musl
-    ),
-    nif_versions: ["2.15"]
+      [
+        otp_app: :slap_slatedb,
+        crate: "slatedb_nif",
+        base_url: "https://github.com/mjrusso/slap/releases/download/slap_slatedb-v#{version}",
+        version: version,
+        targets: ~w(
+          aarch64-apple-darwin
+          x86_64-apple-darwin
+          aarch64-unknown-linux-gnu
+          x86_64-unknown-linux-gnu
+          aarch64-unknown-linux-musl
+          x86_64-unknown-linux-musl
+        ),
+        nif_versions: ["2.15"]
+      ] ++ force_build
 
   @doc false
   # A timed-out write is not cancelled; ordered writers leave this infinite.

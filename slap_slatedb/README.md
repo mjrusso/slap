@@ -85,8 +85,19 @@ checksum. You don't need Rust.
 
 On other platforms, or for builds without network access such as Nix sandbox
 builds, compile the NIF from source: install Rust 1.91 or later, add
-`{:rustler, "~> 0.38"}` to your dependencies, and set `SLAP_SLATEDB_BUILD=1`
-when you compile.
+`{:rustler, "~> 0.38"}` to your dependencies, and either set
+`SLAP_SLATEDB_BUILD=1` when you compile or add this to your app's
+`config/config.exs`:
+
+```elixir
+config :rustler_precompiled, :force_build, slap_slatedb: true
+```
+
+Build from source in the same way when you depend on `slap_slatedb` by path or
+from git. Otherwise compilation uses the prebuilt NIF released for the version
+in `slap_slatedb`'s `mix.exs`, which lacks native changes made after that
+release. Compilation and loading succeed, so the mismatch shows up only when the
+code runs.
 
 ## Example
 

@@ -2,25 +2,30 @@
 
 ## Unreleased
 
-- Add `get_range/3`, which reads at most `:max_value_bytes` of a value
-  (optionally from `:value_range`) and returns the value's full size.
-- Add `preview_iterator/2`, an iterator that cuts keys and values to
-  `:max_key_bytes` and `:max_value_bytes` and returns rows as
-  `{key, value, version, key_size, value_size}`, with the full sizes.
-- Both bound only the bytes copied into the BEAM; SlateDB still loads full
-  rows in native memory.
-- Fix repeated metadata garbage collection on local stores by supporting
-  ETag-conditional updates. Local mutations serialize per store root. Stop old
-  processes before upgrading, and use the same root in every process accessing
-  the same data.
-
-- Reject recognized network filesystems, including NFS and SMB/CIFS, for local
-  stores.
-
-- Local stores (`{:local, directory}`) now use `fsync` for object writes and
-  completed uploads. On Unix, directory changes are synced too. This improves
-  protection against OS crashes and power loss, and can increase write and
-  open latency.
+- `config :rustler_precompiled, :force_build, slap_slatedb: true` now builds
+  the NIF from source. Previously it had no effect, and only
+  `SLAP_SLATEDB_BUILD=1` forced a build.
+- Adds `get_range/3`, which reads at most `:max_value_bytes` of a value
+  (optionally from `:value_range`) and returns the value's full size. It
+  limits the bytes copied into the BEAM; SlateDB still loads the whole value
+  in native memory.
+- Adds `preview_iterator/2`, an iterator that cuts keys and values to
+  `:max_key_bytes` and `:max_value_bytes` and returns their full sizes. It
+  limits the bytes copied into the BEAM; SlateDB still loads whole rows in
+  native memory.
+- Local stores (`{:local, directory}`) support conditional updates
+  (`{:update, version}`), so SlateDB's garbage collector removes obsolete
+  metadata on every run, not only the first, and `slap_cluster`'s
+  `ObjectLease` strategy works with a local store. Conditional updates return
+  `:unsupported` on filesystems without microsecond modification times.
+- Writes under one local store root now run one at a time. Before upgrading,
+  stop processes running older versions. Open the same root in every process
+  that uses the data, and do not delete the `.slap-lock#0` file in the root.
+- Local stores reject recognized network filesystems, including NFS and
+  SMB/CIFS.
+- Local stores sync object writes and completed uploads to disk with `fsync`.
+  On Unix, directory changes are synced too. Data survives OS crashes and power
+  loss more reliably, and writes and opens can take longer.
 
 ## 0.2.0
 
