@@ -1,5 +1,24 @@
 # slap
 
+Slap is a set of Elixir libraries that store streams, key-value data, files
+and Yjs documents in S3-compatible object storage or a local directory, through
+[SlateDB](https://slatedb.io). The services run inside your application rather
+than as a separate database server. They run on one node or across several,
+with each service's data split into shards that are spread across the nodes.
+
+Add the `slap` package to install all seven Slap server libraries at once. It
+also provides `mix slap.server`, a standalone HTTP server for evaluating and
+benchmarking Streams and KV.
+
+- [Run the kitchen sink demo](#kitchen-sink-demo) to see every service update
+  sample data once a second.
+- [Try the libraries](#try-the-libraries) through their Elixir APIs in IEx.
+- [Run the standalone server](#try-the-standalone-server) and use its HTTP APIs.
+- [Use Slap in an application](#use-slap-in-an-application) to embed the
+  services.
+- [Browse the data with Slap Inspect](#slap-inspect), a read-only TUI and CLI
+  installed separately.
+
 <!-- slap-preamble -->
 > #### About Slap {: .info}
 >
@@ -40,16 +59,96 @@
 > subset, add those packages directly.
 <!-- /slap-preamble -->
 
-The `slap` package includes all seven `slap_*` packages, so you can use
-every Slap library with a single dependency. If you only need a subset,
-add those packages directly to keep your dependency set smaller.
+## Kitchen sink demo
 
-The `slap` package also provides `mix slap.server`, a standalone HTTP server
-for [Durable Streams](https://durablestreams.com)
-([`slap_streams`](https://hexdocs.pm/slap_streams/)) and partitioned key-value
-storage ([`slap_kv`](https://hexdocs.pm/slap_kv/)). It serves either or both
-from one listener, and it does not authenticate requests. Use it to evaluate,
-test, and benchmark those services without writing an application.
+The [kitchen sink demo](https://github.com/mjrusso/slap/blob/main/slap/examples/kitchen_sink.exs)
+runs all seven server libraries with in-memory storage and prints
+`slap-inspect` commands for browsing the cluster data.
+
+### Run without a checkout
+
+With Elixir 1.18 or later and Erlang/OTP 26.2 or later, download the script
+and run it directly:
+
+```sh
+curl -fsSLo kitchen_sink.exs https://raw.githubusercontent.com/mjrusso/slap/main/slap/examples/kitchen_sink.exs
+elixir kitchen_sink.exs
+```
+
+Outside a Mix project, the script installs the latest `slap` release with
+`Mix.install([:slap])`. Releases up to 0.4.0 cannot be inspected, and the
+demo says so when it starts; run it from a checkout to inspect it.
+
+### Run from a checkout
+
+From the repository root:
+
+```sh
+nix develop
+just deps slap
+cd slap
+mix run examples/kitchen_sink.exs
+```
+
+### Inspect the demo
+
+Keep the demo running. In a second terminal, run one of the `slap-inspect`
+commands the demo prints; each includes the node name, cookie file and cluster
+module for that view. [Install Slap Inspect](#slap-inspect) first if needed.
+
+In the Streams view, the fork's first pages show the messages it inherits from
+its source; press `n` to reach its own updates. See
+[Browse a Streams cluster](https://hexdocs.pm/slap_inspect/readme.html#browse-a-streams-cluster)
+for the keys.
+
+### What the demo does
+
+Every second, the demo updates streams and a fork, a snapshot log, a Yjs
+document, KV rows, and inline and object-backed files. It publishes a log
+snapshot every five ticks. During setup, it also attempts a KV write that
+is rejected as a conflict.
+
+The demo also updates a counter in a standalone SlateDB database. The
+inspector reads only cluster databases, so the demo prints that counter in
+its own terminal. It creates a private cookie file and removes it on normal
+exit.
+
+Data is lost when the VM exits. Stop the demo with Ctrl+C, then `a`.
+For a finite run or a different update interval:
+
+```sh
+mix run examples/kitchen_sink.exs --ticks 10 --interval 250
+```
+
+The same options work with `elixir kitchen_sink.exs`.
+
+## Slap Inspect
+
+[Slap Inspect](https://hexdocs.pm/slap_inspect/) is a read-only TUI and CLI
+for browsing Slap data. It works with the standalone server and with Slap
+services embedded in your application. Install it on the machine you will
+connect from:
+
+```sh
+mix escript.install hex slap_inspect
+```
+
+The inspector connects over distributed Erlang, using the server's node name,
+a cookie file and the service's cluster module. For example, if the standalone
+server is named `slap@127.0.0.1` and its cookie is saved in `~/.slap-cookie`,
+open the Streams view with:
+
+```sh
+slap-inspect --longnames --node slap@127.0.0.1 \
+  --cookie-file ~/.slap-cookie --cluster Slap.Streams.Cluster streams
+```
+
+Use the Streams cluster for streams, snapshot logs and Yjs, and the KV cluster
+for KV and Files. For clusters defined by your application, pass your cluster
+module instead. The [kitchen sink demo](#kitchen-sink-demo) prints commands
+with these values filled in. See the
+[Slap Inspect guide](https://hexdocs.pm/slap_inspect/) for installation,
+connection, commands and JSON output.
 
 ## Try the libraries
 
@@ -165,6 +264,10 @@ For production configuration and supervision, follow the package links in
 
 ## Try the standalone server
 
+`mix slap.server` serves Streams, KV, or both from one HTTP listener. It does
+not authenticate requests. Use it to evaluate, test and benchmark the services
+without writing an application.
+
 You need Elixir 1.18 or later and Erlang/OTP 26.2 or later. This command
 installs `slap` from Hex with `Mix.install` and starts the server:
 
@@ -174,6 +277,9 @@ elixir -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- 
 ```
 
 `--streams` and `--kv` select the services; pass one or both.
+
+To use Slap Inspect, start a named Erlang node as shown in its
+[standalone server connection guide](https://hexdocs.pm/slap_inspect/readme.html#standalone-slap-server).
 
 The SlateDB NIF is precompiled for macOS and Linux (glibc and musl) on x86_64
 and arm64. The first run downloads it and compiles the dependencies; later

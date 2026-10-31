@@ -40,6 +40,14 @@ defmodule Mix.Tasks.Slap.Server do
   Use `iex -S mix slap.server ...` to keep an interactive prompt while the
   listener runs.
 
+  Slap Inspect requires a named server node:
+
+      elixir --sname slap --cookie COOKIE -S mix slap.server ...
+
+  Use `--name` for long names and pass `--longnames` to the inspector.
+  Select `--cluster Slap.Streams.Cluster` or `--cluster Slap.KV.Cluster`
+  in the inspector.
+
   Without a Mix project, use `Mix.install`:
 
       elixir -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- \\
