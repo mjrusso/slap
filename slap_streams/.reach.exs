@@ -2,6 +2,19 @@
   checks: [source_paths: ["lib"]],
   calls: [
     forbidden: [
+      # Inspection bypasses stream servers and maintenance processes.
+      {["Slap.Streams.Introspect", "Slap.Streams.Introspect.*"],
+       [
+         "Slap.Streams.StreamServer.*",
+         "Slap.Streams.Group.*",
+         "Slap.Streams.Creation.*",
+         "Slap.Streams.Retention.*",
+         "Slap.Streams.Work.*",
+         "Slap.Streams.Upgrade.*",
+         "Slap.Streams.Jobs.*",
+         "Slap.Streams.ShardState.*",
+         "Slap.Streams.*_fenced"
+       ]},
       # Databases belong to slap_cluster's placement (Slap.Cluster.ShardDb).
       {["Slap.Streams", "Slap.Streams.*"], ["Slap.SlateDB.open", "Slap.SlateDB.close"]},
       # Stream servers write stream data and authorize retention and deletion.

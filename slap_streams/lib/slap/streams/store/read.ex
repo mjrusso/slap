@@ -75,11 +75,16 @@ defmodule Slap.Streams.Store.Read do
           {:ok, non_neg_integer()} | {:error, term()}
   def get_trim(db, sid) do
     case SlateDB.get(db, Keys.trim(sid)) do
-      {:ok, nil} -> {:ok, 0}
-      {:ok, <<offset::64>>} -> {:ok, offset}
+      {:ok, value} -> {:ok, _offset} = parse_trim(value)
       {:error, _} = error -> error
     end
   end
+
+  @doc "The trim point stored at `Keys.trim/1` (nil when absent)."
+  @spec parse_trim(binary() | nil) :: {:ok, non_neg_integer()} | {:error, :malformed_trim}
+  def parse_trim(nil), do: {:ok, 0}
+  def parse_trim(<<offset::64>>), do: {:ok, offset}
+  def parse_trim(_value), do: {:error, :malformed_trim}
 
   @doc "The next unreserved stream id, or 1 for a new shard."
   @spec next_sid(SlateDB.t()) :: {:ok, pos_integer()} | {:error, term()}
@@ -105,11 +110,20 @@ defmodule Slap.Streams.Store.Read do
   def read_msgs(_db, _sid, from, until, _max_bytes) when from >= until, do: {[], until}
 
   def read_msgs(db, sid, from, until, max_bytes) do
+    db
+    |> SlateDB.scan(Keys.msg_range(sid, from, until))
+    |> join_msgs(until, max_bytes)
+  end
+
+  @doc """
+  `read_msgs/5` over message rows already read, in key order, from a range
+  that ends at `until`.
+  """
+  @spec join_msgs(Enumerable.t({binary(), binary()}), Offset.t(), pos_integer()) ::
+          {[{Offset.t(), binary()}], Offset.t()}
+  def join_msgs(rows, until, max_bytes) do
     # {messages (reversed), bytes so far, current {offset, parts (reversed)} | nil}
-    result =
-      db
-      |> SlateDB.scan(Keys.msg_range(sid, from, until))
-      |> Enum.reduce_while({[], 0, nil}, &add_row(&1, &2, max_bytes))
+    result = Enum.reduce_while(rows, {[], 0, nil}, &add_row(&1, &2, max_bytes))
 
     case result do
       {:full, acc, {offset, bytes}, next_offset} ->

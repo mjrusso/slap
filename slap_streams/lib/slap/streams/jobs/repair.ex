@@ -136,7 +136,7 @@ defmodule Slap.Streams.Jobs.Repair do
   defp scan(ctx) do
     # Separate worker budgets keep stalled notification checks from blocking a pass.
     ctx.db
-    |> SlateDB.scan(prefix: Keys.type_prefix(0x08), durability: :remote)
+    |> SlateDB.scan(prefix: Keys.prefix(:repair), durability: :remote)
     |> Stream.flat_map(fn {key, path} ->
       Stream.concat([:source_entry], source_work(ctx, path, Keys.decode_sid(key)))
     end)

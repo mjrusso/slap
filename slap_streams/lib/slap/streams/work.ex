@@ -12,7 +12,7 @@ defmodule Slap.Streams.Work do
 
   defp entries({{cluster, _shard}, ctx}, fun) do
     ctx.db
-    |> SlateDB.scan(prefix: Keys.type_prefix(0x0F), durability: :remote)
+    |> SlateDB.scan(prefix: Keys.prefix(:work), durability: :remote)
     |> Enum.each(fn {_key, path} -> fun.({cluster, path}) end)
   rescue
     SlateDB.Error -> :ok

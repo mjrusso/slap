@@ -50,6 +50,33 @@ defmodule Slap.Streams.StoreTest do
       assert lo <= Keys.msg(3, 10, 5) and Keys.msg(3, 19, 999) < hi and Keys.msg(3, 20, 0) >= hi
     end
 
+    test "parses the fields of every stored key family" do
+      target = %{shard: 2, sid: 8}
+
+      for {key, fields} <- [
+            {Keys.next_sid(), %{kind: :next_sid}},
+            {Keys.meta("/path"), %{kind: :meta, path: "/path"}},
+            {Keys.tail(7), %{kind: :tail, sid: 7}},
+            {Keys.producer(7, "p"), %{kind: :producer, sid: 7, producer: "p"}},
+            {Keys.msg(7, 10, 3), %{kind: :message, sid: 7, offset: 10, part: 3}},
+            {Keys.expiry(100, 7), %{kind: :expiry, sid: 7, deadline_ms: 100}},
+            {Keys.delete_pending(7), %{kind: :delete_pending, sid: 7}},
+            {Keys.trim(7), %{kind: :trim, sid: 7}},
+            {Keys.repair(7), %{kind: :repair, sid: 7}},
+            {Keys.seal("/group"), %{kind: :seal, group: "/group"}},
+            {Keys.reclaim(7), %{kind: :reclaim, sid: 7}},
+            {Keys.witness(7), %{kind: :witness, sid: 7}},
+            {Keys.registration(7, target), %{kind: :registration, sid: 7, target: target}},
+            {Keys.pin(7, 10, target), %{kind: :pin, sid: 7, start: 10, target: target}},
+            {Keys.work(7), %{kind: :work, sid: 7}}
+          ] do
+        assert Keys.parse(key) == {:ok, fields}
+      end
+
+      assert {:error, :unknown_or_malformed_key} = Keys.parse(Keys.msg(7, 10, 3) <> <<0>>)
+      assert {:error, :unknown_or_malformed_key} = Keys.parse(<<16, 7::64>>)
+    end
+
     test "row ownership covers stream records and only explicitly shared records" do
       sid = 7
       target = %Identity{path: "/target", shard: 2, sid: 8}
@@ -174,7 +201,7 @@ defmodule Slap.Streams.StoreTest do
     assert cap.expires_at_ms == nil
 
     encoded = :erlang.term_to_binary({:meta, 2, %{creation: {:unknown_creation, %{}}}})
-    assert_raise KeyError, fn -> Codec.decode(encoded) end
+    assert_raise CaseClauseError, fn -> Codec.decode(encoded) end
   end
 
   # A node that takes over a shard may decode a stream's rows before it has

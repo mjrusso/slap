@@ -106,20 +106,30 @@ defmodule Slap.Streams.Store.Codec do
 
   @spec decode(binary()) :: Meta.t() | Tail.t() | Producer.t() | Capture.t()
   def decode(binary) do
-    case :erlang.binary_to_term(binary, [:safe]) do
-      {:meta, 2, fields} ->
-        struct!(Meta, decode_fields(fields))
-
-      {:tail, 1, fields} ->
-        struct!(Tail, decode_fields(fields))
-
-      {:producer, 1, fields} ->
-        struct!(Producer, decode_fields(fields))
-
-      {:capture, 1, fields} ->
-        struct!(Capture, decode_fields(fields))
+    case parse_term(:erlang.binary_to_term(binary, [:safe])) do
+      {:ok, record} -> record
     end
   end
+
+  @doc """
+  Parses a stored record without raising. `to_term` converts the binary to
+  `{:ok, term}` or an error. It is called from this module, so the record
+  atoms exist for a `:safe` conversion.
+  """
+  def parse(binary, to_term) do
+    with {:ok, term} <- to_term.(binary), do: parse_term(term)
+  end
+
+  defp parse_term({:meta, 2, fields}), do: build(Meta, fields)
+  defp parse_term({:tail, 1, fields}), do: build(Tail, fields)
+  defp parse_term({:producer, 1, fields}), do: build(Producer, fields)
+  defp parse_term({:capture, 1, fields}), do: build(Capture, fields)
+
+  defp parse_term({:meta, 1, _fields}),
+    do: {:error, :metadata_v1_requires_offline_upgrade}
+
+  defp parse_term({_tag, version, _fields}), do: {:error, {:unsupported_version, version}}
+  defp parse_term(_term), do: {:error, :malformed_record}
 
   defp pack(tag, version, value),
     do: :erlang.term_to_binary({tag, version, encode_fields(Map.from_struct(value))})
@@ -133,13 +143,39 @@ defmodule Slap.Streams.Store.Codec do
   defp encode_value(fields) when is_map(fields), do: encode_fields(fields)
   defp encode_value(value), do: value
 
-  defp decode_fields(fields),
-    do: Map.new(fields, fn {key, value} -> {key, decode_value(value)} end)
+  # Introspection parses corrupt records, so a field set that `struct!/2`
+  # would reject is an error here.
+  defp build(module, fields) do
+    with {:ok, fields} <- decode_fields(fields) do
+      spec = module.__info__(:struct)
+      names = Enum.map(spec, & &1.field)
 
-  defp decode_value({tag, fields}) when is_atom(tag) and is_map(fields),
-    do: struct!(Map.fetch!(@nested_types, tag), decode_fields(fields))
+      if Enum.all?(Map.keys(fields), &(&1 in names)) and
+           Enum.all?(spec, &(not &1.required or Map.has_key?(fields, &1.field))),
+         do: {:ok, struct!(module, fields)},
+         else: {:error, :malformed_record}
+    end
+  end
 
-  defp decode_value(%_{}), do: raise(ArgumentError, "untagged stored struct")
+  defp decode_fields(fields) when is_map(fields) do
+    Enum.reduce_while(fields, {:ok, %{}}, fn {key, value}, {:ok, acc} ->
+      case decode_value(value) do
+        {:ok, value} -> {:cont, {:ok, Map.put(acc, key, value)}}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp decode_fields(_fields), do: {:error, :malformed_record}
+
+  defp decode_value({tag, fields}) when is_atom(tag) and is_map(fields) do
+    case Map.fetch(@nested_types, tag) do
+      {:ok, module} -> build(module, fields)
+      :error -> {:error, :malformed_record}
+    end
+  end
+
+  defp decode_value(%_{}), do: {:error, :malformed_record}
   defp decode_value(fields) when is_map(fields), do: decode_fields(fields)
-  defp decode_value(value), do: value
+  defp decode_value(value), do: {:ok, value}
 end

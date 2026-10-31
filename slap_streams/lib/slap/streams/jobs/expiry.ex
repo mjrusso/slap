@@ -43,7 +43,7 @@ defmodule Slap.Streams.Jobs.Expiry do
 
     due =
       ctx.db
-      |> SlateDB.scan(gte: Keys.type_prefix(0x05), lt: Keys.expiry(now + 1, 0))
+      |> SlateDB.scan(gte: Keys.prefix(:expiry), lt: Keys.expiry(now + 1, 0))
       |> Enum.take(@batch)
 
     # The entries are of different streams, so their checks are

@@ -41,7 +41,7 @@ defmodule Slap.Streams.Jobs.Deleter do
   end
 
   defp run(state) do
-    pending = pending(state.ctx.db, 0x06)
+    pending = pending(state.ctx.db, :delete_pending)
     Streams.ShardLoad.set_backlog(state.ctx, :delete, length(pending))
     Enum.each(pending, &delete_stream(state, &1))
     Streams.ShardLoad.set_backlog(state.ctx, :delete, 0)
@@ -54,9 +54,9 @@ defmodule Slap.Streams.Jobs.Deleter do
 
   # A non-durable marker may disappear after a crash. Deleting its rows
   # would then lose acknowledged data.
-  defp pending(db, type) do
+  defp pending(db, kind) do
     db
-    |> SlateDB.scan(prefix: Keys.type_prefix(type), durability: :remote)
+    |> SlateDB.scan(prefix: Keys.prefix(kind), durability: :remote)
     |> Enum.to_list()
   end
 
@@ -93,7 +93,7 @@ defmodule Slap.Streams.Jobs.Deleter do
     %{ctx: %{db: db}, page: page} = state
 
     trimmed =
-      for {key, <<offset::64>>} <- pending(db, 0x0A), into: %{} do
+      for {key, <<offset::64>>} <- pending(db, :reclaim), into: %{} do
         sid = Keys.decode_sid(key)
         if Map.get(state.trimmed, sid) != offset, do: trim_below(db, sid, 0, offset, page)
         {sid, offset}

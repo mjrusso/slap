@@ -2,16 +2,23 @@
 
 ## Unreleased
 
-- Fixes stream bodies of exactly 1 GiB being treated as empty.
-- Create forks by reference, with no limit on inherited data size. Replace
-  `:max_fork_copy_bytes` with `:max_fork_depth` (default 8; HTTP 400 when exceeded).
-- Rename `:fork_copy_grace` to `:creation_grace` for pending forks and copies.
-- Forks retain inherited data after source trim, deletion and expiry, including
-  through deleted forks. Reading that data requires the ancestor shards to be
-  available.
-- Add `Slap.Streams.copy/3` for independent copies that preserve offsets.
-  Retry the same request to resume an interrupted copy. See the
-  [copy options and expiry rules](README.md#lifecycle).
+- Adds read-only stream and retention inspection for
+  [Slap Inspect](https://hexdocs.pm/slap_inspect/).
+- Forks now read their inherited messages from the source's storage instead
+  of copying them, so creation time does not depend on how many messages a
+  fork inherits. Reading those
+  messages needs the source's shards to be available. The source keeps them
+  after it is trimmed, deleted or expires, until the fork and every fork made
+  from it are removed.
+- Breaking change: replaces `:max_fork_copy_bytes` with `:max_fork_depth`
+  (default 8), which limits chains of forks. A deeper fork returns HTTP 400.
+- Breaking change: renames `:fork_copy_grace` to `:creation_grace`. It applies
+  to pending forks and copies.
+- Adds `Slap.Streams.copy/3`, which copies a stream into one with its own
+  storage and the same offsets. Call it again with the same arguments to
+  continue a copy that timed out.
+- Fixes bodies of exactly 1 GiB being treated as empty on OTP 29.1.1, which
+  could close a stream and discard the body.
 
 ### Required store upgrade
 

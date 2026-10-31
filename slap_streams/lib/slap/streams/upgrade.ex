@@ -27,7 +27,7 @@ defmodule Slap.Streams.Upgrade do
     error in SlateDB.Error -> {:error, error}
   end
 
-  defp rows(db), do: SlateDB.scan(db, prefix: <<0x01>>, durability: :remote)
+  defp rows(db), do: SlateDB.scan(db, prefix: Keys.prefix(:meta), durability: :remote)
 
   defp preflight(db) do
     each(rows(db), fn row ->
