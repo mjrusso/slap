@@ -23,6 +23,11 @@ defmodule Slap.Yjs.PresenceTest do
     end
   end
 
+  defp load_doc(doc_id) do
+    {:ok, server} = Yjs.Docs.join(Server, doc_id)
+    Yjs.Docs.leave(server)
+  end
+
   defp next_entries(doc_id) do
     assert_receive {:slap_yjs_awareness, ^doc_id, update}, 2_000
     {:ok, entries} = Awareness.decode(update)
@@ -239,6 +244,7 @@ defmodule Slap.Yjs.PresenceTest do
 
   test "retries an unavailable shard while keeping its client id and latest state" do
     doc_id = doc_id()
+    :ok = load_doc(doc_id)
     observer = start_supervised!({Server, doc_id: doc_id})
     :ok = Yjs.DocServer.subscribe(observer, self(), 5_000)
 
@@ -270,6 +276,7 @@ defmodule Slap.Yjs.PresenceTest do
 
   test "owner exit while retrying a join stops presence without a supervisor restart" do
     doc_id = doc_id()
+    :ok = load_doc(doc_id)
     observer = start_supervised!({Server, doc_id: doc_id})
     :ok = Yjs.DocServer.subscribe(observer, self(), 5_000)
     owner = owner()

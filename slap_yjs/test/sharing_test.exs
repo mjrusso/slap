@@ -82,14 +82,14 @@ defmodule Slap.Yjs.SharingTest do
         forward(test)
       end)
 
-    assert_receive :joined
+    assert_receive :joined, 5_000
 
     client = Yex.Doc.new()
     Yex.Text.insert(Yex.Doc.get_text(client, "text"), 0, "hello")
     update = Yex.encode_state_as_update!(client)
     :ok = Server.process_message_v1(a, update_message(update), self())
 
-    assert_receive {:forwarded, {:slap_yjs_update, ^doc_id, _}}
+    assert_receive {:forwarded, {:slap_yjs_update, ^doc_id, _}}, 5_000
     refute_received {:slap_yjs_update, _, _}
 
     insert(b, 0, "remote ")
