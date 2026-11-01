@@ -1,4 +1,4 @@
-![Slap logo](assets/slap.png)
+![Slap logo](site/assets/slap.png)
 
 ***Slap it in a bucket!*** Use object storage as a database.
 

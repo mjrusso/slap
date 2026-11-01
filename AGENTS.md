@@ -73,6 +73,9 @@ behaviour. `just streams-bench` runs the official Durable Streams benchmarks
 against `mix slap.server` and the official Caddy server. `RELEASING.md`
 describes releases, through `just release-status`, `just release-tags` and
 `just publish`.
+`site/` holds the GitHub Pages site. The `site` workflow copies it to the
+`gh-pages` branch on pushes to main, next to the benchmark results in
+`dev/`; do not edit `gh-pages` by hand.
 
 ## Checks
 
