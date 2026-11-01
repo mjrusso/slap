@@ -1,0 +1,48 @@
+# Publishes site/ to the gh-pages branch, which GitHub Pages serves.
+#
+# The benchmark workflows also push results to dev/ on that branch. This
+# workflow copies files without deleting any, and rebases and retries its
+# push if a benchmark push lands first.
+name: site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/site.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: site
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish site to gh-pages
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          path: main
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: gh-pages
+          path: gh-pages
+      - name: Commit and push
+        working-directory: gh-pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          cp -R ../main/site/. .
+          git add .
+          git diff --cached --quiet && exit 0
+          git commit -m "Publish site from ${GITHUB_SHA}"
+          for _ in 1 2 3; do
+            git push origin HEAD:gh-pages && exit 0
+            git pull --rebase origin gh-pages
+          done
+          exit 1
