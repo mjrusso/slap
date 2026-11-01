@@ -61,7 +61,7 @@ definitely did not take effect, and `:info` when its outcome is uncertain. For
 example, a write can commit and then lose its HTTP reply. A timeout cannot
 prove that the write failed. The checker must consider both possible outcomes
 of that `:info` write. An uncertain write does **not** by itself make the
-whole run inconclusive; later reads can sometimes determine what happened.
+verdict `:unknown`; later reads can sometimes determine what happened.
 
 ### A small Clojure reading guide
 
@@ -281,8 +281,8 @@ duplicate or a list that cannot fit any allowed order is evidence of a bug.
 After recovery, the
 [`list/final-generator`](src/jepsen/slap/list.clj)
 asks every client thread to read every key touched during the trial. Its
-checker verifies that each read was both scheduled and completed. This makes
-missing final observations inconclusive instead of silently passing.
+checker verifies that each read was both scheduled and completed. A missing
+final read makes the verdict `:unknown` instead of letting the test pass.
 
 **What a pass supports.** The observed stream lists fit the selected ordering
 rule, and every client could read each touched stream after recovery. A pass
