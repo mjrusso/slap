@@ -359,28 +359,39 @@ attempts with `incomplete`.
 
 ## Reads and errors
 
-The inspector reads through the owner's open database handle; it never opens
-a database or starts a writer, so it can read a store only while a running
-cluster has it open. Reads return data that SlateDB has written to object
-storage, which can include writes whose callers have not been answered yet,
-or never will be. Pages and object lookups can see different states, so a
-missing row or object alone does not mean corruption. Malformed and truncated
-records are shown with their bytes and a diagnostic.
+Inspection requires a running cluster with the store open. The inspector
+reads through the database handle of the node that owns the shard (its
+owner). It never opens a database or starts a writer.
 
-Each node runs one inspection request at a time, across all its clusters. Reads
-have a five-second budget by default (`--budget MS`, at most 30000), checked
-between storage calls, so a call in progress can take longer. While a read is
-stalled, the terminal keeps at most one more request waiting, and a new
-request replaces it; `--json` exits with a stalled-read error. Quitting or
-disconnecting does not cancel a read on the owner. Press `r` to retry a busy
-owner.
+Reads return data that SlateDB has written to object storage. A durable
+write can appear before its caller receives confirmation, including when
+that confirmation is lost. Separate pages and object lookups do not share
+one snapshot: data can change between reads, so a missing row or object alone
+does not establish corruption. Malformed and truncated records are shown
+with their bytes and a diagnostic.
 
-Remote failures report the node, the function called, the kind (`error`,
-`exit` or `throw`), a summary of the reason, and up to eight stack frames,
-without argument values. A server without inspection support reports
-`owner_does_not_support_inspection`; one with another inspection API version
-reports `unsupported_api` and its version: upgrade the inspector or the
-server so they match.
+Reads have a five-second budget by default; Yjs content reconstruction has
+ten seconds. Set `--budget MS` to change it, up to 30,000 ms. The budget is
+checked between storage calls, so a call in progress can run past it.
+
+If a read stalls, the terminal waits for it to finish. You can submit another
+request while waiting; only the latest waiting request is kept. With
+`--json`, the inspector exits with `owner_read_stalled`. Quitting or
+disconnecting does not cancel the read on the owner.
+
+Each node runs one inspection request at a time across all its clusters.
+Another request to that node fails with `busy` while the first is running.
+In the terminal, press `r` to retry after the node finishes its current read.
+
+If the server reports `owner_does_not_support_inspection`, it needs a version
+with inspection support. If it reports `unsupported_api`, upgrade the
+inspector or server so their inspection API versions match; the error
+includes the server's inspection API version.
+
+Remote exceptions include diagnostics: the node, the function called, the
+kind (`error`, `exit` or `throw`), a summary of the reason, and up to eight
+stack frames without argument values. In the terminal, press `e` to view
+error diagnostics.
 
 ## Development
 
