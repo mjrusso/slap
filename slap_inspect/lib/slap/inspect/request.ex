@@ -37,6 +37,19 @@ defmodule Slap.Inspect.Request do
   def read_limits, do: @read_limits
   def page_options, do: @page
 
+  @doc "`request` for the page after `page`, or nil when `page` is the last."
+  def next(request, %{cursor: cursor} = page) when is_binary(cursor),
+    do: %{
+      request
+      | opts:
+          Keyword.merge(request.opts,
+            cursor: cursor,
+            cursor_exclusive: page[:cursor_exclusive] || false
+          )
+    }
+
+  def next(_request, _page), do: nil
+
   @doc "A request for the cluster's shards, for the shard picker."
   def shards, do: %{view: :shards, budget: 5000}
 

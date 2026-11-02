@@ -24,7 +24,7 @@ defmodule Slap.Inspect.View.Navigation do
     assign(term, selected: row && Rows.id(row), preview: nil, byte_history: [])
   end
 
-  def next_page(%{assigns: %{page: %{cursor: cursor}}} = term) when is_binary(cursor) do
+  def next_page(%{assigns: %{page: %{cursor: cursor} = page}} = term) when is_binary(cursor) do
     request = term.assigns.request
 
     history = [
@@ -33,17 +33,7 @@ defmodule Slap.Inspect.View.Navigation do
 
     {:noreply,
      term
-     |> assign(
-       request: %{
-         request
-         | opts:
-             Keyword.merge(request.opts,
-               cursor: cursor,
-               cursor_exclusive: term.assigns.page[:cursor_exclusive] || false
-             )
-       },
-       history: history
-     )
+     |> assign(request: Request.next(request, page), history: history)
      |> Read.page()}
   end
 
