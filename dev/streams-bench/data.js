@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793631492072,
+  "lastUpdate": 1793631493792,
   "repoUrl": "https://github.com/mjrusso/slap",
   "entries": {
     "Durable Streams (lower is better)": [
@@ -2661,6 +2661,90 @@ window.BENCHMARK_DATA = {
           {
             "name": "slap-s3: Throughput - Large Messages min",
             "value": 51.317587579831766,
+            "unit": "msg/sec"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "mjr@mjrusso.com",
+            "name": "Michael Russo",
+            "username": "mjrusso"
+          },
+          "committer": {
+            "email": "mjr@mjrusso.com",
+            "name": "Michael Russo",
+            "username": "mjrusso"
+          },
+          "distinct": true,
+          "id": "d7ed350f04f1b1e8e4bd929289d6a6510a74035a",
+          "message": "chore(slap): prepare 0.5.0 release",
+          "timestamp": "2026-11-02T09:48:24-05:00",
+          "tree_id": "ab9740190cf9e69ca187e78f89ee6212a26d903d",
+          "url": "https://github.com/mjrusso/slap/commit/d7ed350f04f1b1e8e4bd929289d6a6510a74035a"
+        },
+        "date": 1793631493343,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "caddy-file: Throughput - Small Messages p50",
+            "value": 49752.295757496904,
+            "unit": "msg/sec"
+          },
+          {
+            "name": "slap-local: Throughput - Small Messages p50",
+            "value": 3229.6250978197136,
+            "unit": "msg/sec"
+          },
+          {
+            "name": "slap-s3: Throughput - Small Messages p50",
+            "value": 3232.9818985019942,
+            "unit": "msg/sec"
+          },
+          {
+            "name": "caddy-file: Throughput - Small Messages min",
+            "value": 3854.984771133205,
+            "unit": "msg/sec"
+          },
+          {
+            "name": "slap-local: Throughput - Small Messages min",
+            "value": 1500.5140956358437,
+            "unit": "msg/sec"
+          },
+          {
+            "name": "slap-s3: Throughput - Small Messages min",
+            "value": 3206.1105183422246,
+            "unit": "msg/sec"
+          },
+          {
+            "name": "caddy-file: Throughput - Large Messages p50",
+            "value": 152.69296396197015,
+            "unit": "msg/sec"
+          },
+          {
+            "name": "slap-local: Throughput - Large Messages p50",
+            "value": 80.92243090561693,
+            "unit": "msg/sec"
+          },
+          {
+            "name": "slap-s3: Throughput - Large Messages p50",
+            "value": 63.35935665578295,
+            "unit": "msg/sec"
+          },
+          {
+            "name": "caddy-file: Throughput - Large Messages min",
+            "value": 87.43120750845495,
+            "unit": "msg/sec"
+          },
+          {
+            "name": "slap-local: Throughput - Large Messages min",
+            "value": 61.711595641651904,
+            "unit": "msg/sec"
+          },
+          {
+            "name": "slap-s3: Throughput - Large Messages min",
+            "value": 46.56281698889044,
             "unit": "msg/sec"
           }
         ]
