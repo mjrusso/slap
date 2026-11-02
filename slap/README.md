@@ -119,11 +119,13 @@ its own terminal. It creates a private cookie file and removes it on normal
 exit.
 
 Data is lost when the VM exits. Stop the demo with Ctrl+C, then `a`.
-For a finite run or a different update interval:
+To stop the updates after a number of ticks, or to change the interval:
 
 ```sh
 mix run examples/kitchen_sink.exs --ticks 10 --interval 250
 ```
+
+After the last tick the demo keeps running. Add `--exit` to exit instead.
 
 The same options work with `elixir kitchen_sink.exs`.
 

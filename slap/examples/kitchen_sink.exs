@@ -37,11 +37,16 @@ defmodule Slap.Examples.KitchenSink do
   defp options(["--help"]), do: :help
 
   defp options(args) do
-    with {opts, [], []} <- OptionParser.parse(args, strict: [interval: :integer, ticks: :integer]),
+    with {opts, [], []} <-
+           OptionParser.parse(args,
+             strict: [interval: :integer, ticks: :integer, exit: :boolean]
+           ),
          interval = Keyword.get(opts, :interval, 1000),
          ticks = Keyword.get(opts, :ticks, :infinity),
-         true <- interval > 0 and (ticks == :infinity or ticks > 0) do
-      {:ok, %{interval: interval, ticks: ticks}}
+         exit? = Keyword.get(opts, :exit, false),
+         true <- interval > 0 and (ticks == :infinity or ticks > 0),
+         true <- not exit? or ticks != :infinity do
+      {:ok, %{interval: interval, ticks: ticks, exit: exit?}}
     else
       _ -> :error
     end
@@ -49,8 +54,11 @@ defmodule Slap.Examples.KitchenSink do
 
   defp usage(device) do
     IO.puts(device, """
-    mix run examples/kitchen_sink.exs [--interval MS] [--ticks N]
-    elixir kitchen_sink.exs [--interval MS] [--ticks N]
+    mix run examples/kitchen_sink.exs [--interval MS] [--ticks N [--exit]]
+    elixir kitchen_sink.exs [--interval MS] [--ticks N [--exit]]
+
+    --ticks N stops the updates after N ticks and keeps the data available
+    until Ctrl+C. With --exit, the demo exits after the last tick instead.
     """)
   end
 
@@ -192,6 +200,11 @@ defmodule Slap.Examples.KitchenSink do
 
         if state.tick == opts.ticks do
           IO.puts("Completed #{state.tick} timed updates.")
+
+          unless opts.exit do
+            IO.puts("Data stays available until Ctrl+C, then a.")
+            Process.sleep(:infinity)
+          end
         else
           Process.send_after(self(), :tick, opts.interval)
           loop(state, opts)
