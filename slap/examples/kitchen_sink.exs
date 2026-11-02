@@ -8,11 +8,43 @@ defmodule Slap.Examples.DemoDoc do
   use Slap.Yjs.DocServer
 end
 
+defmodule Slap.Examples.CounterCluster do
+  use Slap.Cluster, otp_app: :slap
+end
+
+# The shard child is the one writer of its shard's database. Callers reach it
+# through Slap.Cluster.call/4, which runs put/2 on the node that owns the shard.
+defmodule Slap.Examples.Counter do
+  @behaviour Slap.Cluster.ShardChildren
+
+  use GenServer
+
+  alias Slap.{Cluster, SlateDB}
+
+  @impl Slap.Cluster.ShardChildren
+  def child_specs(ctx), do: [{__MODULE__, ctx}]
+
+  def start_link(ctx), do: GenServer.start_link(__MODULE__, ctx.db, name: name(ctx))
+
+  def put(ctx, value), do: GenServer.call(name(ctx), {:put, value}, 30_000)
+
+  defp name(ctx), do: Cluster.via(ctx.cluster, ctx.n, __MODULE__)
+
+  @impl GenServer
+  def init(db), do: {:ok, db}
+
+  @impl GenServer
+  def handle_call({:put, value}, _from, db) do
+    {:ok, _} = SlateDB.put(db, "counter", value, await_durable: true)
+    {:reply, :ok, db}
+  end
+end
+
 defmodule Slap.Examples.KitchenSink do
   @moduledoc false
 
   alias Slap.{Cluster, Files, KV, SlateDB, SnapshotLog, Streams, Yjs}
-  alias Slap.Examples.DemoDoc
+  alias Slap.Examples.{Counter, CounterCluster, DemoDoc}
   alias Slap.Files.Config
 
   @events "/demo/events"
@@ -57,8 +89,9 @@ defmodule Slap.Examples.KitchenSink do
     mix run examples/kitchen_sink.exs [--interval MS] [--ticks N [--exit]]
     elixir kitchen_sink.exs [--interval MS] [--ticks N [--exit]]
 
-    --ticks N stops the updates after N ticks and keeps the data available
-    until Ctrl+C. With --exit, the demo exits after the last tick instead.
+    The demo exits when you press Enter. --ticks N stops the updates after
+    N ticks and keeps the data until you press Enter. With --exit, the demo
+    exits after the last tick instead.
     """)
   end
 
@@ -71,20 +104,24 @@ defmodule Slap.Examples.KitchenSink do
       {Streams.Cluster, store: :memory, path: "demo-streams", shards: 2},
       {KV.Cluster, store: :memory, path: "demo-kv", shards: 2},
       {Files, store: :memory, path: "demo-files", retention_ms: 5000},
-      Yjs.Docs
+      Yjs.Docs,
+      {CounterCluster,
+       store: :memory,
+       path: "demo-counter",
+       shards: 1,
+       shard_children: {Counter, :child_specs, []}}
     ]
 
     {:ok, supervisor} = Supervisor.start_link(children, strategy: :one_for_one)
-    {:ok, db} = SlateDB.open("demo-native", store: :memory)
 
     try do
-      state = seed(db)
       instructions(opts)
+      exit_on_enter()
+      state = seed()
       Process.send_after(self(), :tick, opts.interval)
       loop(state, opts)
     after
       :ok = Supervisor.stop(supervisor, :normal, 30_000)
-      :ok = SlateDB.close(db)
     end
   end
 
@@ -105,7 +142,7 @@ defmodule Slap.Examples.KitchenSink do
     end
   end
 
-  defp seed(db) do
+  defp seed do
     body = JSON.encode!(%{event: "started", tick: 0})
     {:ok, :created, _} = Streams.create(@events, content_type: "application/json", body: body)
     {:ok, :created, _} = Streams.create(@fork, forked_from: @events)
@@ -113,7 +150,6 @@ defmodule Slap.Examples.KitchenSink do
     {:ok, doc} = Yjs.DocServer.doc(server, 5000)
 
     state = %{
-      db: db,
       server: server,
       doc: doc,
       tick: 0,
@@ -132,13 +168,14 @@ defmodule Slap.Examples.KitchenSink do
     tick = state.tick
     event = %{event: "tick", tick: tick, at: DateTime.to_iso8601(DateTime.utc_now())}
     body = JSON.encode!(event)
-    {:ok, _} = SlateDB.put(state.db, "counter", Integer.to_string(tick), await_durable: true)
-    {:ok, counter} = SlateDB.get(state.db, "counter", durability: :remote)
+    {:ok, :ok} = CounterCluster.call(0, {Counter, :put, [Integer.to_string(tick)]})
     {:ok, _} = Streams.append(@events, body)
     {:ok, _} = Streams.append(@fork, JSON.encode!(Map.put(event, :branch, "fork")))
     {:ok, offset} = SnapshotLog.append(@log, body)
 
-    if rem(tick, 5) == 0 do
+    snapshot? = rem(tick, 5) == 0
+
+    if snapshot? do
       snapshot = JSON.encode!(%{count: tick + 1, last_event: event})
       :ok = SnapshotLog.snapshot(@log, offset, snapshot)
     end
@@ -170,9 +207,7 @@ defmodule Slap.Examples.KitchenSink do
         storage: :object
       )
 
-    IO.puts(
-      "Tick #{tick}: streams, fork, log, Yjs, KV and both files updated; SlateDB counter=#{counter}"
-    )
+    IO.puts(if snapshot?, do: "Tick #{tick} (log snapshot)", else: "Tick #{tick}")
 
     %{
       state
@@ -188,20 +223,45 @@ defmodule Slap.Examples.KitchenSink do
         state = write(%{state | tick: state.tick + 1})
 
         if state.tick == opts.ticks do
-          IO.puts("Completed #{state.tick} timed updates.")
-
-          unless opts.exit do
-            IO.puts("Data stays available until Ctrl+C, then a.")
-            Process.sleep(:infinity)
-          end
+          finish(state, opts)
         else
           Process.send_after(self(), :tick, opts.interval)
           loop(state, opts)
         end
 
+      :exit ->
+        :ok
+
       {:slap_yjs_update, _document, _update} ->
         loop(state, opts)
     end
+  end
+
+  defp finish(state, %{exit: true}), do: IO.puts("Completed #{state.tick} ticks.")
+
+  defp finish(state, _opts) do
+    IO.puts("Completed #{state.tick} ticks. Press Enter to exit.")
+    await_exit()
+  end
+
+  defp await_exit do
+    receive do
+      :exit -> :ok
+      {:slap_yjs_update, _document, _update} -> await_exit()
+    end
+  end
+
+  # Without a terminal, stdin reaches end of file at once; the demo then
+  # keeps running until the VM is stopped.
+  defp exit_on_enter do
+    demo = self()
+
+    spawn_link(fn ->
+      case IO.gets("") do
+        line when is_binary(line) -> send(demo, :exit)
+        _eof_or_error -> :ok
+      end
+    end)
   end
 
   defp instructions(opts) do
@@ -211,18 +271,25 @@ defmodule Slap.Examples.KitchenSink do
     partition = Config.partition(Config.get(), :record, "demo")
 
     IO.puts("""
+    Slap kitchen sink demo on node #{Node.self()}
 
-    Kitchen sink demo: all application data is in memory and is lost on exit.
-    Updating every #{opts.interval} ms. Stop with Ctrl+C, then a.
-    Streams shards: #{inspect(Cluster.local_shards(Streams.Cluster))}
-    KV shards: #{inspect(Cluster.local_shards(KV.Cluster))}
+    All data is in memory and is lost when the demo exits.
+    Press Enter to exit.
 
-    Inspect from another terminal (install with: mix escript.install hex slap_inspect):
+    Every #{opts.interval} ms, the demo:
+
+      - appends to the stream #{@events} and its fork #{@fork}
+      - appends to the snapshot log #{@log}, with a snapshot every 5 ticks
+      - edits the Yjs document #{elem(@document, 0)}/#{elem(@document, 1)}
+      - updates the KV row demo/counter
+      - updates two files: demo/status.json (inline) and demo/report.txt (object)
+      - writes the tick number to the one shard of #{inspect(CounterCluster)}
+
+    Inspect from another terminal:
 
       #{connection}
 
-    The inspector lists Slap.Streams.Cluster and Slap.KV.Cluster with their views.
-    To open a view directly, add a command:
+    Or open one view:
 
       Streams: #{connection} streams --shard #{shard}
       Fork:    #{connection} logical --path #{@fork}
@@ -230,11 +297,15 @@ defmodule Slap.Examples.KitchenSink do
       Yjs:     #{connection} yjs --base #{Yjs.Store.base(@document)}
       KV:      #{connection} kv --partition demo
       Files:   #{connection} files --partition #{partition}
+      Counter: #{connection} --cluster #{inspect(CounterCluster)} scan --shard 0
       Raw:     #{connection} --cluster Slap.Streams.Cluster scan --shard #{shard}
 
-    Add --json to any command to print one page and exit.
-    In the Fork view, press n to move from inherited data to the fork's own updates.
-    The standalone SlateDB handle is separate from the inspected cluster handles.
+    Add --json to a command to print one page and exit.
+
+    In the Fork view, the first pages show messages inherited from
+    #{@events}. Press n to reach the fork's own updates.
+
+    Install the inspector with: mix escript.install hex slap_inspect
     """)
 
     unless Code.ensure_loaded?(Slap.Streams.Introspect) do

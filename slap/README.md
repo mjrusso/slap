@@ -112,8 +112,8 @@ MIX_ENV=prod mix escript.build
 
 Then run the demo's commands with `./slap-inspect` in place of `slap-inspect`.
 
-In the Streams view, the fork's first pages show the messages it inherits from
-its source; press `n` to reach its own updates. See
+In the Fork view, the first pages show the messages the fork inherits from its
+source; press `n` to reach its own updates. See
 [Browse a Streams cluster](https://hexdocs.pm/slap_inspect/readme.html#browse-a-streams-cluster)
 for the keys.
 
@@ -124,18 +124,22 @@ document, KV rows, and inline and object-backed files. It publishes a log
 snapshot every five ticks. During setup, it also attempts a KV write that
 is rejected as a conflict.
 
-The demo also updates a counter in a standalone SlateDB database. The
-inspector reads only cluster databases, so the demo prints that counter in
-its own terminal.
+The demo also runs a third cluster, `Slap.Examples.CounterCluster`, built
+directly on `slap_cluster`. It has one shard, and the shard's child process
+writes the tick number to the shard's SlateDB database. The demo prints a
+`slap-inspect` command that scans this shard.
 
-Data is lost when the VM exits. Stop the demo with Ctrl+C, then `a`.
+Data is lost when the demo exits. Press Enter to exit. Without a terminal on
+stdin, the demo runs until the VM is stopped.
+
 To stop the updates after a number of ticks, or to change the interval:
 
 ```sh
 mix run examples/kitchen_sink.exs --ticks 10 --interval 250
 ```
 
-After the last tick the demo keeps running. Add `--exit` to exit instead.
+After the last tick, the demo keeps its data until you press Enter. Add
+`--exit` to exit after the last tick instead.
 
 The same options work with `elixir kitchen_sink.exs`.
 
