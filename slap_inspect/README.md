@@ -109,8 +109,7 @@ The inspector uses long names when the host in `--node` contains a dot, as in
 `my_app@127.0.0.1`. For a long name without a dot, such as
 `my_app@localhost`, pass `--longnames`. The inspector's machine must be able
 to reach the distributed Erlang ports of the entry node and the nodes that own
-its shards. The inspector finds the shard owners
-automatically.
+its shards.
 
 A server started without `--cookie` uses the default cookie of the user that
 runs it. If the inspector runs as that user on the same machine, omit
@@ -176,8 +175,7 @@ ports as you would access to a remote console.
 ### Standalone Slap server
 
 If you use `mix slap.server`, its cluster modules are `Slap.Streams.Cluster`
-and `Slap.KV.Cluster`, and one inspector session browses both. An unnamed server must be restarted with `--sname`
-or `--name` before the inspector can connect.
+and `Slap.KV.Cluster`, and one inspector session browses both.
 
 A local server and the inspector both use Erlang's default cookie,
 `~/.erlang.cookie`, which Erlang creates if it does not exist. In a Mix
@@ -220,10 +218,10 @@ data until some is written through its HTTP or Elixir APIs.
 
 ## Commands
 
-Add a command after the connection options. It opens the terminal UI; with
-`--json`, it writes one JSON object and exits. JSON encodes raw binaries as
-hexadecimal strings and preserves reconstructed document content as JSON.
-Errors exit nonzero. Omitting the command opens the raw `scan` view.
+Add a command after the connection options; without one, the inspector opens
+the raw `scan` view. JSON encodes every binary as a hexadecimal string,
+including paths, partition names and keys; reconstructed document content
+stays JSON. Errors exit nonzero.
 
 `scan` and `get` return raw keys and values. Use `streams`, `kv` or `files`
 for decoded records.
@@ -250,8 +248,8 @@ or press `s` in the terminal. Path and partition lookups route automatically.
 ### Streams, snapshot logs and Yjs
 
 `--sid` is the numeric stream ID shown in stream metadata. `--from N` and
-`--until N` limit `messages`, `logical` and `log` to the stream offsets from
-`--from` (inclusive) to `--until` (exclusive).
+`--until N` limit `messages`, `logical`, `log --component` and `yjs` to the
+stream offsets from `--from` (inclusive) to `--until` (exclusive).
 
 A source registration is a row stored with a stream for each fork or copy
 that reads its messages. While the row exists, the messages it covers are not
@@ -274,13 +272,8 @@ make a `logical` lookup fail if the path now names a stream with another ID.
 Following a registration with `f` adds this option to the query.
 
 `logical` lists the records a fork inherits first, then its own records. The
-pages share one cursor: pass the hexadecimal cursor from a page back unchanged
-to read the next one. `lineage` in the result lists the source streams the
+pages share one cursor. `lineage` in the result lists the source streams the
 inherited records came from.
-
-Each page names the node that owns the shard, the shard number, and the
-shard's durable sequence number (`durable_seq`). A read includes only writes
-up to that sequence number.
 
 ### Files
 
@@ -289,7 +282,9 @@ Files partition name. File records for the Files partition `users` are in
 `files-ns:<namespace>:record:users`, where `<namespace>` is the Files
 namespace in unpadded URL-safe Base64. With the default namespace, that is
 `files-ns:ZGVmYXVsdA:record:users`. Upload intents and object registrations
-are in partitions with `intent` and `object` in place of `record`.
+are spread over 64 partitions per namespace, not by Files partition:
+`files-ns:<namespace>:intent:N` and `files-ns:<namespace>:object:N`, for N
+from 0 to 63.
 
 For object previews from a named Files instance, pass
 `--instance MyApp.Files`.
@@ -304,9 +299,31 @@ if the page reports `cursor_exclusive: true`. With `--json`, when a page has
 a cursor, the inspector also writes the command for the next page to stderr,
 after `Next page: `.
 
+Terminal pages default to 200 rows and a 1 MiB target, and `--json`
+listings to 50 rows and 256 KiB. A page includes the row that crosses its
+target. Single-record reads, Yjs content, `log --base` without
+`--component`, and `yjs --base` always use the terminal defaults. Previews
+are capped at 4 KiB per key and 512 KiB per value. Use `--limit`,
+`--target-bytes`, `--max-key-bytes` and `--max-value-bytes` to lower these
+limits. SlateDB still loads full rows in native memory. Malformed or truncated
+records are shown with their bytes and a diagnostic.
+
+A key longer than `--max-key-bytes` is shown cut to that length, and the page
+ends at it. The next page starts after every key that begins with the shown
+bytes, so those keys are skipped, and a cut key cannot be fetched or
+followed. If you lowered `--max-key-bytes`, raise it to read these keys. Keys
+longer than 4 KiB, the maximum, are always cut.
+
 `--offset N --length N` selects a byte range for `get` or `object`. Offsets
-must be nonnegative; lengths cannot exceed `--max-value-bytes` (at most
-512 KiB). Object ranges require a positive length; `get` also accepts zero.
+must be nonnegative. Without `--length`, a range is 4096 bytes, or
+`--max-value-bytes` if that is smaller. `object` rejects a length above
+`--max-value-bytes` (default and maximum 512 KiB); `get` rejects it only when
+`--max-value-bytes` is given, and otherwise returns at most 512 KiB. Object
+ranges require a positive length; `get` also accepts zero.
+
+Each page names the node that owns the shard, the shard number, and the
+shard's durable sequence number (`durable_seq`). A read includes only writes
+up to that sequence number.
 
 A page's `hard_max_bytes` is the size limit on the owner's reply. JSON output
 can be larger, because the inspector adds fields after the reply arrives:
@@ -326,7 +343,7 @@ and `lineage`.
 | `n` / `p` | Next / previous page. |
 | `/` | Edit the current command and filters. |
 | `?` | Keyboard help, including the full query. |
-| `e` | Diagnostics for the last error. |
+| `e` | Diagnostics for the last read, if it failed. |
 | `s` | List and select available shards. |
 | `d` | Cycle bytes, wrapped text and JSON details. |
 | `[` / `]` | Pan details left / right by twenty columns. |
@@ -340,24 +357,29 @@ and `lineage`.
 | `m` / `M` | Load the next / previous byte range. |
 | `q` | Quit. |
 
-`--refresh MS` starts the inspector with timed refresh at that interval.
-Pressing `t` turns it off; pressing `t` again turns it on at five seconds,
-not at the `--refresh` interval. Only the active page refreshes;
-selection is kept when the same key is still present. The header shows the
-active command, refresh interval and last successful read time. Failed
-refreshes keep the previous results and label them `Last good data`.
-Timed refresh skips Yjs content, which displays `Manual reconstruction`;
-press `r` to reconstruct it again after confirmation.
+Timed refresh rereads the current page at a fixed interval. It is off unless
+the inspector starts with `--refresh MS`. When it is on, `t` turns it off;
+when it is off, `t` turns it on at five seconds, even if `--refresh` set
+another interval. It pauses while a read is running or the command editor,
+help, diagnostics, the shard picker or a confirmation is open. It skips Yjs
+content, which displays `Manual reconstruction`; press `r` to reconstruct it
+again after confirmation.
+
+A refresh keeps the selection when the same key is still present. If it
+fails, the previous results stay on screen, labelled `Last good data`. The
+header shows the active command, the refresh interval and the time of the
+last successful read.
 
 Set connection, output and refresh options when starting the inspector. The
 command editor accepts query options only.
 
 In the command editor, Left/Right, Home/End and Backspace/Delete move the
 cursor and edit text. Up/Down recalls submitted commands from this session;
-Ctrl-U clears the input. Enter submits and Escape discards the edit. Quoted
-arguments support escaped quotes, backslashes, `\n`, `\r`, `\t`, two-digit
-`\xHH` byte escapes and four-digit `\uXXXX` escapes. Opaque binary paths use
-byte escapes so submitting the displayed command preserves their bytes.
+Ctrl-U clears the input. Enter submits and Escape discards the edit. Outside
+single quotes, a backslash escapes the next character: `\n`, `\r`, `\t`,
+`\b`, `\f`, two-digit `\xHH` and four-digit `\uXXXX` are recognized, and any
+other escaped character stands for itself. Opaque binary paths use byte
+escapes so submitting the displayed command preserves their bytes.
 Single quotes preserve their contents literally. View shortcuts open the
 command editor when the selected view needs arguments. The status line lists
 the required options, and the editor adds the first one to the command.
@@ -368,7 +390,6 @@ records and details; the pane label and border identify focus. If a refreshed
 record disappears, focus returns to the list with an explanation. Help and
 diagnostics return to the same selection and scroll position with Escape.
 Long record labels stay on one line; open details to inspect the record.
-Help shows the full query when it is clipped in the header.
 
 ## Reading data
 
@@ -441,21 +462,6 @@ object storage. That data can include writes whose callers have not yet
 received a reply, or never will. Pages and object lookups can observe
 different states; a missing row or object alone does not establish
 corruption.
-
-Terminal pages default to 200 rows and a 1 MiB target, and `--json`
-listings to 50 rows and 256 KiB. A page includes the row that crosses its
-target. Single-record reads, Yjs content, `log --base` without
-`--component`, and `yjs --base` always use the terminal defaults. Previews
-are capped at 4 KiB per key and 512 KiB per value. Use `--limit`,
-`--target-bytes`, `--max-key-bytes` and `--max-value-bytes` to lower these
-limits. SlateDB still loads full rows in native memory. Malformed or truncated
-records are shown with their bytes and a diagnostic.
-
-A key longer than `--max-key-bytes` is shown cut to that length, and the page
-ends at it. The next page starts after every key that begins with the shown
-bytes, so those keys are skipped, and a cut key cannot be fetched or
-followed. If you lowered `--max-key-bytes`, raise it to read these keys. Keys
-longer than 4 KiB, the maximum, are always cut.
 
 File summaries include metadata and storage kind. Inline bodies are shown
 as byte counts; their encoded bytes remain in the raw row.
