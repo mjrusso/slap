@@ -36,6 +36,19 @@ defmodule Slap.Inspect.CLITest do
     assert {:error, {:invalid, _message}} = CLI.parse(["clusters" | @connection])
   end
 
+  test "the cookie file is optional, and the node's host selects long names" do
+    assert {:ok, %{cookie_file: nil, name_domain: :shortnames}, :clusters} =
+             CLI.parse(["--node", "slap@host", "clusters"])
+
+    assert {:ok, %{cookie_file: "/cookie", name_domain: :longnames}, :clusters} =
+             CLI.parse(["--node", "slap@127.0.0.1", "--cookie-file", "/cookie", "clusters"])
+
+    assert {:ok, %{name_domain: :longnames}, :clusters} =
+             CLI.parse(["--node", "slap@localhost", "--longnames", "clusters"])
+
+    assert {:error, {:invalid, _message}} = CLI.parse(["--node", "slap", "clusters"])
+  end
+
   test "JSON output reads the one cluster that serves its view, and names the candidates otherwise" do
     streams = %{cluster: Demo.Streams, services: [:streams]}
     kv = %{cluster: Demo.KV, services: [:kv]}

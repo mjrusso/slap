@@ -25,11 +25,9 @@ defmodule Slap.Inspect.Remote do
   def api_version, do: @api_version
 
   def connect(entry, cookie_file, opts) do
-    with {:ok, raw} <- File.read(cookie_file),
-         cookie = String.trim(raw),
-         true <- byte_size(cookie) in 1..255 and String.valid?(cookie),
+    with {:ok, cookie} <- read_cookie(cookie_file),
          :ok <- start_node(opts) do
-      Node.set_cookie(String.to_atom(cookie))
+      set_cookie(cookie)
       if :net_kernel.hidden_connect_node(entry), do: :ok, else: {:error, :connection_failed}
     else
       _ -> {:error, :connection_failed}
@@ -37,6 +35,23 @@ defmodule Slap.Inspect.Remote do
   rescue
     _error in [ArgumentError, SystemLimitError] -> {:error, :connection_failed}
   end
+
+  # Without a cookie file, the node keeps the cookie its VM started with:
+  # -setcookie, or Erlang's default cookie file.
+  defp read_cookie(nil), do: {:ok, nil}
+
+  defp read_cookie(path) do
+    with {:ok, raw} <- File.read(path) do
+      cookie = String.trim(raw)
+
+      if byte_size(cookie) in 1..255 and String.valid?(cookie),
+        do: {:ok, String.to_atom(cookie)},
+        else: {:error, :invalid_cookie}
+    end
+  end
+
+  defp set_cookie(nil), do: true
+  defp set_cookie(cookie), do: Node.set_cookie(cookie)
 
   defp start_node(_opts) when node() != :nonode@nohost, do: :ok
 

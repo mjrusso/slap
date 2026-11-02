@@ -14,12 +14,12 @@ defmodule Slap.Inspect.CLI do
   }
 
   @usage """
-  Usage: slap-inspect --node NODE --cookie-file PATH [--cluster MODULE] [options] [command]
+  Usage: slap-inspect --node NODE [--cookie-file PATH] [--cluster MODULE] [options] [command]
 
   Opens a read-only terminal inspector for the Slap clusters running on NODE.
   Add --json to write one JSON object and exit.
 
-      slap-inspect --node slap@host --cookie-file ~/.slap-cookie
+      slap-inspect --node slap@host
       slap-inspect --node slap@host --cookie-file ~/.slap-cookie --json kv --partition users
       slap-inspect --node slap@host --cookie-file ~/.slap-cookie --cluster MyApp.Cluster scan
 
@@ -35,10 +35,13 @@ defmodule Slap.Inspect.CLI do
   lookups, --path PATH for a stream, --base PATH for a log, --partition NAME
   for KV, and --sid N for messages or retention. --placement-key overrides stream
   routing. --prefix, --key, --key-prefix and --cursor take hexadecimal pairs.
-  Use --offset N --length N for a value or object byte range. --longnames
-  selects long node names. --budget MS defaults to 5000, or 10000 for
-  document content (maximum 30000).
+  Use --offset N --length N for a value or object byte range.
+  --budget MS defaults to 5000, or 10000 for document content (maximum 30000).
   --refresh MS refreshes terminal pages at that interval, except Yjs content.
+
+  Without --cookie-file, the inspector uses Erlang's default cookie
+  (~/.erlang.cookie). It uses long node names when NODE's host contains a
+  dot, as in slap@127.0.0.1; --longnames selects them for other hosts.
 
   Use yjs --content --base PATH --root text:body to read document content.
   Repeat --root TYPE:NAME for text, array, map or xml_fragment roots.
@@ -144,14 +147,27 @@ defmodule Slap.Inspect.CLI do
 
   defp endpoint(opts) do
     with {:ok, entry} <- required(opts, :node),
-         {:ok, cookie_file} <- required(opts, :cookie_file) do
+         {:ok, host} <- host(entry) do
       {:ok,
        %{
          entry: String.to_atom(entry),
-         cookie_file: cookie_file,
-         name_domain: if(opts[:longnames], do: :longnames, else: :shortnames)
+         cookie_file: opts[:cookie_file],
+         name_domain: name_domain(host, opts)
        }}
     end
+  end
+
+  defp host(entry) do
+    case String.split(entry, "@", parts: 2) do
+      [_name, host] -> {:ok, host}
+      _ -> {:error, {:invalid, "--node must be NAME@HOST"}}
+    end
+  end
+
+  # Short names cannot have a dot in the host, so a dot requires long names.
+  # Long names without one (slap@localhost) need --longnames.
+  defp name_domain(host, opts) do
+    if opts[:longnames] || String.contains?(host, "."), do: :longnames, else: :shortnames
   end
 
   defp selection(endpoint, opts, ["clusters"]) do

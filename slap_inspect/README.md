@@ -102,17 +102,23 @@ cookie rather than the server's HTTP address. Supply these options:
 | Option | Value |
 | --- | --- |
 | `--node` | The server's full Erlang node name, such as `my_app@my-host`. To find it, run `Node.self()` in the server's IEx console. |
-| `--cookie-file` | A file on the inspector's machine containing the server's Erlang cookie as text. |
+| `--cookie-file` | Optional. A file on the inspector's machine containing the server's Erlang cookie as text. Without it, the inspector uses Erlang's default cookie, `~/.erlang.cookie`. |
 | `--cluster` | Optional. The module used to start the cluster to read, such as `MyApp.Streams.Cluster` or `MyApp.KV.Cluster`. Without it, the inspector reads every cluster running on the node. |
 
-For a server started with `--name`, also pass `--longnames`. The inspector's
-machine must be able to reach the distributed Erlang ports of the entry node
-and the nodes that own its shards. The inspector finds the shard owners
+The inspector uses long names when the host in `--node` contains a dot, as in
+`my_app@127.0.0.1`. For a long name without a dot, such as
+`my_app@localhost`, pass `--longnames`. The inspector's machine must be able
+to reach the distributed Erlang ports of the entry node and the nodes that own
+its shards. The inspector finds the shard owners
 automatically.
 
-To find the cookie, run `Node.get_cookie()` in the server's IEx console. Save
-the atom's name without a leading colon or surrounding quotes, and restrict the
-file's permissions with `chmod 600 ~/.slap-cookie`.
+A server started without `--cookie` uses the default cookie of the user that
+runs it. If the inspector runs as that user on the same machine, omit
+`--cookie-file`. Otherwise, find the cookie with `Node.get_cookie()` in the
+server's IEx console. Save the atom's name to a file, without a leading colon
+or quotes, and restrict the file's permissions with
+`chmod 600 ~/.slap-cookie`. With the wrong cookie, or a node it cannot reach,
+the inspector exits with `connection_failed`.
 
 Open the inspector, replacing the node name with your application's:
 
@@ -173,26 +179,18 @@ If you use `mix slap.server`, its cluster modules are `Slap.Streams.Cluster`
 and `Slap.KV.Cluster`, and one inspector session browses both. An unnamed server must be restarted with `--sname`
 or `--name` before the inspector can connect.
 
-For a new local server, create a cookie file once:
+A local server and the inspector both use Erlang's default cookie,
+`~/.erlang.cookie`, which Erlang creates if it does not exist. In a Mix
+project that depends on `slap`, start the server with:
 
 ```sh
-(
-  umask 077
-  elixir -e 'IO.puts(Base.encode16(:crypto.strong_rand_bytes(32)))' > ~/.slap-cookie
-)
-```
-
-Use this file for both the server and inspector. In a Mix project that
-depends on `slap`, start the server with:
-
-```sh
-elixir --name slap@127.0.0.1 --cookie "$(cat ~/.slap-cookie)" -S mix slap.server --streams --kv --store local:./data
+elixir --name slap@127.0.0.1 -S mix slap.server --streams --kv --store local:./data
 ```
 
 Without a Mix project, install and start the server with:
 
 ```sh
-elixir --name slap@127.0.0.1 --cookie "$(cat ~/.slap-cookie)" \
+elixir --name slap@127.0.0.1 \
   -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- \
   --streams --kv --store local:./data
 ```
@@ -200,7 +198,7 @@ elixir --name slap@127.0.0.1 --cookie "$(cat ~/.slap-cookie)" \
 Then connect from another terminal on the same machine:
 
 ```sh
-slap-inspect --longnames --node slap@127.0.0.1 --cookie-file ~/.slap-cookie
+slap-inspect --node slap@127.0.0.1
 ```
 
 ## Browse a Streams cluster
