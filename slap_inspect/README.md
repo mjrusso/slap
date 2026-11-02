@@ -1,17 +1,18 @@
-# Slap Inspect
+# slap_inspect
 
-`slap-inspect` is a read-only TUI and CLI for browsing Slap data: streams, KV
-rows, files, snapshot logs and Yjs documents, including retained Yjs history.
+The `slap_inspect` package provides `slap-inspect`, a read-only TUI and CLI for
+browsing Slap data: streams, KV rows, files, snapshot logs and Yjs documents,
+including retained Yjs history.
 
-The terminal UI is for exploring: it pages through records, opens their
-details and follows links between them. With `--json`, the same commands print
-one page as JSON and exit, so scripts can use them.
+The terminal UI is designed for exploring data: it pages through records, opens
+their details and follows links between them. With `--json`, the same commands
+print one page as JSON and exit.
 
 It has no dependency on the server libraries or the SlateDB NIF.
 
 [Install the inspector](#installation), [connect to a server](#connecting),
-then [browse its data](#browse-a-streams-cluster). To try it with sample data,
-run the [kitchen sink demo](https://hexdocs.pm/slap/readme.html#kitchen-sink-demo).
+then [browse its data](#commands). To try it with sample data, run the
+[kitchen sink demo](https://hexdocs.pm/slap/readme.html#kitchen-sink-demo).
 
 <!-- slap-preamble -->
 > #### About Slap {: .info}
@@ -60,9 +61,10 @@ run the [kitchen sink demo](https://hexdocs.pm/slap/readme.html#kitchen-sink-dem
 
 ## Installation
 
-Install on the machine you will connect from. You need Elixir 1.18 or later.
-`slap_inspect` is the Hex package name; `slap-inspect` is the command it
-installs. You do not need to add it to your application's Mix dependencies.
+Install the inspector on the machine you connect from. The inspector requires
+Elixir 1.18 or later. The Hex package `slap_inspect` installs the
+`slap-inspect` command. You do not need to add it to your application's
+dependencies.
 
 ```sh
 mix local.hex --force
@@ -70,122 +72,81 @@ mix local.rebar --force
 mix escript.install hex slap_inspect
 ```
 
-Add Mix's escript directory to your `PATH` if needed. The default is
-`~/.mix/escripts`:
-
-```sh
-export PATH="$HOME/.mix/escripts:$PATH"
-```
-
-If you use asdf, run `asdf reshim elixir` after installation. To update the
-inspector, run `mix escript.install hex slap_inspect` again.
-
-To list the connection options and commands, run:
-
-```sh
-slap-inspect --help
-```
-
-To install from `main` (requires Git):
+Mix installs escripts in `~/.mix/escripts`; add that directory to your `PATH`
+if needed. If you use asdf, run `asdf reshim elixir` afterwards. Run `mix
+escript.install hex slap_inspect` again to update. To install from `main`:
 
 ```sh
 mix escript.install github mjrusso/slap branch main --sparse slap_inspect
 ```
 
+`slap-inspect --help` lists the options and commands.
+
 ## Connecting
 
-Run `slap-inspect` in a separate terminal. The server must have inspection
-support and an Erlang node name, set with `--sname` or `--name` when it starts.
-The inspector connects through distributed Erlang, using the node name and
-cookie rather than the server's HTTP address. Supply these options:
+The inspector connects to a server through distributed Erlang, so the server
+must have inspection support and a node name, set with `--sname` or `--name`.
 
 | Option | Value |
 | --- | --- |
-| `--node` | The server's full Erlang node name, such as `my_app@my-host`. To find it, run `Node.self()` in the server's IEx console. |
-| `--cookie-file` | Optional. A file on the inspector's machine containing the server's Erlang cookie as text. Without it, the inspector uses Erlang's default cookie, `~/.erlang.cookie`. |
-| `--cluster` | Optional. The module used to start the cluster to read, such as `MyApp.Streams.Cluster` or `MyApp.KV.Cluster`. Without it, the inspector reads every cluster running on the node. |
-
-The inspector uses long names when the host in `--node` contains a dot, as in
-`my_app@127.0.0.1`. For a long name without a dot, such as
-`my_app@localhost`, pass `--longnames`. The inspector's machine must be able
-to reach the distributed Erlang ports of the entry node and the nodes that own
-its shards.
-
-A server started without `--cookie` uses the default cookie of the user that
-runs it. If the inspector runs as that user on the same machine, omit
-`--cookie-file`. Otherwise, find the cookie with `Node.get_cookie()` in the
-server's IEx console. Save the atom's name to a file, without a leading colon
-or quotes, and restrict the file's permissions with
-`chmod 600 ~/.slap-cookie`. With the wrong cookie, or a node it cannot reach,
-the inspector exits with `connection_failed`.
-
-Open the inspector, replacing the node name with your application's:
+| `--node` | The server's node name, such as `my_app@my-host`. `Node.self()` in the server's console prints it. |
+| `--cookie-file` | Optional. A file containing the server's Erlang cookie. Without it, the inspector uses `~/.erlang.cookie`. |
+| `--cluster` | Optional. The module of the cluster to read, such as `MyApp.KV.Cluster`. See [Clusters](#clusters). |
 
 ```sh
 slap-inspect --node my_app@my-host --cookie-file ~/.slap-cookie
 ```
 
-The inspector lists the clusters running on that node, including clusters
-with no shards open there. Clusters on other nodes are not listed. The
-navigation pane shows each cluster's views under its module name: Streams,
-snapshot logs and Yjs documents are in a Streams cluster, and KV and Files
-data are in a KV cluster. Any cluster can be read with `scan` and `get`.
+The inspector uses long names when the host in `--node` contains a dot, as in
+`my_app@127.0.0.1`; pass `--longnames` for a long name without one, such as
+`my_app@localhost`. The inspector must reach the distribution ports of the
+node it connects to and of every node that owns a shard it reads.
 
-Keys 1 to 9 open the first nine views, and the header names the cluster that
-is open. Each listing reads one cluster. When you open another cluster, the
-inspector keeps the first cluster's query, selection and history, and
-restores them when you return.
+A server started without `--cookie` uses the `~/.erlang.cookie` of the user
+that runs it, so the inspector needs no `--cookie-file` when it runs as that
+user on that machine. Otherwise, save the value of `Node.get_cookie()`
+without the leading colon to a file, and `chmod 600` it. With the wrong cookie
+or an unreachable node, the inspector exits with `connection_failed`.
 
-A command opens the first listed cluster that serves it:
+The inspector connects as a hidden node, so it does not appear in
+`Node.list()`. Anyone who has the cookie and can reach the distribution ports
+can run any code on the server: protect both as you would a remote console.
 
-```sh
-slap-inspect --node my_app@my-host --cookie-file ~/.slap-cookie streams
-```
+### Clusters
 
-`--cluster` reads one cluster and does not list the others. It offers the
-views that cluster serves, and exits with `cluster_not_running` if the cluster
-does not run on the node. Use it in scripts, or with a server whose
-`slap_cluster` predates `Slap.Cluster.clusters/0`: without `--cluster`, the
-inspector reports `discovery_unsupported` for such a server, and with it, the
-inspector offers every view:
+Without `--cluster`, the inspector reads every cluster running on the node it
+connects to, including clusters with no shards open there. Clusters running
+only on other nodes are not included. A Streams cluster holds streams,
+snapshot logs and Yjs documents; a KV cluster holds KV rows and files. `scan`
+and `get` read any cluster. A cluster whose shard children report no services,
+such as one built directly on `slap_cluster`, offers only those two.
 
-```sh
-slap-inspect --node my_app@my-host --cookie-file ~/.slap-cookie --cluster MyApp.Streams.Cluster streams
-```
+The terminal lists each cluster's views in the navigation pane and opens a
+command in the first cluster that serves it.
 
-Add `--json` to print one page as JSON and exit. For example, to print the
-first page of the KV partition `users`:
+With `--json`, exactly one cluster must serve the command. If several do, the
+inspector exits with `ambiguous_cluster` and names them; on a node with
+several clusters, this is always the case for `scan` and `get`. If none does,
+it exits with `no_cluster_for_view`, or `no_clusters` if the node runs none.
+Pass `--cluster` to choose one.
 
-```sh
-slap-inspect --node my_app@my-host --cookie-file ~/.slap-cookie --json kv --partition users
-```
-
-Without `--cluster`, `--json` reads the one cluster that serves the command.
-If several clusters serve it, the inspector exits with an `ambiguous_cluster`
-error that names them; with more than one cluster, this is always the case for
-`scan` and `get`. Pass `--cluster` to choose one. The error is `no_clusters`
-when the node runs none, and `no_cluster_for_view` when none serves the
-command.
-
-The inspector connects as a hidden Erlang node, so it does not appear in the
-server's `Node.list()`. Anyone with the cookie who can reach the server's
-distribution ports can run any code on it. Protect the cookie file and the
-ports as you would access to a remote console.
+With `--cluster`, the inspector reads only that cluster, and exits with
+`cluster_not_running` if it does not run on the node. A server whose
+`slap_cluster` predates `Slap.Cluster.clusters/0` cannot list its clusters:
+without `--cluster`, the inspector exits with `discovery_unsupported`; with
+`--cluster`, it offers every view.
 
 ### Standalone Slap server
 
-If you use `mix slap.server`, its cluster modules are `Slap.Streams.Cluster`
-and `Slap.KV.Cluster`, and one inspector session browses both.
-
-A local server and the inspector both use Erlang's default cookie,
-`~/.erlang.cookie`, which Erlang creates if it does not exist. In a Mix
-project that depends on `slap`, start the server with:
+`mix slap.server` runs `Slap.Streams.Cluster` and `Slap.KV.Cluster`. When the
+server and the inspector run on one machine as the same user, they share
+`~/.erlang.cookie`. In a Mix project that depends on `slap`:
 
 ```sh
 elixir --name slap@127.0.0.1 -S mix slap.server --streams --kv --store local:./data
 ```
 
-Without a Mix project, install and start the server with:
+Without a Mix project:
 
 ```sh
 elixir --name slap@127.0.0.1 \
@@ -193,41 +154,20 @@ elixir --name slap@127.0.0.1 \
   --streams --kv --store local:./data
 ```
 
-Then connect from another terminal on the same machine:
+Then, from another terminal:
 
 ```sh
 slap-inspect --node slap@127.0.0.1
 ```
 
-## Browse a Streams cluster
-
-After connecting with the `streams` command:
-
-1. Use Up/Down to select a stream and Enter to open its metadata.
-   Press `d` to switch between bytes, text and JSON.
-2. Press `f` on stream metadata to read its messages. For a fork, this
-   includes the messages it inherits from its source. Use `n` and `p` to page
-   through the results, and Escape or `b` to return.
-3. Press `s` to choose another shard. A listing reads one shard at a time;
-   an empty listing does not mean the whole cluster is empty.
-4. Press `r` to read again, `?` for help, or `q` to quit.
-
-The [kitchen sink demo](https://hexdocs.pm/slap/readme.html#kitchen-sink-demo)
-supplies streams to browse. A server using an empty store has no application
-data until some is written through its HTTP or Elixir APIs.
-
 ## Commands
 
 Add a command after the connection options; without one, the inspector opens
-the raw `scan` view. JSON encodes every binary as a hexadecimal string,
-including paths, partition names and keys; reconstructed document content
-stays JSON. Errors exit nonzero.
+`scan`. For example:
 
-`scan` and `get` return raw keys and values. Use `streams`, `kv` or `files`
-for decoded records.
-
-Listings default to the first shard. Use `--shard N` to select another,
-or press `s` in the terminal. Path and partition lookups route automatically.
+```sh
+slap-inspect --node my_app@my-host --json kv --partition users
+```
 
 | Command | Reads |
 | --- | --- |
@@ -237,254 +177,210 @@ or press `s` in the terminal. Path and partition lookups route automatically.
 | `streams` / `stream --path PATH` | Stream metadata. |
 | `messages --shard N --sid ID` | The message records stored under one stream ID. |
 | `logical --path PATH` | A stream's messages, including those a fork inherits. |
-| `retention --shard N --sid ID` | Source registrations; add `--pins` to list them by start offset. |
+| `retention --shard N --sid ID` | Source registrations. |
 | `kv --partition NAME` | KV rows; `--key-prefix HEX` filters keys. |
 | `files --partition PARTITION` | File records, intents and object registrations. |
 | `object --object-key KEY` | A file's object body. |
 | `log --base PATH` | Snapshot-log state and components. |
-| `yjs --base PATH` | Snapshot selection and update frame counts and sizes. |
+| `yjs --base PATH` | The selected snapshot, and the number and size of update frames. |
 | `yjs --content --base PATH --root text:body` | Yjs content with `body` read as text. |
+
+A listing reads one shard: the first, unless `--shard N`, or `s` in the
+terminal, selects another. An empty listing therefore does not mean the
+cluster is empty. Commands that take `--path` or `--partition` find the shard
+themselves.
+
+JSON encodes every binary as a hexadecimal string, including paths, partition
+names and keys. [Yjs content](#yjs-content) is the exception: its values are
+written as JSON. Errors are written to stderr as JSON, and the inspector exits
+nonzero.
 
 ### Streams, snapshot logs and Yjs
 
-`--sid` is the numeric stream ID shown in stream metadata. `--from N` and
+`--sid` is the numeric stream ID in stream metadata. `--from N` and
 `--until N` limit `messages`, `logical`, `log --component` and `yjs` to the
-stream offsets from `--from` (inclusive) to `--until` (exclusive).
+offsets from `--from` (inclusive) to `--until` (exclusive). Pass
+`--placement-key` for a stream created with a custom placement key.
 
-A source registration is a row stored with a stream for each fork or copy
-that reads its messages. While the row exists, the messages it covers are not
-deleted, even after the stream is trimmed. `retention` lists these rows;
-`--pins` lists them by the first offset they protect.
+`logical` lists the records a fork inherits, then its own, with one cursor
+across them; its `lineage` field names the source streams. A path can be
+reused after its stream is deleted: `--expected-sid N` makes the lookup fail
+if the path now names another stream. Following a registration with `f` sets
+`--expected-sid`.
 
-For snapshot logs, `--base` is the path passed to `Slap.SnapshotLog`. For Yjs,
-obtain it with `Slap.Yjs.Store.base/2`, using the document ID and store
-options configured on the server. With the default prefix, `{"demo", "notes"}`
-has the base `/v1/stream/yjs/demo/docs/notes`.
+A source registration protects the messages that a fork or copy still reads:
+trimming the source does not delete them. `retention` lists a stream's
+registrations; `--pins` lists them by the first offset each protects, and
+`--path PATH` adds the stream's metadata summary.
 
-Use `log --base PATH --component index` to page a log component; `control`
-and `updates` also work. For Yjs updates alone, use `yjs --shard N --sid ID`.
-Add `--path PATH` to `retention` to include the stream's metadata summary.
+For a snapshot log, `--base` is the path passed to `Slap.SnapshotLog`. For a
+Yjs document, `Slap.Yjs.Store.base/2` returns it from the document ID and the
+server's store options; with the default prefix, `{"demo", "notes"}` has the
+base `/v1/stream/yjs/demo/docs/notes`.
 
-For a stream created with a custom placement key, pass `--placement-key`.
-
-A path can be reused after its stream is deleted. Pass `--expected-sid N` to
-make a `logical` lookup fail if the path now names a stream with another ID.
-Following a registration with `f` adds this option to the query.
-
-`logical` lists the records a fork inherits first, then its own records. The
-pages share one cursor. `lineage` in the result lists the source streams the
-inherited records came from.
+`log --base PATH --component NAME` pages one component: `control`, `index` or
+`updates`. `yjs --shard N --sid ID` pages a Yjs update stream by itself.
 
 ### Files
 
-For Files, `--partition` is the KV partition that stores the data, not the
-Files partition name. File records for the Files partition `users` are in
-`files-ns:<namespace>:record:users`, where `<namespace>` is the Files
-namespace in unpadded URL-safe Base64. With the default namespace, that is
-`files-ns:ZGVmYXVsdA:record:users`. Upload intents and object registrations
-are spread over 64 partitions per namespace, not by Files partition:
-`files-ns:<namespace>:intent:N` and `files-ns:<namespace>:object:N`, for N
-from 0 to 63.
+For `files`, `--partition` names a KV partition. File records for the
+Files partition `users` are in `files-ns:<namespace>:record:users`, where
+`<namespace>` is the Files namespace in unpadded URL-safe Base64; with the
+default namespace, `files-ns:ZGVmYXVsdA:record:users`. Upload intents and
+object registrations are spread over 64 partitions per namespace, not by
+Files partition: `files-ns:<namespace>:intent:N` and
+`files-ns:<namespace>:object:N`, for N from 0 to 63.
 
-For object previews from a named Files instance, pass
-`--instance MyApp.Files`.
+File summaries show inline bodies only as byte counts. For object previews
+from a named Files instance, pass `--instance MyApp.Files`.
 
-### Raw keys, ranges and pagination
+### Keys, ranges and pages
 
 `--prefix`, `--key`, `--key-prefix` and `--cursor` take hexadecimal byte
-pairs, optionally separated by spaces. Quote values containing spaces, as
-in `--prefix "00 ff"`. KV partition names are literal text.
-Resume a returned cursor with `--cursor HEX`; also pass `--cursor-exclusive`
-if the page reports `cursor_exclusive: true`. With `--json`, when a page has
-a cursor, the inspector also writes the command for the next page to stderr,
-after `Next page: `.
+pairs, optionally separated by spaces, as in `--prefix "00 ff"`. KV partition
+names are text.
 
-Terminal pages default to 200 rows and a 1 MiB target, and `--json`
-listings to 50 rows and 256 KiB. A page includes the row that crosses its
-target. Single-record reads, Yjs content, `log --base` without
-`--component`, and `yjs --base` always use the terminal defaults. Previews
-are capped at 4 KiB per key and 512 KiB per value. Use `--limit`,
-`--target-bytes`, `--max-key-bytes` and `--max-value-bytes` to lower these
-limits. SlateDB still loads full rows in native memory. Malformed or truncated
+A page that has more rows includes a cursor. Pass it back with `--cursor HEX`,
+and with `--cursor-exclusive` if the page reports `cursor_exclusive: true`.
+With `--json`, the inspector also writes the command for the next page to
+stderr, after `Next page: `.
+
+Terminal pages default to 200 rows and a 1 MiB target, and `--json` listings
+to 50 rows and 256 KiB. A page includes the row that crosses its target.
+Single-record reads, Yjs content, `log --base` without `--component`, and
+`yjs --base` use the terminal defaults with `--json` too. Values are cut at
+512 KiB and keys at 4 KiB. `--limit`, `--target-bytes`, `--max-value-bytes`
+and `--max-key-bytes` lower these limits. They bound the reply; SlateDB still
+loads whole rows into native memory.
+
+A key cut by `--max-key-bytes` ends its page, and the next page starts after
+every key that begins with the shown bytes, so those keys are skipped. A cut
+key cannot be fetched or followed; raise `--max-key-bytes` to read it, up to
+4 KiB.
+
+`--offset N --length N` selects a byte range for `get` or `object`. Without
+`--length`, a range is 4096 bytes, or `--max-value-bytes` if that is smaller.
+`object` rejects a length above `--max-value-bytes`; `get` rejects it only
+when `--max-value-bytes` is given, and otherwise returns at most 512 KiB.
+Object ranges need a positive length; `get` also accepts zero.
+
+Each page names the shard, its owner and the shard's durable sequence number
+(`durable_seq`); the page holds only writes up to it. JSON output can exceed
+the page's `hard_max_bytes`, the largest reply the owner can send, because the
+inspector adds assembled `messages`, the `log` summary, and the `logical`
+view's `metadata` and `lineage`.
+
+## Terminal
+
+The footer lists the keys for the current screen, and `?` lists them all
+with the full query.
+
+| Key                           | Action                                            |
+|-------------------------------|---------------------------------------------------|
+| Arrows                        | Select rows, or scroll and pan details.           |
+| PageUp / PageDown, Home / End | Scroll details by a page, or to the top / bottom. |
+| `[` / `]`                     | Pan details by twenty columns.                    |
+| Tab                           | Switch between records and details.               |
+| Enter                         | Open details.                                     |
+| Escape / `b`                  | Go back.                                          |
+| `n` / `p`                     | Next / previous page.                             |
+| `m` / `M`                     | Next / previous byte range of a value.            |
+| `d`                           | Show details as bytes, text or JSON.              |
+| `/`                           | Edit the command.                                 |
+| `1`–`9`                       | Open a view listed in the navigation pane.        |
+| `s`                           | Choose a shard.                                   |
+| `f`                           | Follow a linked stream or object.                 |
+| `g`                           | Show a stream's retention.                        |
+| `c`                           | Reconstruct the content of a log or Yjs document. |
+| `i`                           | Choose how Yjs roots are read.                    |
+| `r`                           | Read again.                                       |
+| `t`                           | Turn timed refresh off, or on at five seconds.    |
+| `e`                           | Diagnostics for the last read, if it failed.      |
+| `?`                           | Help.                                             |
+| `q`                           | Quit.                                             |
+
+Timed refresh rereads the current page and keeps the selection when its key
+is still present. It is off unless the inspector starts with `--refresh MS`.
+When it is on, `t` turns it off; when it is off, `t` turns it on at five
+seconds, even if `--refresh` set another interval. It pauses while a read is
+running or a dialog or the command editor is open, and it skips Yjs content.
+If a refresh fails, the previous results stay on screen, labelled
+`Last good data`.
+
+The command editor accepts query options; connection, output and refresh
+options are set at startup. Outside single quotes, a backslash escapes the
+next character: `\n`, `\r`, `\t`, `\b`, `\f`, two-digit `\xHH` and four-digit
+`\uXXXX` are recognized, and any other escaped character stands for itself.
+The editor shows binary paths with byte escapes, so submitting the displayed
+command keeps their bytes.
+
+The byte and text views show up to 4096 bytes at a time. The terminal shows
+zero-width code points as `\u{HEX}`: a key holding `e` followed by U+0301
+appears as `"e\u{301}"`, and a key holding the characters `\u{301}` appears
+with a doubled backslash.
+
+## Yjs content
+
+`yjs --content --base PATH` reconstructs a stored document: the shard owners
+read its updates, and the node the inspector connects to applies them. The
+terminal shows the owner and the input size and asks for confirmation;
+`--json` does not ask.
+
+`--root TYPE:NAME` reads a root as `text`, `array`, `map` or `xml_fragment`;
+repeat it for more roots. Use the types the application uses; others can
+return empty values. Roots without a type are listed without values, and
+missing roots are reported as absent. Text omits formatting. In the terminal,
+`i` changes the types.
+
+Buffers in arrays and maps are written as `{"$bytes": "<hex>"}`. A user map
+key that starts with `$` gains another `$` at every nesting level: `"$bytes"`
+becomes `"$$bytes"`. Remove one leading `$` to recover a user key; a key with
+exactly one leading `$` is an encoder tag. Root names are unchanged.
+
+Without `--at-offset`, the content includes every update before the reported
+offset, and may include later state from its snapshot. `--at-offset N` replays
+the updates before `N` without a snapshot, where `N` is the start offset of a
+stored update or the log's tail. It needs every earlier update to be
+readable; for a fork, that includes inherited updates, which its registration
+keeps readable.
+
+| Option               | Default   | Maximum   |
+|----------------------|-----------|-----------|
+| `--max-input-bytes`  | 8 MiB     | 32 MiB    |
+| `--max-entries`      | 50,000    | 200,000   |
+| `--max-output-bytes` | 1 MiB     | 4 MiB     |
+| `--budget`           | 10,000 ms | 30,000 ms |
+
+Input sizes count each message's body plus its four-byte header, including
+the snapshot. Native operations can run past the budget, memory use can
+exceed the input size, and the output limit is checked after conversion. If
+the selected snapshot keeps changing, reconstruction stops after three
+attempts with `incomplete`.
+
+## Reads and errors
+
+The inspector reads through the owner's open database handle; it never opens
+a database or starts a writer, so it can read a store only while a running
+cluster has it open. Reads return data that SlateDB has written to object
+storage, which can include writes whose callers have not been answered yet,
+or never will be. Pages and object lookups can see different states, so a
+missing row or object alone does not mean corruption. Malformed and truncated
 records are shown with their bytes and a diagnostic.
 
-A key longer than `--max-key-bytes` is shown cut to that length, and the page
-ends at it. The next page starts after every key that begins with the shown
-bytes, so those keys are skipped, and a cut key cannot be fetched or
-followed. If you lowered `--max-key-bytes`, raise it to read these keys. Keys
-longer than 4 KiB, the maximum, are always cut.
+Each node runs one inspection request at a time, across all its clusters. Reads
+have a five-second budget by default (`--budget MS`, at most 30000), checked
+between storage calls, so a call in progress can take longer. While a read is
+stalled, the terminal keeps at most one more request waiting, and a new
+request replaces it; `--json` exits with a stalled-read error. Quitting or
+disconnecting does not cancel a read on the owner. Press `r` to retry a busy
+owner.
 
-`--offset N --length N` selects a byte range for `get` or `object`. Offsets
-must be nonnegative. Without `--length`, a range is 4096 bytes, or
-`--max-value-bytes` if that is smaller. `object` rejects a length above
-`--max-value-bytes` (default and maximum 512 KiB); `get` rejects it only when
-`--max-value-bytes` is given, and otherwise returns at most 512 KiB. Object
-ranges require a positive length; `get` also accepts zero.
-
-Each page names the node that owns the shard, the shard number, and the
-shard's durable sequence number (`durable_seq`). A read includes only writes
-up to that sequence number.
-
-A page's `hard_max_bytes` is the size limit on the owner's reply. JSON output
-can be larger, because the inspector adds fields after the reply arrives:
-assembled `messages`, the `log` summary, and the `logical` view's `metadata`
-and `lineage`.
-
-## Terminal controls
-
-| Key | Action |
-| --- | --- |
-| Arrows | Select rows or scroll details. |
-| PageUp / PageDown | Scroll details by a page. |
-| Tab | Change pane focus. |
-| Enter | Open details. |
-| Escape / `b` | Go back. |
-| Home / End | Scroll details to the top / bottom. |
-| `n` / `p` | Next / previous page. |
-| `/` | Edit the current command and filters. |
-| `?` | Keyboard help, including the full query. |
-| `e` | Diagnostics for the last read, if it failed. |
-| `s` | List and select available shards. |
-| `d` | Cycle bytes, wrapped text and JSON details. |
-| `[` / `]` | Pan details left / right by twenty columns. |
-| `1`–`9` | Open a view listed in the navigation pane, grouped by cluster. |
-| `r` | Refresh. |
-| `t` | Turn timed refresh off, or on at five seconds. |
-| `f` | Follow a linked stream or object. |
-| `g` | Inspect stream retention. |
-| `c` | Reconstruct content from a log or Yjs view. Press `y` to confirm or `n` to cancel. |
-| `i` | Choose root interpretations for loaded Yjs content. |
-| `m` / `M` | Load the next / previous byte range. |
-| `q` | Quit. |
-
-Timed refresh rereads the current page at a fixed interval. It is off unless
-the inspector starts with `--refresh MS`. When it is on, `t` turns it off;
-when it is off, `t` turns it on at five seconds, even if `--refresh` set
-another interval. It pauses while a read is running or the command editor,
-help, diagnostics, the shard picker or a confirmation is open. It skips Yjs
-content, which displays `Manual reconstruction`; press `r` to reconstruct it
-again after confirmation.
-
-A refresh keeps the selection when the same key is still present. If it
-fails, the previous results stay on screen, labelled `Last good data`. The
-header shows the active command, the refresh interval and the time of the
-last successful read.
-
-Set connection, output and refresh options when starting the inspector. The
-command editor accepts query options only.
-
-In the command editor, Left/Right, Home/End and Backspace/Delete move the
-cursor and edit text. Up/Down recalls submitted commands from this session;
-Ctrl-U clears the input. Enter submits and Escape discards the edit. Outside
-single quotes, a backslash escapes the next character: `\n`, `\r`, `\t`,
-`\b`, `\f`, two-digit `\xHH` and four-digit `\uXXXX` are recognized, and any
-other escaped character stands for itself. Opaque binary paths use byte
-escapes so submitting the displayed command preserves their bytes.
-Single quotes preserve their contents literally. View shortcuts open the
-command editor when the selected view needs arguments. The status line lists
-the required options, and the editor adds the first one to the command.
-Commands submitted in the editor read the open cluster.
-
-Enter opens the first record when none is selected. Tab switches between
-records and details; the pane label and border identify focus. If a refreshed
-record disappears, focus returns to the list with an explanation. Help and
-diagnostics return to the same selection and scroll position with Escape.
-Long record labels stay on one line; open details to inspect the record.
-
-## Reading data
-
-Details start in the byte view. Press `d` for text with line breaks and
-wrapping, then again for formatted JSON. Unavailable interpretations show an
-explanation; the byte view remains available. The byte view and raw text
-view show up to 4096 bytes at a time. The range label identifies the displayed
-interval, total size, truncation, partial reads and EOF. Press `m` to advance
-and `M` to return to the previous offset and length through a new durable
-read. Changing ranges starts at the top of the details. Manual and timed
-refresh reread the displayed range and preserve its scroll position.
-Yjs text mode labels each interpreted root with its interpretation and shows
-text roots with real line breaks; it does not change the stored document.
-
-The terminal displays zero-width Unicode codepoints as `\u{HEX}` escapes so
-combining marks and format characters remain visible. For example, a key
-containing `e` followed by U+0301 appears as `"e\u{301}"`; a key containing
-the literal characters `\u{301}` appears with a doubled backslash. These escapes
-affect terminal display only.
-
-### Yjs content and history
-
-Use `yjs --content --base PATH` to reconstruct a stored document. The terminal
-shows the owner and input size in wire bytes before asking for confirmation. JSON
-mode runs immediately. The inspector reads the document from its shard owners
-and the entry node reconstructs it.
-
-Use `--root TYPE:NAME` to choose how each root is read: `text`, `array`, `map`
-or `xml_fragment`. Repeat it for multiple roots. Roots without a type are
-listed without values; missing roots are reported as absent. Text omits
-formatting. Buffers in arrays and maps use `{"$bytes": "<hex>"}`.
-User map keys starting with `$` gain another `$`, at every nesting level:
-`"$bytes"` becomes `"$$bytes"` and `"$$x"` becomes `"$$$x"`. Remove one leading
-`$` to recover a user key; keys with exactly one leading `$` are encoder tags.
-Root names are unchanged.
-Use the application's root types; other choices may return empty values.
-
-In the terminal, press `i` to choose interpretations without restarting.
-Up/Down selects a root; Left/Right cycles its type, including none. Enter
-reviews the reconstruction cost before confirmation; Escape discards edits.
-
-Current content includes all updates before the reported offset, but its
-snapshot may include later state. For history, use `--at-offset N` with a
-stored update entry's starting offset or the log's tail. It replays updates
-before `N` without a snapshot and requires all earlier updates to remain
-readable. For a fork, this includes inherited updates: the fork's registration
-keeps them readable after its source is trimmed.
-
-| Option | Default | Maximum |
-| --- | --- | --- |
-| `--max-input-bytes` | 8 MiB | 32 MiB |
-| `--max-entries` | 50,000 | 200,000 |
-| `--max-output-bytes` | 1 MiB | 4 MiB |
-| `--budget` | 10,000 ms | 30,000 ms |
-
-Input sizes count wire bytes: each message's body plus its four-byte header,
-including the snapshot. The confirmation and input-limit errors use this count.
-
-Native operations can run past the budget. Memory use can exceed encoded
-input size, and the JSON output limit is checked after conversion.
-If the selected snapshot keeps changing, collection stops after three
-attempts and returns `:incomplete`.
-
-### Stored records
-
-Reads use the owner's existing handle without opening databases or starting
-application writers, so a store can be inspected only while a running
-cluster has it open. Reads return only data that SlateDB has written to
-object storage. That data can include writes whose callers have not yet
-received a reply, or never will. Pages and object lookups can observe
-different states; a missing row or object alone does not establish
-corruption.
-
-File summaries include metadata and storage kind. Inline bodies are shown
-as byte counts; their encoded bytes remain in the raw row.
-
-### Errors and stalled reads
-
-Each node allows one inspection request at a time across its clusters.
-Ordinary reads default to a five-second budget (`--budget MS`, maximum 30000),
-checked between storage calls; a call already in progress may take longer.
-While a read is stalled, the terminal keeps at most one more request waiting;
-navigating again replaces it. JSON mode exits with a stalled-read error.
-Quitting or disconnecting does not cancel the owner's read. Press `r` to retry
-a busy owner, or enable timed refresh.
-
-Remote failures report the node, requested module/function/arity, failure kind
-(`error`, `exit` or `throw`), a reason summary, and up to eight stack frames.
-Frames include arity and source location without argument values. Before JSON
-encoding, diagnostics are capped at 8 KiB, including at most 1 KiB for the
-reason. A server without inspection support reports
-`owner_does_not_support_inspection`; one with a different inspection API
-version reports `unsupported_api` and the version it supports. Upgrade
-`slap-inspect` or the server so they match. Transport timeouts and
-disconnections are reported separately.
+Remote failures report the node, the function called, the kind (`error`,
+`exit` or `throw`), a summary of the reason, and up to eight stack frames,
+without argument values. A server without inspection support reports
+`owner_does_not_support_inspection`; one with another inspection API version
+reports `unsupported_api` and its version: upgrade the inspector or the
+server so they match.
 
 ## Development
 
@@ -496,37 +392,20 @@ just deps slap_inspect
 cd slap_inspect
 ```
 
-Run from source with the Mix task:
+Run from source with `mix slap.inspect` in place of `slap-inspect`:
 
 ```sh
-mix slap.inspect --help
-mix slap.inspect --node my_app@my-host --cookie-file ~/.slap-cookie --cluster MyApp.Streams.Cluster streams
+mix slap.inspect --node my_app@my-host --cluster MyApp.Streams.Cluster streams
 ```
 
-For commands elsewhere in this guide or printed by the demo, replace
-`slap-inspect` with `mix slap.inspect` when running from source.
+Check changes with `mix format` and `mix check`. Package tests run without
+the server libraries or the SlateDB NIF; the tests against real servers are
+the [`slap` project's inspection tests](https://github.com/mjrusso/slap/blob/main/slap/test/inspect_remote_test.exs),
+which need that project's dependencies, including the NIF.
 
-Format and check changes with:
-
-```sh
-mix format
-mix check
-```
-
-Package tests run without the server libraries or the SlateDB NIF.
-Tests that connect to real servers live in the
-[`slap` project's inspection tests](https://github.com/mjrusso/slap/blob/main/slap/test/inspect_remote_test.exs)
-and require that project's dependencies, including the SlateDB NIF.
-
-### Testing the executable
-
-Build the executable locally:
+To build and run the executable:
 
 ```sh
 MIX_ENV=prod mix escript.build
 ./slap-inspect --help
 ```
-
-Use `./slap-inspect` in place of `slap-inspect` in the examples above. The
-executable bundles the inspector, its dependencies and Elixir; running it
-requires Erlang/OTP. Rebuild it after changing the source.

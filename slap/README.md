@@ -113,9 +113,8 @@ MIX_ENV=prod mix escript.build
 Then run the demo's commands with `./slap-inspect` in place of `slap-inspect`.
 
 In the Fork view, the first pages show the messages the fork inherits from its
-source; press `n` to reach its own updates. See
-[Browse a Streams cluster](https://hexdocs.pm/slap_inspect/readme.html#browse-a-streams-cluster)
-for the keys.
+source; press `n` to reach its own updates. The inspector's README
+[lists the other keys](https://hexdocs.pm/slap_inspect/readme.html#terminal).
 
 ### What the demo does
 
