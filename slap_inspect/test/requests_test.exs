@@ -3,6 +3,8 @@ defmodule Slap.Inspect.RequestsTest do
 
   alias Slap.Inspect.Requests
 
+  @connection %{entry: :test@localhost, cluster: Cluster}
+
   test "replaces waiting requests and ignores old results, including after a stall" do
     client = self()
 
@@ -10,7 +12,7 @@ defmodule Slap.Inspect.RequestsTest do
       start_supervised!(
         {Requests,
          client: client,
-         read: fn request ->
+         read: fn @connection, request ->
            send(client, {:started, request.name, self()})
 
            receive do
@@ -19,10 +21,10 @@ defmodule Slap.Inspect.RequestsTest do
          end}
       )
 
-    Requests.submit(worker, 1, %{name: :first, budget: 30_000, opts: []})
+    Requests.submit(worker, 1, @connection, %{name: :first, budget: 30_000, opts: []})
     assert_receive {:started, :first, first}
-    Requests.submit(worker, 2, %{name: :discarded, budget: 30_000, opts: []})
-    Requests.submit(worker, 3, %{name: :latest, budget: 30_000, opts: []})
+    Requests.submit(worker, 2, @connection, %{name: :discarded, budget: 30_000, opts: []})
+    Requests.submit(worker, 3, @connection, %{name: :latest, budget: 30_000, opts: []})
     send(worker, {:stalled, 1})
     assert_receive {:inspection_stalled, 1}
     send(first, :release)
@@ -41,7 +43,7 @@ defmodule Slap.Inspect.RequestsTest do
       Supervisor.child_spec(
         {Requests,
          client: client,
-         read: fn request ->
+         read: fn @connection, request ->
            send(parent, {:started, request.name, self()})
 
            receive do
@@ -53,9 +55,9 @@ defmodule Slap.Inspect.RequestsTest do
 
     coordinator = start_supervised!(spec)
     ref = Process.monitor(coordinator)
-    Requests.submit(coordinator, 1, %{name: :outstanding, budget: 30_000, opts: []})
+    Requests.submit(coordinator, 1, @connection, %{name: :outstanding, budget: 30_000, opts: []})
     assert_receive {:started, :outstanding, reader}
-    Requests.submit(coordinator, 2, %{name: :waiting, budget: 30_000, opts: []})
+    Requests.submit(coordinator, 2, @connection, %{name: :waiting, budget: 30_000, opts: []})
     Agent.stop(client)
     assert_receive {:DOWN, ^ref, :process, ^coordinator, :normal}
     assert Process.alive?(reader)
@@ -70,13 +72,13 @@ defmodule Slap.Inspect.RequestsTest do
       start_supervised!(
         {Requests,
          client: client,
-         read: fn request ->
+         read: fn @connection, request ->
            send(client, {:started, request.observer, self()})
            receive do: (:release -> {:ok, :finished})
          end}
       )
 
-    Requests.submit(worker, 1, %{shard: 0, budget: 30_000, opts: []})
+    Requests.submit(worker, 1, @connection, %{shard: 0, budget: 30_000, opts: []})
     assert_receive {:started, ^worker, reader}
     send(worker, {:inspection_owner, :entry@localhost, 0})
     assert_receive {:inspection_owner, 1, :entry@localhost, 0}

@@ -2,10 +2,11 @@ defmodule Slap.Inspect.ViewCase do
   @moduledoc false
 
   # Drives Slap.Inspect.View through Breeze.Test. The view's reads go to the
-  # test: each sends `{:read, request, worker}` and waits for the test to
-  # answer. `answer/2` and `reply/3` deliver results through the real request
-  # worker and return once the result is in the view's mailbox, so a render
-  # that follows sees it.
+  # test: each sends `{:read, request, worker}`, with the cluster read under
+  # the request's `:cluster` key, and waits for the test to answer.
+  # `answer/2` and `reply/3` deliver results through the real request worker
+  # and return once the result is in the view's mailbox, so a render that
+  # follows sees it.
 
   import ExUnit.Assertions
   import ExUnit.Callbacks, only: [on_exit: 1]
@@ -16,23 +17,23 @@ defmodule Slap.Inspect.ViewCase do
   def start_view(opts \\ []) do
     client = self()
 
-    read = fn request ->
-      send(client, {:read, request, self()})
+    read = fn connection, request ->
+      send(client, {:read, Map.put(request, :cluster, connection.cluster), self()})
       receive do: ({:reply, result} -> result)
     end
 
     request =
       Map.merge(%{view: :raw, shard: 0, budget: 5000, opts: []}, Map.new(opts[:request] || []))
 
+    default = %{cluster: Slap.Streams.Cluster, services: [:streams, :kv]}
+    clusters = Keyword.get(opts, :clusters, [default])
+
     session =
       Test.start!(View,
         size: Keyword.get(opts, :size, {80, 24}),
         start_opts: [
-          connection: %{
-            entry: :slap@localhost,
-            cluster: Slap.Streams.Cluster,
-            cookie_file: "/cookie"
-          },
+          connection: %{entry: :slap@localhost, cluster: hd(clusters).cluster},
+          clusters: clusters,
           request: request,
           read: read,
           refresh: Keyword.get(opts, :refresh, 0)

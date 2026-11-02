@@ -66,11 +66,18 @@ defmodule Slap.Inspect.Help do
   defp link(:none, _action), do: []
   defp link({:ok, _view, _opts, _shard}, action), do: [action]
 
+  defp menu(menu) do
+    for group <- menu,
+        keyed = for(%{view: view, key: key} <- group.items, key, do: "#{key} #{view}"),
+        keyed != [],
+        do: inspect(group.cluster) <> ": " <> Enum.join(keyed, " · ")
+  end
+
   def text(assigns) do
     page = assigns.page || %{}
 
     Enum.join(
-      [
+      List.flatten([
         "Keyboard help",
         "",
         "Query: " <> CLI.command(assigns.request),
@@ -87,7 +94,9 @@ defmodule Slap.Inspect.Help do
         "n/p next/previous record page; Esc/b back to list or previous query.",
         "/ edits the current query; only Enter submits; Esc cancels.",
         "Editor: ←→, Home/End, Backspace/Delete, ↑↓ history, Ctrl-U clear.",
-        "1 Raw · 2 Streams · 3 KV · 4 Files · 5 Logs · 6 Yjs",
+        "1-9 open the views listed by cluster in the navigation pane;",
+        "each cluster keeps its own query, selection and history.",
+        menu(assigns.menu),
         "s lists available shards; Enter selects one; Esc cancels.",
         "r refresh; t toggles five-second refresh; e shows error diagnostics.",
         "f follows linked streams/objects; g shows stream retention.",
@@ -96,7 +105,7 @@ defmodule Slap.Inspect.Help do
         "Last read is the last successful page read; failed refreshes retain last good data.",
         "",
         "Esc returns to the same query, selection and scroll position."
-      ],
+      ]),
       "\n"
     )
   end

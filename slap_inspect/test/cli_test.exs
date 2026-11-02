@@ -3,7 +3,7 @@ defmodule Slap.Inspect.CLITest do
 
   import ExUnit.CaptureIO
 
-  alias Slap.Inspect.{Bytes, CLI, Command, JSON, Query, Remote}
+  alias Slap.Inspect.{Bytes, CLI, Clusters, Command, JSON, Query, Remote}
 
   @connection [
     "--node",
@@ -20,6 +20,35 @@ defmodule Slap.Inspect.CLITest do
       assert output =~ "Usage: slap-inspect"
       assert output =~ "--json"
     end
+  end
+
+  test "the cluster is optional, and the clusters command lists them" do
+    connection = Enum.take(@connection, 4)
+
+    assert {:ok, _connection, nil, %{view: :kv}, %{json: true}} =
+             CLI.parse(connection ++ ["--json", "kv"])
+
+    assert {:ok, _connection, Slap.KV.Cluster, %{view: :raw}, _mode} =
+             CLI.parse(connection ++ ["--cluster", "Slap.KV.Cluster"])
+
+    assert {:ok, _endpoint, :clusters} = CLI.parse(["clusters" | connection])
+    assert {:error, {:required, :cluster}} = CLI.parse(connection ++ ["--cluster", ""])
+    assert {:error, {:invalid, _message}} = CLI.parse(["clusters" | @connection])
+  end
+
+  test "JSON output reads the one cluster that serves its view, and names the candidates otherwise" do
+    streams = %{cluster: Demo.Streams, services: [:streams]}
+    kv = %{cluster: Demo.KV, services: [:kv]}
+    plain = %{cluster: Demo.Plain, services: []}
+
+    assert {:ok, Demo.KV} = Clusters.only([streams, kv, plain], :files)
+    assert {:ok, Demo.Streams} = Clusters.only([streams, kv, plain], :yjs_content)
+
+    assert {:error, {:ambiguous_cluster, :raw, ["Demo.Streams", "Demo.KV"]}} =
+             Clusters.only([streams, kv], :raw)
+
+    assert {:error, {:no_cluster_for_view, :kv}} = Clusters.only([streams, plain], :kv)
+    assert {:error, :no_clusters} = Clusters.only([], :raw)
   end
 
   test "executable errors write JSON to stderr and exit nonzero" do
@@ -45,7 +74,7 @@ defmodule Slap.Inspect.CLITest do
   end
 
   test "hex filters reject incomplete pairs and control sequences" do
-    assert {:ok, _, %{opts: opts}, _} =
+    assert {:ok, _, _, %{opts: opts}, _} =
              CLI.parse(@connection ++ ["--json", "scan", "--prefix", "00 ff 01"])
 
     assert opts[:prefix] == <<0, 255, 1>>
@@ -57,7 +86,7 @@ defmodule Slap.Inspect.CLITest do
   end
 
   test "commands retain opaque bytes and reject unknown switches" do
-    assert {:ok, _, %{view: :kv, opts: opts}, %{json: true}} =
+    assert {:ok, _, _, %{view: :kv, opts: opts}, %{json: true}} =
              CLI.parse(
                @connection ++ ["--json", "kv", "--partition", "users", "--key-prefix", "ff"]
              )
@@ -83,7 +112,7 @@ defmodule Slap.Inspect.CLITest do
       assert {:error, {:invalid_option, _, _, _}} = CLI.run(@connection ++ mode ++ args)
     end
 
-    assert {:ok, _, _, _} =
+    assert {:ok, _, _, _, _} =
              CLI.parse(@connection ++ ["get", "--key", "61", "--offset", "0", "--length", "0"])
   end
 
@@ -95,7 +124,7 @@ defmodule Slap.Inspect.CLITest do
   end
 
   test "default object ranges respect a reduced preview limit" do
-    assert {:ok, _, %{opts: opts}, _} =
+    assert {:ok, _, _, %{opts: opts}, _} =
              CLI.parse(
                @connection ++ ["object", "--object-key", "key", "--max-value-bytes", "1024"]
              )
@@ -129,9 +158,9 @@ defmodule Slap.Inspect.CLITest do
           ["logical", "--path", "/fork", "--expected-sid", "12", "--shard", "0"],
           ["logical", "--path", <<255>>]
         ] do
-      assert {:ok, _, request, _} = CLI.parse(@connection ++ args)
+      assert {:ok, _, _, request, _} = CLI.parse(@connection ++ args)
       {:ok, command} = request |> CLI.command() |> Command.split()
-      assert {:ok, _, restored, _} = CLI.parse(@connection ++ command)
+      assert {:ok, _, _, restored, _} = CLI.parse(@connection ++ command)
       assert Map.drop(restored, [:opts]) == Map.drop(request, [:opts])
       assert Enum.sort(restored.opts) == Enum.sort(request.opts)
     end
@@ -182,7 +211,7 @@ defmodule Slap.Inspect.CLITest do
   end
 
   test "content commands parse root interpretations and history offsets" do
-    assert {:ok, _, %{view: :yjs_content, budget: 10_000, opts: opts}, _} =
+    assert {:ok, _, _, %{view: :yjs_content, budget: 10_000, opts: opts}, _} =
              CLI.parse(
                @connection ++
                  [

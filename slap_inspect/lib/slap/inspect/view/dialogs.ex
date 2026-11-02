@@ -3,14 +3,14 @@ defmodule Slap.Inspect.View.Dialogs do
   import Breeze.View, only: [focus: 2]
   import Breeze.Component, only: [assign: 2]
 
-  alias Slap.Inspect.{CLI, Command, Editor, Feedback, Request, Requests}
+  alias Slap.Inspect.{CLI, Command, Editor, Feedback, Request}
   alias Slap.Inspect.View.Read
 
   @root_types [nil, :text, :array, :map, :xml_fragment]
 
   def open_shards(term) do
     id = {:shards, make_ref()}
-    Requests.submit(term.assigns.worker, id, Request.shards())
+    Read.submit(term, id, Request.shards())
 
     {:noreply, assign(term, id: id, operation: :reading, status: "Loading available shards")}
   end
@@ -169,7 +169,7 @@ defmodule Slap.Inspect.View.Dialogs do
 
   def confirm(%{assigns: %{mode: {:confirm, request, _capture}}} = term) do
     id = make_ref()
-    Requests.submit(term.assigns.worker, id, request)
+    Read.submit(term, id, request)
 
     {:noreply,
      assign(term,

@@ -1,21 +1,39 @@
 defmodule Slap.Inspect.CLI do
   @moduledoc false
 
-  alias Slap.Inspect.{Command, Feedback, JSON, Operation, Query, Remote, Request, Requests}
+  alias Slap.Inspect.{
+    Clusters,
+    Command,
+    Feedback,
+    JSON,
+    Operation,
+    Query,
+    Remote,
+    Request,
+    Requests
+  }
 
   @usage """
-  Usage: slap-inspect --node NODE --cookie-file PATH --cluster MODULE [options] [command]
+  Usage: slap-inspect --node NODE --cookie-file PATH [--cluster MODULE] [options] [command]
 
-  Opens a read-only terminal inspector for a running Slap cluster.
+  Opens a read-only terminal inspector for the Slap clusters running on NODE.
   Add --json to write one JSON object and exit.
 
-      slap-inspect --node slap@host --cookie-file ~/.slap-cookie --cluster Slap.Streams.Cluster
-      slap-inspect --node slap@host --cookie-file ~/.slap-cookie --cluster Slap.KV.Cluster --json kv --partition users
+      slap-inspect --node slap@host --cookie-file ~/.slap-cookie
+      slap-inspect --node slap@host --cookie-file ~/.slap-cookie --json kv --partition users
+      slap-inspect --node slap@host --cookie-file ~/.slap-cookie --cluster MyApp.Cluster scan
 
-  Commands: scan, get, streams, stream, messages, logical, retention, kv,
-  files, object, log, yjs. Use --shard N for raw scans or sid lookups,
-  --path PATH for a stream, --base PATH for a log, --partition NAME for KV,
-  and --sid N for messages or retention. --placement-key overrides stream
+  Without --cluster, the inspector lists the clusters running on NODE and
+  shows each one's views; keys 1-9 open them. A command opens the first
+  listed cluster that serves it. With --json, exactly one cluster must serve
+  the command; when several do, choose one with --cluster. --cluster reads
+  one cluster and also works with servers that cannot list their clusters.
+  The clusters command prints the list as JSON, with or without --json.
+
+  Commands: clusters, scan, get, streams, stream, messages, logical,
+  retention, kv, files, object, log, yjs. Use --shard N for raw scans or sid
+  lookups, --path PATH for a stream, --base PATH for a log, --partition NAME
+  for KV, and --sid N for messages or retention. --placement-key overrides stream
   routing. --prefix, --key, --key-prefix and --cursor take hexadecimal pairs.
   Use --offset N --length N for a value or object byte range. --longnames
   selects long node names. --budget MS defaults to 5000, or 10000 for
@@ -116,24 +134,46 @@ defmodule Slap.Inspect.CLI do
 
   def parse(args) do
     case OptionParser.parse(args, strict: @switches) do
-      {opts, commands, []} -> connection(opts, commands)
-      {_opts, _commands, invalid} -> {:error, {:invalid_options, Enum.map(invalid, &elem(&1, 0))}}
+      {opts, commands, []} ->
+        with {:ok, endpoint} <- endpoint(opts), do: selection(endpoint, opts, commands)
+
+      {_opts, _commands, invalid} ->
+        {:error, {:invalid_options, Enum.map(invalid, &elem(&1, 0))}}
     end
   end
 
-  defp connection(opts, commands) do
+  defp endpoint(opts) do
     with {:ok, entry} <- required(opts, :node),
-         {:ok, cookie_file} <- required(opts, :cookie_file),
-         {:ok, cluster} <- required(opts, :cluster),
-         :ok <- Request.refresh(opts[:refresh] || 0),
-         {:ok, request} <- query(opts, commands) do
+         {:ok, cookie_file} <- required(opts, :cookie_file) do
       {:ok,
        %{
          entry: String.to_atom(entry),
-         cluster: Module.concat([cluster]),
          cookie_file: cookie_file,
          name_domain: if(opts[:longnames], do: :longnames, else: :shortnames)
-       }, request, %{json: opts[:json] || false, refresh: opts[:refresh] || 0}}
+       }}
+    end
+  end
+
+  defp selection(endpoint, opts, ["clusters"]) do
+    if opts[:cluster],
+      do: {:error, {:invalid, "clusters lists every cluster; omit --cluster"}},
+      else: {:ok, endpoint, :clusters}
+  end
+
+  defp selection(endpoint, opts, commands) do
+    with {:ok, cluster} <- cluster(opts),
+         :ok <- Request.refresh(opts[:refresh] || 0),
+         {:ok, request} <- query(opts, commands),
+         do:
+           {:ok, endpoint, cluster, request,
+            %{json: opts[:json] || false, refresh: opts[:refresh] || 0}}
+  end
+
+  defp cluster(opts) do
+    case opts[:cluster] do
+      nil -> {:ok, nil}
+      "" -> {:error, {:required, :cluster}}
+      name -> {:ok, Module.concat([name])}
     end
   end
 
@@ -283,20 +323,42 @@ defmodule Slap.Inspect.CLI do
   end
 
   def run(args) do
-    with {:ok, connection, request, mode} <- parse(args),
-         :ok <-
-           Remote.connect(connection.entry, connection.cookie_file,
-             name_domain: connection.name_domain
-           ) do
-      if mode.json, do: json(connection, request), else: terminal(connection, request, mode)
+    case parse(args) do
+      {:ok, endpoint, :clusters} ->
+        with :ok <- connect(endpoint), do: list(endpoint.entry)
+
+      {:ok, endpoint, cluster, request, mode} ->
+        with :ok <- connect(endpoint), do: read(endpoint.entry, cluster, request, mode)
+
+      error ->
+        error
     end
   end
 
-  defp json(connection, request) do
-    {:ok, worker} = Requests.start_link(client: self(), read: &Query.execute(connection, &1))
-    id = make_ref()
-    Requests.submit(worker, id, request)
-    await_json(id)
+  defp connect(endpoint),
+    do: Remote.connect(endpoint.entry, endpoint.cookie_file, name_domain: endpoint.name_domain)
+
+  defp read(entry, cluster, request, %{json: true}), do: json(entry, cluster, request)
+  defp read(entry, cluster, request, mode), do: terminal(entry, cluster, request, mode)
+
+  defp list(entry) do
+    with {:ok, clusters} <- Clusters.discover(entry) do
+      # Slap.Inspect.JSON would write the cluster names, which are binaries, as hexadecimal.
+      IO.puts(Elixir.JSON.encode!(%{clusters: Enum.map(clusters, &listed/1)}))
+    end
+  end
+
+  defp listed(cluster),
+    do: %{cluster | cluster: inspect(cluster.cluster)} |> Map.put(:views, Clusters.views(cluster))
+
+  defp json(entry, cluster, request) do
+    with {:ok, clusters} <- Clusters.load(entry, cluster),
+         {:ok, cluster} <- Clusters.only(clusters, request.view) do
+      {:ok, worker} = Requests.start_link(client: self(), read: &Query.execute/2)
+      id = make_ref()
+      Requests.submit(worker, id, %{entry: entry, cluster: cluster}, request)
+      await_json(id)
+    end
   end
 
   defp await_json(id) do
@@ -319,10 +381,18 @@ defmodule Slap.Inspect.CLI do
     end
   end
 
-  defp terminal(connection, request, mode),
-    do:
+  defp terminal(entry, cluster, request, mode) do
+    with {:ok, clusters} <- Clusters.load(entry, cluster),
+         {:ok, cluster} <- Clusters.first(clusters, request.view) do
       Breeze.Server.run(
         view: Slap.Inspect.View,
-        start_opts: [connection: connection, request: request, refresh: mode.refresh]
+        start_opts: [
+          connection: %{entry: entry, cluster: cluster},
+          clusters: clusters,
+          request: request,
+          refresh: mode.refresh
+        ]
       )
+    end
+  end
 end

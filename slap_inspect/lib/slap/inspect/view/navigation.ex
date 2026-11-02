@@ -3,7 +3,7 @@ defmodule Slap.Inspect.View.Navigation do
   import Breeze.View, only: [focus: 2]
   import Breeze.Component, only: [assign: 2]
 
-  alias Slap.Inspect.{CLI, Details, Feedback, Links, Request, Rows}
+  alias Slap.Inspect.{CLI, Clusters, Details, Feedback, Links, Request, Rows}
   alias Slap.Inspect.View.{Dialogs, Read}
 
   def display_mode(term) do
@@ -161,16 +161,76 @@ defmodule Slap.Inspect.View.Navigation do
      |> Read.page()}
   end
 
-  def switch(term, view) do
+  # Defaults of the assigns saved per cluster. An assign that belongs to a
+  # query must be listed here, or it carries over when another cluster opens.
+  @browsing %{
+    page: nil,
+    rows: [],
+    selected: nil,
+    detail: false,
+    preview: nil,
+    byte_history: [],
+    observed_at: nil,
+    stale: false,
+    history: [],
+    navigation: [],
+    status: "Loading",
+    diagnostic: nil,
+    operation: :idle,
+    id: nil
+  }
+
+  def browsing(request), do: Map.put(@browsing, :request, request)
+
+  @doc "Opens the view under `key`. Opening the view on screen reads it again."
+  def open(term, key) do
+    case Clusters.find(term.assigns.menu, key) do
+      nil -> {:noreply, term}
+      {cluster, view} -> {:noreply, term |> select_cluster(cluster) |> enter(view)}
+    end
+  end
+
+  defp select_cluster(%{assigns: %{connection: %{cluster: cluster}}} = term, cluster), do: term
+
+  defp select_cluster(term, cluster) do
+    connection = term.assigns.connection
+    current = Map.take(term.assigns, [:request | Map.keys(@browsing)])
+    saved = Map.put(term.assigns.saved, connection.cluster, current)
+    state = Map.get_lazy(saved, cluster, &fresh/0)
+
+    # A read in flight when the state was saved no longer updates it: the
+    # request worker drops its result if another read is submitted, and the
+    # view ignores it otherwise, since its id is no longer current.
+    term
+    |> assign(Map.to_list(state))
+    |> assign(saved: saved, connection: %{connection | cluster: cluster}, operation: :idle)
+    |> focus(if state.detail, do: "details", else: "records")
+  end
+
+  defp fresh do
+    {:ok, request} = Request.new(%{view: :raw, shard: nil, budget: nil, opts: []})
+    browsing(request)
+  end
+
+  defp enter(%{assigns: %{request: %{view: view}}} = term, view), do: resume(term)
+
+  # A view that needs arguments opens the editor over the cluster's last
+  # results, without reading.
+  defp enter(term, view) do
     candidate = Request.draft(term.assigns.request, view)
 
     case Request.new(candidate) do
       {:ok, request} ->
-        {:noreply, term |> assign(request: request, history: []) |> Read.page()}
+        term |> assign(request: request, history: []) |> Read.page()
 
       {:error, reason} ->
-        term = Dialogs.editor(term, CLI.command(candidate))
-        {:noreply, assign(term, diagnostic: reason, status: Feedback.error(reason))}
+        term
+        |> Dialogs.editor(CLI.command(candidate))
+        |> assign(diagnostic: reason, status: Feedback.error(reason))
     end
   end
+
+  # Yjs content is reconstructed only on request.
+  defp resume(%{assigns: %{request: %{view: :yjs_content}}} = term), do: term
+  defp resume(term), do: Read.start(term)
 end

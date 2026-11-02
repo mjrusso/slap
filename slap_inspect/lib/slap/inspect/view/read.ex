@@ -17,6 +17,9 @@ defmodule Slap.Inspect.View.Read do
     end
   end
 
+  def submit(term, id, request),
+    do: Requests.submit(term.assigns.worker, id, term.assigns.connection, request)
+
   defp start_validated(term, request) do
     {id, submitted, operation} =
       if request.view == :yjs_content,
@@ -25,7 +28,7 @@ defmodule Slap.Inspect.View.Read do
            %{request | opts: Keyword.put(request.opts, :preflight, true)}, {:preflight, request}},
         else: {make_ref(), request, :reading}
 
-    Requests.submit(term.assigns.worker, id, submitted)
+    submit(term, id, submitted)
 
     assign(term,
       id: id,
@@ -276,7 +279,7 @@ defmodule Slap.Inspect.View.Read do
     case Request.bytes(request, row.key, range) do
       {:ok, request} ->
         id = {:preview, Rows.id(row), history, make_ref()}
-        Requests.submit(term.assigns.worker, id, request)
+        submit(term, id, request)
 
         {:noreply,
          assign(term,

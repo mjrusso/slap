@@ -8,6 +8,7 @@ defmodule Slap.Inspect.Remote do
   # Sent with every versioned call; the server checks it (Slap.Cluster.Inspection).
   @api_version 1
   @allowed [
+    {@cluster, :clusters, 0},
     {@cluster, :status, 2},
     {@cluster, :assignments, 1},
     {@cluster, :shard_for, 2},

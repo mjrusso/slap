@@ -3,10 +3,11 @@ defmodule Slap.Inspect.View.Layout do
   use Breeze.Component
 
   alias BackBreeze.Utils
-  alias Slap.Inspect.{Bytes, CLI, Details, Editor, Help, Operation, Rows}
+  alias Slap.Inspect.{Bytes, CLI, Details, Editor, Help, Rows}
 
   # The terminal width from which navigation, records and details share the screen.
   @two_panes 110
+  @navigation_width 17..32
 
   def prepare(term) do
     assigns = term.assigns
@@ -19,7 +20,7 @@ defmodule Slap.Inspect.View.Layout do
 
     if visible do
       row = Rows.selected(assigns)
-      width = pane_width(width)
+      width = pane_width(width, navigation_width(assigns.menu))
       key = {row, assigns.preview, assigns.display, width}
 
       case assigns.detail_cache do
@@ -38,7 +39,8 @@ defmodule Slap.Inspect.View.Layout do
   def render(assigns) do
     assigns = assign(assigns, presentation(assigns.mode))
     row = Rows.selected(assigns)
-    width = pane_width(assigns.breeze.terminal.width)
+    navigation_width = navigation_width(assigns.menu)
+    width = pane_width(assigns.breeze.terminal.width, navigation_width)
     details = assigns.detail_cache || %{text: "", width: 0}
     height = body_height(assigns)
     overlay = overlay_text(assigns.overlay, height)
@@ -62,13 +64,15 @@ defmodule Slap.Inspect.View.Layout do
         shard_label: (assigns.page || %{})[:shard] || assigns.request.shard || "auto",
         observation: observation(assigns),
         help_lines: Help.lines(assigns, row),
-        body_height: height
+        body_height: height,
+        navigation: navigation(assigns.menu, {assigns.connection.cluster, assigns.request.view}),
+        navigation_width: navigation_width
       )
 
     ~H"""
     <box class="block w-screen h-screen">
       <box class="h-1 w-full font-bold overflow-hidden">
-        Slap Inspect · {@request.view} · shard {@shard_label} (one shard)
+        Slap Inspect · {inspect(@connection.cluster)} · {@request.view} · shard {@shard_label} (one shard)
       </box>
       <box class="h-1 w-full overflow-hidden">{@command}</box>
       <box class="h-1 w-full overflow-hidden">{@observation}</box>
@@ -122,9 +126,14 @@ defmodule Slap.Inspect.View.Layout do
     end}
         style={%{width: :full, height: @body_height}}
       >
-        <box :if={@wide} id="navigation" class="w-17 h-full border focus:border-6">
+        <box
+          :if={@wide}
+          id="navigation"
+          class="h-full border focus:border-6 overflow-hidden"
+          style={%{width: @navigation_width}}
+        >
           <box class="block">
-            <box :for={{view, index} <- Enum.with_index(Operation.views(), 1)}>{index} {view}</box>
+            <box :for={line <- @navigation} class="h-1 overflow-hidden">{line}</box>
             <box>[/] Command</box>
             <box>[?] Help</box>
             <box>[b] Back</box>
@@ -189,8 +198,26 @@ defmodule Slap.Inspect.View.Layout do
     """
   end
 
-  defp pane_width(width) when width >= @two_panes, do: div(width - 17, 2) - 4
-  defp pane_width(width), do: width - 4
+  defp pane_width(width, navigation) when width >= @two_panes, do: div(width - navigation, 2) - 4
+  defp pane_width(width, _navigation), do: width - 4
+
+  defp navigation_width(menu) do
+    longest = Enum.max(for(group <- menu, do: String.length(inspect(group.cluster))), fn -> 0 end)
+    min(max(longest + 2, @navigation_width.first), @navigation_width.last)
+  end
+
+  defp navigation(menu, on_screen) do
+    for group <- menu,
+        line <- [
+          inspect(group.cluster) | Enum.map(group.items, &item(&1, group.cluster, on_screen))
+        ],
+        do: line
+  end
+
+  defp item(%{view: view, key: key}, cluster, on_screen) do
+    marker = if {cluster, view} == on_screen, do: ">", else: " "
+    "#{marker}#{key || " "} #{view}"
+  end
 
   defp body_height(assigns) do
     confirmation = if assigns.confirmation, do: 4, else: 0

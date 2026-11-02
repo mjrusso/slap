@@ -3,7 +3,9 @@ defmodule Slap.Inspect.Requests do
   use GenServer
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
-  def submit(pid, id, request), do: GenServer.cast(pid, {:submit, id, request})
+
+  def submit(pid, id, connection, request),
+    do: GenServer.cast(pid, {:submit, id, connection, request})
 
   @impl true
   def init(opts) do
@@ -20,18 +22,18 @@ defmodule Slap.Inspect.Requests do
   end
 
   @impl true
-  def handle_cast({:submit, id, request}, state) do
+  def handle_cast({:submit, id, connection, request}, state) do
     case state.active do
-      nil -> {:noreply, launch(state, {id, request})}
-      _active -> {:noreply, %{state | waiting: {id, request}}}
+      nil -> {:noreply, launch(state, {id, connection, request})}
+      _active -> {:noreply, %{state | waiting: {id, connection, request}}}
     end
   end
 
-  defp launch(state, {id, request}) do
+  defp launch(state, {id, connection, request}) do
     parent = self()
     read = state.read
     request = Map.put(request, :observer, parent)
-    {_pid, ref} = spawn_monitor(fn -> send(parent, {:result, id, read.(request)}) end)
+    {_pid, ref} = spawn_monitor(fn -> send(parent, {:result, id, read.(connection, request)}) end)
     timer = Process.send_after(self(), {:stalled, id}, request.budget + 2000)
 
     %{

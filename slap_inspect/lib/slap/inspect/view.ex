@@ -2,33 +2,26 @@ defmodule Slap.Inspect.View do
   @moduledoc false
   use Breeze.View
 
-  alias Slap.Inspect.{CLI, Help, Operation, Query, Requests}
+  alias Slap.Inspect.{CLI, Clusters, Help, Query, Requests}
   alias Slap.Inspect.View.{Dialogs, Layout, Navigation, Read}
 
   def mount(opts, term) do
-    connection = Keyword.fetch!(opts, :connection)
-    read = Keyword.get(opts, :read, &Query.execute(connection, &1))
+    read = Keyword.get(opts, :read, &Query.execute/2)
     request = Keyword.fetch!(opts, :request)
     {:ok, worker} = Requests.start_link(client: self(), read: read)
 
     term =
-      assign(term,
-        connection: connection,
-        request: request,
+      term
+      |> assign(Navigation.browsing(request))
+      |> assign(
+        connection: Keyword.fetch!(opts, :connection),
+        menu: Clusters.menu(Keyword.fetch!(opts, :clusters)),
+        saved: %{},
         worker: worker,
-        page: nil,
-        rows: [],
-        selected: nil,
-        detail: false,
         detail_cache: nil,
         mode: :browse,
         commands: [CLI.command(request)],
         display: :bytes,
-        byte_history: [],
-        observed_at: nil,
-        stale: false,
-        history: [],
-        navigation: [],
         refresh: Keyword.get(opts, :refresh, 0),
         refresh_timer: nil
       )
@@ -144,8 +137,8 @@ defmodule Slap.Inspect.View do
   defp event(:input, %{"key" => "c"}, term), do: Navigation.content(term)
   defp event(:input, %{"key" => "i"}, term), do: Dialogs.open_roots(term)
 
-  defp event(:input, %{"key" => key}, term) when key in ["1", "2", "3", "4", "5", "6"],
-    do: Navigation.switch(term, Enum.at(Operation.views(), String.to_integer(key) - 1))
+  defp event(:input, %{"key" => key}, term) when key in ~w(1 2 3 4 5 6 7 8 9),
+    do: Navigation.open(term, key)
 
   defp event(_event, _payload, term), do: {:noreply, term}
 end

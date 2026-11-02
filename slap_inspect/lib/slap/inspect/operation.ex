@@ -131,6 +131,35 @@ defmodule Slap.Inspect.Operation do
       budget: 10_000
     }
   }
+  # :any views read any cluster. The other names must match the services/0 of
+  # Slap.Streams.ShardChildren and Slap.KV.PartitionWriter.
+  @services %{
+    raw: :any,
+    get: :any,
+    streams: :streams,
+    stream: :streams,
+    messages: :streams,
+    logical: :streams,
+    retention: :streams,
+    log: :streams,
+    yjs: :streams,
+    yjs_content: :streams,
+    kv: :kv,
+    files: :kv,
+    object: :kv
+  }
+
+  views = MapSet.new(Map.values(@definitions), & &1.view)
+  named = MapSet.new(Map.keys(@services))
+
+  unless MapSet.equal?(views, named),
+    do:
+      raise(
+        "@services must name exactly the views of @definitions; " <>
+          "missing: #{inspect(MapSet.to_list(MapSet.difference(views, named)))}, " <>
+          "extra: #{inspect(MapSet.to_list(MapSet.difference(named, views)))}"
+      )
+
   @commands @definitions
             |> Enum.reject(fn {_operation, definition} -> Map.has_key?(definition, :flags) end)
             |> Map.new(fn {_operation, definition} -> {definition.command, definition.view} end)
@@ -185,6 +214,8 @@ defmodule Slap.Inspect.Operation do
   def route(operation), do: Map.get(Map.fetch!(@definitions, operation), :route, :stream)
   def budget(operation), do: Map.get(Map.fetch!(@definitions, operation), :budget, 5000)
   def targets, do: for(%{target: target} <- Map.values(@definitions), uniq: true, do: target)
+
+  def service(view), do: Map.fetch!(@services, view)
 
   def views do
     @definitions

@@ -103,7 +103,7 @@ cookie rather than the server's HTTP address. Supply these options:
 | --- | --- |
 | `--node` | The server's full Erlang node name, such as `my_app@my-host`. To find it, run `Node.self()` in the server's IEx console. |
 | `--cookie-file` | A file on the inspector's machine containing the server's Erlang cookie as text. |
-| `--cluster` | The module used to start the service's cluster, such as `MyApp.Streams.Cluster` or `MyApp.KV.Cluster`. |
+| `--cluster` | Optional. The module used to start the cluster to read, such as `MyApp.Streams.Cluster` or `MyApp.KV.Cluster`. Without it, the inspector reads every cluster running on the node. |
 
 For a server started with `--name`, also pass `--longnames`. The inspector's
 machine must be able to reach the distributed Erlang ports of the entry node
@@ -114,24 +114,53 @@ To find the cookie, run `Node.get_cookie()` in the server's IEx console. Save
 the atom's name without a leading colon or surrounding quotes, and restrict the
 file's permissions with `chmod 600 ~/.slap-cookie`.
 
-Open the Streams view, replacing the node and cluster module with your
-application's values:
+Open the inspector, replacing the node name with your application's:
+
+```sh
+slap-inspect --node my_app@my-host --cookie-file ~/.slap-cookie
+```
+
+The inspector lists the clusters running on that node, including clusters
+with no shards open there. Clusters on other nodes are not listed. The
+navigation pane shows each cluster's views under its module name: Streams,
+snapshot logs and Yjs documents are in a Streams cluster, and KV and Files
+data are in a KV cluster. Any cluster can be read with `scan` and `get`.
+
+Keys 1 to 9 open the first nine views, and the header names the cluster that
+is open. Each listing reads one cluster. When you open another cluster, the
+inspector keeps the first cluster's query, selection and history, and
+restores them when you return.
+
+A command opens the first listed cluster that serves it:
+
+```sh
+slap-inspect --node my_app@my-host --cookie-file ~/.slap-cookie streams
+```
+
+`--cluster` reads one cluster and does not list the others. It offers the
+views that cluster serves, and exits with `cluster_not_running` if the cluster
+does not run on the node. Use it in scripts, or with a server whose
+`slap_cluster` predates `Slap.Cluster.clusters/0`: without `--cluster`, the
+inspector reports `discovery_unsupported` for such a server, and with it, the
+inspector offers every view:
 
 ```sh
 slap-inspect --node my_app@my-host --cookie-file ~/.slap-cookie --cluster MyApp.Streams.Cluster streams
 ```
 
-`--cluster` selects the data the inspector reads. Streams, snapshot logs and
-Yjs documents are in the Streams cluster. KV and Files data are in the KV
-cluster. An inspector reads one cluster; to read the other, start a second
-inspector with a different `--cluster`.
-
 Add `--json` to print one page as JSON and exit. For example, to print the
 first page of the KV partition `users`:
 
 ```sh
-slap-inspect --node my_app@my-host --cookie-file ~/.slap-cookie --cluster MyApp.KV.Cluster --json kv --partition users
+slap-inspect --node my_app@my-host --cookie-file ~/.slap-cookie --json kv --partition users
 ```
+
+Without `--cluster`, `--json` reads the one cluster that serves the command.
+If several clusters serve it, the inspector exits with an `ambiguous_cluster`
+error that names them; with more than one cluster, this is always the case for
+`scan` and `get`. Pass `--cluster` to choose one. The error is `no_clusters`
+when the node runs none, and `no_cluster_for_view` when none serves the
+command.
 
 The inspector connects as a hidden Erlang node, so it does not appear in the
 server's `Node.list()`. Anyone with the cookie who can reach the server's
@@ -141,7 +170,7 @@ ports as you would access to a remote console.
 ### Standalone Slap server
 
 If you use `mix slap.server`, its cluster modules are `Slap.Streams.Cluster`
-and `Slap.KV.Cluster`. An unnamed server must be restarted with `--sname`
+and `Slap.KV.Cluster`, and one inspector session browses both. An unnamed server must be restarted with `--sname`
 or `--name` before the inspector can connect.
 
 For a new local server, create a cookie file once:
@@ -171,7 +200,7 @@ elixir --name slap@127.0.0.1 --cookie "$(cat ~/.slap-cookie)" \
 Then connect from another terminal on the same machine:
 
 ```sh
-slap-inspect --longnames --node slap@127.0.0.1 --cookie-file ~/.slap-cookie --cluster Slap.Streams.Cluster streams
+slap-inspect --longnames --node slap@127.0.0.1 --cookie-file ~/.slap-cookie
 ```
 
 ## Browse a Streams cluster
@@ -206,6 +235,7 @@ or press `s` in the terminal. Path and partition lookups route automatically.
 
 | Command | Reads |
 | --- | --- |
+| `clusters` | The node's clusters, with their shard counts, local shards, services and views. Always prints JSON, and does not take `--cluster`. |
 | `scan --shard N --prefix HEX` | Raw stored rows. |
 | `get --shard N --key HEX` | One stored value. |
 | `streams` / `stream --path PATH` | Stream metadata. |
@@ -300,7 +330,7 @@ and `lineage`.
 | `s` | List and select available shards. |
 | `d` | Cycle bytes, wrapped text and JSON details. |
 | `[` / `]` | Pan details left / right by twenty columns. |
-| `1`–`6` | Raw, Streams, KV, Files, Logs, Yjs. |
+| `1`–`9` | Open a view listed in the navigation pane, grouped by cluster. |
 | `r` | Refresh. |
 | `t` | Turn timed refresh off, or on at five seconds. |
 | `f` | Follow a linked stream or object. |
@@ -329,7 +359,8 @@ arguments support escaped quotes, backslashes, `\n`, `\r`, `\t`, two-digit
 `\xHH` byte escapes and four-digit `\uXXXX` escapes. Opaque binary paths use
 byte escapes so submitting the displayed command preserves their bytes.
 Single quotes preserve their contents literally. View shortcuts open the
-command editor when the selected view needs arguments.
+command editor when the selected view needs arguments. Commands submitted in
+the editor read the open cluster.
 
 Enter opens the first record when none is selected. Tab switches between
 records and details; the pane label and border identify focus. If a refreshed
