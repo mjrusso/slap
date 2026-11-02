@@ -210,29 +210,51 @@ defmodule Slap.InspectRemoteTest do
   test "an unnamed inspector starts a hidden connection from its cookie file" do
     distribute()
     {_entry_peer, entry} = peer("inspect-connection")
+    cookie_path = Path.join(tmp_dir(), "cookie")
+    File.write!(cookie_path, Atom.to_string(Node.get_cookie()))
+
+    inspector = connect_unnamed(entry, cookie_path, %{})
+    refute inspector in :erpc.call(entry, Node, :list, [], 5000)
+    assert inspector in :erpc.call(entry, Node, :list, [:hidden], 5000)
+  end
+
+  test "an unnamed inspector without a cookie file uses Erlang's default cookie file" do
+    distribute()
+    {_entry_peer, entry} = peer("inspect-default-cookie")
+    home = tmp_dir()
+    cookie_path = Path.join(home, ".erlang.cookie")
+    File.write!(cookie_path, Atom.to_string(Node.get_cookie()))
+    # Erlang rejects a cookie file that others can read.
+    File.chmod!(cookie_path, 0o600)
+
+    inspector = connect_unnamed(entry, nil, %{env: [{~c"HOME", String.to_charlist(home)}]})
+    assert inspector in :erpc.call(entry, Node, :list, [:hidden], 5000)
+  end
+
+  defp tmp_dir do
+    path = Path.join(System.tmp_dir!(), "inspect-remote-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(path)
+    on_exit(fn -> File.rm_rf(path) end)
+    path
+  end
+
+  defp connect_unnamed(entry, cookie_file, peer_options) do
     paths = Enum.flat_map(:code.get_path(), &[~c"-pa", &1])
-    {:ok, client, _node} = :peer.start(%{connection: :standard_io, args: [~c"+S", ~c"2" | paths]})
+    options = Map.merge(%{connection: :standard_io, args: [~c"+S", ~c"2" | paths]}, peer_options)
+    {:ok, client, _node} = :peer.start(options)
     on_exit(fn -> :peer.stop(client) end)
     assert {:ok, _} = :peer.call(client, :application, :ensure_all_started, [:elixir], 10_000)
-
-    cookie_path =
-      Path.join(System.tmp_dir!(), "inspect-cookie-#{System.unique_integer([:positive])}")
-
-    File.write!(cookie_path, Atom.to_string(Node.get_cookie()))
-    on_exit(fn -> File.rm(cookie_path) end)
 
     assert :ok =
              :peer.call(
                client,
                @remote,
                :connect,
-               [entry, cookie_path, [name_domain: :longnames]],
+               [entry, cookie_file, [name_domain: :longnames]],
                10_000
              )
 
-    inspector = :peer.call(client, Node, :self, [], 5000)
-    refute inspector in :erpc.call(entry, Node, :list, [], 5000)
-    assert inspector in :erpc.call(entry, Node, :list, [:hidden], 5000)
+    :peer.call(client, Node, :self, [], 5000)
   end
 
   # Remote.read takes a deadline in the inspector's monotonic clock.
