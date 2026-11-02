@@ -1,7 +1,7 @@
 defmodule Slap.Cluster.MixProject do
   use Mix.Project
 
-  @version "0.4.0"
+  @version "0.5.0"
   @source_url "https://github.com/mjrusso/slap"
 
   def project do
@@ -60,7 +60,7 @@ defmodule Slap.Cluster.MixProject do
 
   defp deps do
     [
-      slap_dep(:slap_slatedb, "~> 0.2.0"),
+      slap_dep(:slap_slatedb, "~> 0.3.0"),
       {:telemetry, "~> 1.0"},
       {:rustler, "~> 0.38", optional: true, runtime: false},
       {:credo, "~> 1.7.19", only: [:dev, :test], runtime: false},
