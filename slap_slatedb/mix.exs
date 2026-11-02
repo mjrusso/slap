@@ -20,6 +20,24 @@ defmodule Slap.SlateDB.MixProject do
       docs: [
         main: "readme",
         extras: ["README.md", "CHANGELOG.md", "LICENSE"],
+        search: [
+          %{name: "slap_slatedb", help: "Search slap_slatedb"},
+          %{
+            name: "All Slap packages",
+            help: "Search every Slap package on HexDocs",
+            packages: [
+              :slap_slatedb,
+              :slap_cluster,
+              :slap_streams,
+              :slap_snapshot_log,
+              :slap_yjs,
+              :slap_kv,
+              :slap_files,
+              :slap_inspect,
+              :slap
+            ]
+          }
+        ],
         groups_for_modules: [
           Database: [
             Slap.SlateDB,

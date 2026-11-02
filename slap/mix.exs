@@ -21,6 +21,24 @@ defmodule Slap.MixProject do
       docs: [
         main: "readme",
         extras: ["README.md", "CHANGELOG.md", "LICENSE"],
+        search: [
+          %{name: "slap", help: "Search slap"},
+          %{
+            name: "All Slap packages",
+            help: "Search every Slap package on HexDocs",
+            packages: [
+              :slap_slatedb,
+              :slap_cluster,
+              :slap_streams,
+              :slap_snapshot_log,
+              :slap_yjs,
+              :slap_kv,
+              :slap_files,
+              :slap_inspect,
+              :slap
+            ]
+          }
+        ],
         source_url_pattern: "#{@source_url}/blob/slap-v#{@version}/slap/%{path}#L%{line}"
       ]
     ]

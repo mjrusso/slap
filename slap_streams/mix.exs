@@ -21,6 +21,24 @@ defmodule Slap.Streams.MixProject do
       docs: [
         main: "readme",
         extras: ["README.md", "CHANGELOG.md", "LICENSE"],
+        search: [
+          %{name: "slap_streams", help: "Search slap_streams"},
+          %{
+            name: "All Slap packages",
+            help: "Search every Slap package on HexDocs",
+            packages: [
+              :slap_slatedb,
+              :slap_cluster,
+              :slap_streams,
+              :slap_snapshot_log,
+              :slap_yjs,
+              :slap_kv,
+              :slap_files,
+              :slap_inspect,
+              :slap
+            ]
+          }
+        ],
         groups_for_modules: [
           Streams: [Slap.Streams, Slap.Streams.Cluster, Slap.Streams.Offset, Slap.Streams.Wait],
           HTTP: [Slap.Streams.HTTP.Router, Slap.Streams.HTTP.Metrics],

@@ -26,6 +26,24 @@ defmodule Slap.Inspect.MixProject do
       docs: [
         main: "readme",
         extras: ["README.md", "CHANGELOG.md", "LICENSE"],
+        search: [
+          %{name: "slap_inspect", help: "Search slap_inspect"},
+          %{
+            name: "All Slap packages",
+            help: "Search every Slap package on HexDocs",
+            packages: [
+              :slap_slatedb,
+              :slap_cluster,
+              :slap_streams,
+              :slap_snapshot_log,
+              :slap_yjs,
+              :slap_kv,
+              :slap_files,
+              :slap_inspect,
+              :slap
+            ]
+          }
+        ],
         source_url_pattern:
           "#{@source_url}/blob/slap_inspect-v#{@version}/slap_inspect/%{path}#L%{line}"
       ]
