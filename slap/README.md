@@ -81,8 +81,7 @@ elixir kitchen_sink.exs
 ```
 
 Outside a Mix project, the script installs the latest `slap` release with
-`Mix.install([:slap])`. Releases up to 0.4.0 cannot be inspected, and the
-demo says so when it starts; run it from a checkout to inspect it.
+`Mix.install([:slap])`. Inspection requires `slap` 0.5.0 or later.
 
 ### Run from a checkout
 
@@ -432,7 +431,7 @@ Add `slap` to the dependencies in your application's `mix.exs`:
 ```elixir
 defp deps do
   [
-    {:slap, "~> 0.4.0"}
+    {:slap, "~> 0.5.0"}
   ]
 end
 ```
