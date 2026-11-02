@@ -101,16 +101,16 @@ Keep the demo running. In a second terminal, run one of the `slap-inspect`
 commands the demo prints. [Install Slap Inspect](#slap-inspect) first if
 needed.
 
-When you run the demo from a checkout, build the inspector from the same
+When you run the demo from a checkout, use the inspector from the same
 checkout. From the repository root:
 
 ```sh
 nix develop
-cd slap_inspect
-MIX_ENV=prod mix escript.build
+just install-inspector
 ```
 
-Then run the demo's commands with `./slap-inspect` in place of `slap-inspect`.
+This installs `slap-inspect` into `.nix-mix/escripts`, which `nix develop`
+puts on `PATH`.
 
 In the Fork view, the first pages show the messages the fork inherits from its
 source; press `n` to reach its own updates. The inspector's README

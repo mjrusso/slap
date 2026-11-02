@@ -305,7 +305,7 @@ defmodule Slap.Examples.KitchenSink do
     In the Fork view, the first pages show messages inherited from
     #{@events}. Press n to reach the fork's own updates.
 
-    Install the inspector with: mix escript.install hex slap_inspect
+    #{install_hint(Mix.Project.config()[:app])}
     """)
 
     unless Code.ensure_loaded?(Slap.Streams.Introspect) do
@@ -314,6 +314,11 @@ defmodule Slap.Examples.KitchenSink do
       )
     end
   end
+
+  defp install_hint(:slap),
+    do: "Install the inspector from this checkout with: just install-inspector"
+
+  defp install_hint(_app), do: "Install the inspector with: mix escript.install hex slap_inspect"
 end
 
 Slap.Examples.KitchenSink.main(System.argv())
