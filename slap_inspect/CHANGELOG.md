@@ -1,5 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.1.0
 
-Initial release of `slap_inspect`.
+Initial release of `slap-inspect`, a read-only terminal UI and JSON CLI for raw
+storage, streams, KV rows, files, snapshot logs and Yjs documents.
+
+- Requires a running server with `slap_cluster` 0.5.0 or later. Service views
+  also require the package for that service at 0.5.0 or later. Reads use the
+  shard owners' open database handles; the inspector itself has no dependency
+  on the server libraries or the SlateDB NIF.
+- Connects through distributed Erlang and discovers the clusters and services
+  running on a node. Browse several clusters in one terminal session or select
+  one with `--cluster`.
+- Supports paginated reads, byte-range previews, links between records,
+  optional timed refresh and reconstruction of Yjs content and retained history.
+  JSON listings print the next page's command to stderr.
