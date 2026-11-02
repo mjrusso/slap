@@ -140,20 +140,20 @@ connect from:
 mix escript.install hex slap_inspect
 ```
 
-The inspector connects over distributed Erlang, using the server's node name,
-a cookie file and the service's cluster module. For example, if the standalone
-server is named `slap@127.0.0.1` and its cookie is saved in `~/.slap-cookie`,
-open the Streams view with:
+The inspector connects over distributed Erlang, using the server's node name
+and a cookie file. For example, if the standalone server is named
+`slap@127.0.0.1` and its cookie is saved in `~/.slap-cookie`, open it with:
 
 ```sh
-slap-inspect --longnames --node slap@127.0.0.1 \
-  --cookie-file ~/.slap-cookie --cluster Slap.Streams.Cluster streams
+slap-inspect --longnames --node slap@127.0.0.1 --cookie-file ~/.slap-cookie
 ```
 
-Use the Streams cluster for streams, snapshot logs and Yjs, and the KV cluster
-for KV and Files. For clusters defined by your application, pass your cluster
-module instead. The [kitchen sink demo](#kitchen-sink-demo) prints commands
-with these values filled in. See the
+The inspector lists the clusters running on the node, including those your
+application defines, and browses all of them in one session. Streams, snapshot
+logs and Yjs documents are in Streams clusters; KV and Files data are in KV
+clusters. To read one cluster only, pass `--cluster MODULE`. The
+[kitchen sink demo](#kitchen-sink-demo) prints commands with these values
+filled in. See the
 [Slap Inspect guide](https://hexdocs.pm/slap_inspect/) for installation,
 connection, commands and JSON output.
 

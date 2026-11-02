@@ -221,8 +221,6 @@ defmodule Slap.Examples.KitchenSink do
     connection =
       "slap-inspect#{naming} --node #{Node.self()} --cookie-file #{quote_arg(cookie_file)}"
 
-    streams = connection <> " --cluster Slap.Streams.Cluster"
-    kv = connection <> " --cluster Slap.KV.Cluster"
     shard = Cluster.shard_for(Streams.Cluster, Streams.placement_key(@events))
     partition = Config.partition(Config.get(), :record, "demo")
 
@@ -235,13 +233,18 @@ defmodule Slap.Examples.KitchenSink do
 
     Inspect from another terminal (install with: mix escript.install hex slap_inspect):
 
-      Streams: #{streams} streams --shard #{shard}
-      Fork:    #{streams} logical --path #{@fork}
-      Log:     #{streams} log --base #{@log}
-      Yjs:     #{streams} yjs --base #{Yjs.Store.base(@document)}
-      KV:      #{kv} kv --partition demo
-      Files:   #{kv} files --partition #{partition}
-      Raw:     #{streams} scan --shard #{shard}
+      #{connection}
+
+    The inspector lists Slap.Streams.Cluster and Slap.KV.Cluster with their views.
+    To open a view directly, add a command:
+
+      Streams: #{connection} streams --shard #{shard}
+      Fork:    #{connection} logical --path #{@fork}
+      Log:     #{connection} log --base #{@log}
+      Yjs:     #{connection} yjs --base #{Yjs.Store.base(@document)}
+      KV:      #{connection} kv --partition demo
+      Files:   #{connection} files --partition #{partition}
+      Raw:     #{connection} --cluster Slap.Streams.Cluster scan --shard #{shard}
 
     Add --json to any command to print one page and exit.
     In the Fork view, press n to move from inherited data to the fork's own updates.
