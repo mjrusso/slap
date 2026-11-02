@@ -81,7 +81,7 @@ elixir kitchen_sink.exs
 ```
 
 Outside a Mix project, the script installs the latest `slap` release with
-`Mix.install([:slap])`. Inspection requires `slap` 0.5.0 or later.
+`Mix.install([:slap])`.
 
 ### Run from a checkout
 
@@ -100,8 +100,7 @@ Keep the demo running. In a second terminal, run one of the `slap-inspect`
 commands the demo prints. [Install Slap Inspect](#slap-inspect) first if
 needed.
 
-When you run the demo from a checkout, use the inspector from the same
-checkout. From the repository root:
+To use an inspector built from your checkout, run from the repository root:
 
 ```sh
 nix develop
