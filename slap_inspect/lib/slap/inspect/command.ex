@@ -61,6 +61,14 @@ defmodule Slap.Inspect.Command do
     end
   end
 
+  # quote/1 writes the query editor's syntax, which split/1 reads back;
+  # shell_quote/1 writes POSIX sh syntax, for commands run in a shell.
+  def shell_quote(word) do
+    if Regex.match?(~r/\A[A-Za-z0-9_@%+=:,.\/-]+\z/, word),
+      do: word,
+      else: "'" <> String.replace(word, "'", "'\\''") <> "'"
+  end
+
   defp escaped(?b), do: "\b"
   defp escaped(?f), do: "\f"
   defp escaped(?n), do: "\n"

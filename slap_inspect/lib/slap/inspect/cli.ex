@@ -38,9 +38,10 @@ defmodule Slap.Inspect.CLI do
   Use --offset N --length N for a value or object byte range.
 
   A listing is read one page at a time. A page that has more includes a
-  hexadecimal cursor: pass --cursor HEX back, with --cursor-exclusive if the
-  page reports cursor_exclusive: true. --limit N sets the rows per page (at
-  most 200), --target-bytes N the bytes per page (at most 1 MiB),
+  hexadecimal cursor; with --json, the command for the next page is written
+  to stderr. Pass --cursor HEX back, with --cursor-exclusive if the page
+  reports cursor_exclusive: true. --limit N sets the rows per page (at most
+  200), --target-bytes N the bytes per page (at most 1 MiB),
   --max-value-bytes N the bytes kept from each value (at most 512 KiB) and
   --max-key-bytes N from each key (at most 4096). Terminal pages default to
   the maximums. --json listings default to 50 rows and 256 KiB. Single
@@ -169,6 +170,13 @@ defmodule Slap.Inspect.CLI do
          name_domain: name_domain(host, opts)
        }}
     end
+  end
+
+  # The inverse of endpoint/1.
+  defp endpoint_args(endpoint) do
+    cookie = if endpoint.cookie_file, do: ["--cookie-file", endpoint.cookie_file], else: []
+    longnames = if endpoint.name_domain == :longnames, do: ["--longnames"], else: []
+    ["--node", Atom.to_string(endpoint.entry)] ++ cookie ++ longnames
   end
 
   defp host(entry) do
@@ -324,15 +332,11 @@ defmodule Slap.Inspect.CLI do
       else: :error
   end
 
-  def command(request) do
+  def command(request), do: request |> words() |> Enum.map_join(" ", &Command.quote/1)
+
+  defp words(request) do
     {:ok, operation, definition} = Operation.normalize(request.view, request.opts)
-
-    command =
-      Enum.join(
-        [definition.command | Enum.map(Map.get(definition, :flags, []), &Feedback.option/1)],
-        " "
-      )
-
+    flags = Enum.map(Map.get(definition, :flags, []), &Feedback.option/1)
     options = Enum.flat_map(request.opts, &command_option/1)
     shard = if is_nil(request.shard), do: [], else: ["--shard", to_string(request.shard)]
 
@@ -341,24 +345,30 @@ defmodule Slap.Inspect.CLI do
         do: [],
         else: ["--budget", to_string(request.budget)]
 
-    Enum.join([command | shard ++ options ++ budget], " ")
+    [definition.command | flags] ++ shard ++ options ++ budget
+  end
+
+  def shell_command(endpoint, cluster, request) do
+    ["slap-inspect" | endpoint_args(endpoint)]
+    |> Enum.concat(["--cluster", inspect(cluster), "--json" | words(request)])
+    |> Enum.map_join(" ", &Command.shell_quote/1)
   end
 
   defp command_option({:roots, roots}),
-    do: Enum.flat_map(roots, fn {name, type} -> ["--root", Command.quote("#{type}:#{name}")] end)
+    do: Enum.flat_map(roots, fn {name, type} -> ["--root", "#{type}:#{name}"] end)
 
   defp command_option({:value_range, {offset, length}}),
     do: ["--offset", to_string(offset), "--length", to_string(length)]
 
   defp command_option({key, value}) when key in [:prefix, :key_prefix, :key, :cursor],
-    do: [Feedback.option(key), Command.quote(Base.encode16(value, case: :lower))]
+    do: [Feedback.option(key), Base.encode16(value, case: :lower)]
 
   defp command_option({_key, false}), do: []
   defp command_option({key, true}), do: [Feedback.option(key)]
 
   defp command_option({key, value}) do
     if Keyword.has_key?(@switches, key),
-      do: [Feedback.option(key), Command.quote(to_string(value))],
+      do: [Feedback.option(key), to_string(value)],
       else: []
   end
 
@@ -368,7 +378,7 @@ defmodule Slap.Inspect.CLI do
         with :ok <- connect(endpoint), do: list(endpoint.entry)
 
       {:ok, endpoint, cluster, request, mode} ->
-        with :ok <- connect(endpoint), do: read(endpoint.entry, cluster, request, mode)
+        with :ok <- connect(endpoint), do: read(endpoint, cluster, request, mode)
 
       error ->
         error
@@ -378,8 +388,10 @@ defmodule Slap.Inspect.CLI do
   defp connect(endpoint),
     do: Remote.connect(endpoint.entry, endpoint.cookie_file, name_domain: endpoint.name_domain)
 
-  defp read(entry, cluster, request, %{json: true}), do: json(entry, cluster, request)
-  defp read(entry, cluster, request, mode), do: terminal(entry, cluster, request, mode)
+  defp read(endpoint, cluster, request, %{json: true}), do: json(endpoint, cluster, request)
+
+  defp read(endpoint, cluster, request, mode),
+    do: terminal(endpoint.entry, cluster, request, mode)
 
   defp list(entry) do
     with {:ok, clusters} <- Clusters.discover(entry) do
@@ -391,21 +403,30 @@ defmodule Slap.Inspect.CLI do
   defp listed(cluster),
     do: %{cluster | cluster: inspect(cluster.cluster)} |> Map.put(:views, Clusters.views(cluster))
 
-  defp json(entry, cluster, request) do
-    with {:ok, clusters} <- Clusters.load(entry, cluster),
-         {:ok, cluster} <- Clusters.only(clusters, request.view) do
-      {:ok, worker} = Requests.start_link(client: self(), read: &Query.execute/2)
-      id = make_ref()
-      Requests.submit(worker, id, %{entry: entry, cluster: cluster}, request)
-      await_json(id)
+  defp json(endpoint, cluster, request) do
+    with {:ok, clusters} <- Clusters.load(endpoint.entry, cluster),
+         {:ok, cluster} <- Clusters.only(clusters, request.view),
+         {:ok, page} <- fetch_page(endpoint.entry, cluster, request) do
+      IO.puts(JSON.encode(page))
+
+      case Request.next(request, page) do
+        nil -> :ok
+        next -> IO.puts(:stderr, "Next page: " <> shell_command(endpoint, cluster, next))
+      end
     end
+  end
+
+  defp fetch_page(entry, cluster, request) do
+    {:ok, worker} = Requests.start_link(client: self(), read: &Query.execute/2)
+    id = make_ref()
+    Requests.submit(worker, id, %{entry: entry, cluster: cluster}, request)
+    await_json(id)
   end
 
   defp await_json(id) do
     receive do
       {:inspection_result, ^id, {:ok, page}} ->
-        IO.puts(JSON.encode(page))
-        :ok
+        {:ok, page}
 
       {:inspection_result, ^id, {:error, _} = error} ->
         error

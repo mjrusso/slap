@@ -3,7 +3,7 @@ defmodule Slap.Inspect.CLITest do
 
   import ExUnit.CaptureIO
 
-  alias Slap.Inspect.{Bytes, CLI, Clusters, Command, JSON, Query, Remote}
+  alias Slap.Inspect.{Bytes, CLI, Clusters, Command, JSON, Query, Remote, Request}
 
   @connection [
     "--node",
@@ -204,6 +204,24 @@ defmodule Slap.Inspect.CLITest do
       refute Keyword.has_key?(opts, :limit)
       refute Keyword.has_key?(opts, :target_bytes)
     end
+  end
+
+  test "the next page's JSON command runs in a shell and reads from the page's cursor" do
+    {:ok, endpoint, cluster, request, _mode} =
+      CLI.parse(
+        ["--node", "slap@localhost", "--longnames", "--cookie-file", "/my cookie's"] ++
+          ["--cluster", "Slap.KV.Cluster", "--json", "kv", "--partition", "it's users"]
+      )
+
+    assert Request.next(request, %{cursor: nil}) == nil
+    next = Request.next(request, %{cursor: <<0, 255>>, cursor_exclusive: true})
+    command = CLI.shell_command(endpoint, cluster, next)
+
+    assert {output, 0} = System.cmd("sh", ["-c", "printf '%s\\0' " <> command])
+    ["slap-inspect" | args] = output |> String.split(<<0>>) |> Enum.drop(-1)
+
+    assert {:ok, ^endpoint, ^cluster, restored, %{json: true}} = CLI.parse(args)
+    assert Enum.sort(restored.opts) == Enum.sort(next.opts)
   end
 
   test "editable queries reject connection and process options" do

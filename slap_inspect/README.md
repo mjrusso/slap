@@ -300,7 +300,9 @@ For object previews from a named Files instance, pass
 pairs, optionally separated by spaces. Quote values containing spaces, as
 in `--prefix "00 ff"`. KV partition names are literal text.
 Resume a returned cursor with `--cursor HEX`; also pass `--cursor-exclusive`
-if the page reports `cursor_exclusive: true`.
+if the page reports `cursor_exclusive: true`. With `--json`, when a page has
+a cursor, the inspector also writes the command for the next page to stderr,
+after `Next page: `.
 
 `--offset N --length N` selects a byte range for `get` or `object`. Offsets
 must be nonnegative; lengths cannot exceed `--max-value-bytes` (at most
