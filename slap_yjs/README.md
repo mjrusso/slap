@@ -70,7 +70,7 @@ application's `mix.exs`:
 ```elixir
 defp deps do
   [
-    {:slap_yjs, "~> 0.4.0"}
+    {:slap_yjs, "~> 0.5.0"}
   ]
 end
 ```
