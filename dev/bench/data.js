@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793631294510,
+  "lastUpdate": 1793631296140,
   "repoUrl": "https://github.com/mjrusso/slap",
   "entries": {
     "slap_slatedb (lower is better)": [
@@ -6705,6 +6705,130 @@ window.BENCHMARK_DATA = {
           {
             "name": "s3 +20ms: 64 shards: durable puts",
             "value": 3598,
+            "unit": "ops/s"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "mjr@mjrusso.com",
+            "name": "Michael Russo",
+            "username": "mjrusso"
+          },
+          "committer": {
+            "email": "mjr@mjrusso.com",
+            "name": "Michael Russo",
+            "username": "mjrusso"
+          },
+          "distinct": true,
+          "id": "d7ed350f04f1b1e8e4bd929289d6a6510a74035a",
+          "message": "chore(slap): prepare 0.5.0 release",
+          "timestamp": "2026-11-02T09:48:24-05:00",
+          "tree_id": "ab9740190cf9e69ca187e78f89ee6212a26d903d",
+          "url": "https://github.com/mjrusso/slap/commit/d7ed350f04f1b1e8e4bd929289d6a6510a74035a"
+        },
+        "date": 1793631295876,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "s3: durable puts x64",
+            "value": 633,
+            "unit": "ops/s"
+          },
+          {
+            "name": "s3: writes x16",
+            "value": 144726,
+            "unit": "ops/s"
+          },
+          {
+            "name": "s3: scan",
+            "value": 684041,
+            "unit": "rows/s"
+          },
+          {
+            "name": "s3 +20ms: durable puts x64",
+            "value": 632,
+            "unit": "ops/s"
+          },
+          {
+            "name": "s3 +20ms: writes x16",
+            "value": 116232,
+            "unit": "ops/s"
+          },
+          {
+            "name": "s3 +20ms: scan",
+            "value": 656858,
+            "unit": "rows/s"
+          },
+          {
+            "name": "s3: flush 5 ms: durable puts x64",
+            "value": 10590,
+            "unit": "ops/s"
+          },
+          {
+            "name": "s3: flush 10 ms: durable puts x64",
+            "value": 5781,
+            "unit": "ops/s"
+          },
+          {
+            "name": "s3: flush 20 ms: durable puts x64",
+            "value": 3034,
+            "unit": "ops/s"
+          },
+          {
+            "name": "s3: flush 100 ms: durable puts x64",
+            "value": 633,
+            "unit": "ops/s"
+          },
+          {
+            "name": "s3: 8 shards: durable puts",
+            "value": 2852,
+            "unit": "ops/s"
+          },
+          {
+            "name": "s3: 16 shards: durable puts",
+            "value": 3817,
+            "unit": "ops/s"
+          },
+          {
+            "name": "s3: 64 shards: durable puts",
+            "value": 3793,
+            "unit": "ops/s"
+          },
+          {
+            "name": "s3 +20ms: flush 5 ms: durable puts x64",
+            "value": 1919,
+            "unit": "ops/s"
+          },
+          {
+            "name": "s3 +20ms: flush 10 ms: durable puts x64",
+            "value": 1891,
+            "unit": "ops/s"
+          },
+          {
+            "name": "s3 +20ms: flush 20 ms: durable puts x64",
+            "value": 2129,
+            "unit": "ops/s"
+          },
+          {
+            "name": "s3 +20ms: flush 100 ms: durable puts x64",
+            "value": 633,
+            "unit": "ops/s"
+          },
+          {
+            "name": "s3 +20ms: 8 shards: durable puts",
+            "value": 1199,
+            "unit": "ops/s"
+          },
+          {
+            "name": "s3 +20ms: 16 shards: durable puts",
+            "value": 2190,
+            "unit": "ops/s"
+          },
+          {
+            "name": "s3 +20ms: 64 shards: durable puts",
+            "value": 3505,
             "unit": "ops/s"
           }
         ]
