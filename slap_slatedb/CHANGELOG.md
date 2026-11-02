@@ -1,44 +1,40 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
-- `config :rustler_precompiled, :force_build, slap_slatedb: true` now builds
-  the NIF from source. Previously it had no effect, and only
-  `SLAP_SLATEDB_BUILD=1` forced a build.
-- Adds `get_range/3`, which reads at most `:max_value_bytes` of a value
-  (optionally from `:value_range`) and returns the value's full size. It
-  limits the bytes copied into the BEAM; SlateDB still loads the whole value
-  in native memory.
-- Adds `preview_iterator/2`, an iterator that cuts keys and values to
-  `:max_key_bytes` and `:max_value_bytes` and returns their full sizes. It
-  limits the bytes copied into the BEAM; SlateDB still loads whole rows in
-  native memory.
-- Local stores (`{:local, directory}`) support conditional updates
-  (`{:update, version}`), so SlateDB's garbage collector removes obsolete
-  metadata on every run, not only the first, and `slap_cluster`'s
-  `ObjectLease` strategy works with a local store. Conditional updates return
-  `:unsupported` on filesystems without microsecond modification times.
-- Writes under one local store root now run one at a time. Before upgrading,
-  stop processes running older versions. Open the same root in every process
-  that uses the data, and do not delete the `.slap-lock#0` file in the root.
+- If using local storage (`{:local, directory}`), writes now share one
+  exclusive OS lock per store root. Before starting this version, stop all
+  processes accessing that store with older `slap_slatedb` versions, which do
+  not take this lock. Use the same root in every process accessing the data,
+  and keep the root's `.slap-lock#0` file.
 - Local stores reject recognized network filesystems, including NFS and
   SMB/CIFS.
 - Local stores sync object writes and completed uploads to disk with `fsync`.
-  On Unix, directory changes are synced too. Data survives OS crashes and power
-  loss more reliably, and writes and opens can take longer.
+  On Unix, they also sync directory changes. Persistence depends on the
+  filesystem and device honoring sync requests. Writes and opens can take
+  longer.
+- Local stores support conditional updates (`{:update, version}`). This lets
+  SlateDB's garbage collector remove obsolete metadata on subsequent runs and
+  lets `slap_cluster` use `ObjectLease` on local storage. Conditional updates
+  return `:unsupported` on filesystems without microsecond modification times.
+- Fixes `config :rustler_precompiled, :force_build, slap_slatedb: true` being
+  ignored. It now builds the NIF from source, as `SLAP_SLATEDB_BUILD=1` does.
+- Adds `get_range/3` to preview a value with `:max_value_bytes` and optional
+  `:value_range`, and `preview_iterator/2` to preview keys and values with
+  `:max_key_bytes` and `:max_value_bytes`. Both return full sizes and limit
+  bytes copied into the BEAM; SlateDB still loads whole rows in native memory.
 
 ## 0.2.0
 
-- Upgrade SlateDB to 0.17. Databases written by 0.16 open unchanged.
-- Keys can be up to 4 GiB long; the previous limit was 65,535 bytes.
-- `Slap.SlateDB.Iterator.seek/3` returns an `:invalid` error for an iterator
-  with `order: :desc`.
+- Upgrades SlateDB to 0.17. Databases written by 0.16 open unchanged.
+- `Slap.SlateDB.Iterator.seek/3` returns an error with `kind: :invalid` for an
+  iterator with `order: :desc`.
+- Raises the maximum key size from 65,535 bytes to 4 GiB minus one byte.
+- `Slap.SlateDB.ObjectStore.download/3` accepts `range: {first, last}`
+  (inclusive) to download part of an object.
 - SlateDB 0.17's new settings can be passed in `:settings`, among them
   `compactor_options.checkpoint_lifetime` and
   `compactor_options.scheduler_options.sorted_run_consolidation_threshold`.
-- Ranged downloads: `Slap.SlateDB.ObjectStore.download/3` takes
-  `range: {first, last}` (inclusive) and downloads only those bytes of the
-  object.
 
 ## 0.1.0
 
