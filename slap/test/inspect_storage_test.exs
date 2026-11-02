@@ -75,20 +75,18 @@ defmodule Slap.InspectStorageTest do
 
   test "a real S3 stall reports its owner and sends only the latest waiting request", context do
     connection = %{entry: node(), cluster: Streams.Cluster}
-
-    worker =
-      start_supervised!({Requests, client: self(), read: &Query.execute(connection, &1)})
+    worker = start_supervised!({Requests, client: self(), read: &Query.execute/2})
 
     request = %{view: :raw, shard: 0, budget: 300, opts: [prefix: "inspect/"]}
     owner = node()
     StorageProxy.hold(context.proxy, :sst)
 
     try do
-      Requests.submit(worker, 1, request)
+      Requests.submit(worker, 1, connection, request)
       assert_receive {:storage_blocked, _, "GET " <> _}, 5000
       reads = StorageProxy.reads(context.proxy)
       latest = %{request | view: :get, opts: [key: List.last(context.keys)]}
-      for id <- 2..20, do: Requests.submit(worker, id, latest)
+      for id <- 2..20, do: Requests.submit(worker, id, connection, latest)
       assert_receive {:inspection_stalled, 1, ^owner, 0}, 5000
       assert StorageProxy.reads(context.proxy) == reads
       refute_received {:inspection_result, _, _}

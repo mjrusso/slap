@@ -4,7 +4,7 @@ defmodule Slap.InspectRemoteErrorsTest do
 
   import Slap.Test.InspectPeers
 
-  alias Slap.Inspect.Remote
+  alias Slap.Inspect.{Clusters, Remote}
   alias Slap.Streams.Introspect
 
   setup do
@@ -46,6 +46,13 @@ defmodule Slap.InspectRemoteErrorsTest do
     """)
 
     %{owner: owner}
+  end
+
+  test "a server that cannot list its clusters asks for --cluster, which offers every view",
+       %{owner: owner} do
+    assert {:error, :discovery_unsupported} = Clusters.load(owner, nil)
+    assert {:ok, [%{cluster: Named} = named]} = Clusters.load(owner, Named)
+    assert Clusters.views(named) == [:raw, :streams, :kv, :files, :log, :yjs]
   end
 
   test "endpoint errors, exits and throws retain bounded diagnostics", %{owner: owner} do
