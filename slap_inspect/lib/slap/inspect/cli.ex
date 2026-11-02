@@ -36,6 +36,16 @@ defmodule Slap.Inspect.CLI do
   for KV, and --sid N for messages or retention. --placement-key overrides stream
   routing. --prefix, --key, --key-prefix and --cursor take hexadecimal pairs.
   Use --offset N --length N for a value or object byte range.
+
+  A listing is read one page at a time. A page that has more includes a
+  hexadecimal cursor: pass --cursor HEX back, with --cursor-exclusive if the
+  page reports cursor_exclusive: true. --limit N sets the rows per page (at
+  most 200), --target-bytes N the bytes per page (at most 1 MiB),
+  --max-value-bytes N the bytes kept from each value (at most 512 KiB) and
+  --max-key-bytes N from each key (at most 4096). Terminal pages default to
+  the maximums. --json listings default to 50 rows and 256 KiB. Single
+  records, document content, log --base without --component, and yjs --base
+  keep the maximums.
   --budget MS defaults to 5000, or 10000 for document content (maximum 30000).
   --refresh MS refreshes terminal pages at that interval, except Yjs content.
 
@@ -61,6 +71,10 @@ defmodule Slap.Inspect.CLI do
   Distributed Erlang permits full remote access; restrict it as you would
   a remote console. The inspector never opens a database.
   """
+
+  # Hexadecimal JSON doubles each stored byte, so --json listings read
+  # smaller pages than the terminal by default.
+  @json_page [limit: 50, target_bytes: 256 * 1024]
 
   @connection_options [:node, :cookie_file, :cluster, :json, :longnames, :refresh]
   @switches [
@@ -179,10 +193,20 @@ defmodule Slap.Inspect.CLI do
   defp selection(endpoint, opts, commands) do
     with {:ok, cluster} <- cluster(opts),
          :ok <- Request.refresh(opts[:refresh] || 0),
-         {:ok, request} <- query(opts, commands),
-         do:
-           {:ok, endpoint, cluster, request,
-            %{json: opts[:json] || false, refresh: opts[:refresh] || 0}}
+         {:ok, request} <- query(opts, commands) do
+      json = opts[:json] || false
+
+      {:ok, endpoint, cluster, json_page(request, json),
+       %{json: json, refresh: opts[:refresh] || 0}}
+    end
+  end
+
+  defp json_page(request, false), do: request
+
+  defp json_page(request, true) do
+    if Operation.listing?(request.operation),
+      do: %{request | opts: Keyword.merge(@json_page, request.opts)},
+      else: request
   end
 
   defp cluster(opts) do

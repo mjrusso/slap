@@ -12,6 +12,7 @@ defmodule Slap.Inspect.Operation do
       command: "scan",
       view: :raw,
       options: [:prefix],
+      listing: true,
       required: [],
       target: {Slap.Cluster.Inspection, :scan},
       menu: 1
@@ -27,6 +28,7 @@ defmodule Slap.Inspect.Operation do
       command: "streams",
       view: :streams,
       options: [:prefix],
+      listing: true,
       required: [],
       target: {Slap.Streams.Introspect, :list},
       menu: 2
@@ -42,6 +44,7 @@ defmodule Slap.Inspect.Operation do
       command: "messages",
       view: :messages,
       options: @messages,
+      listing: true,
       required: [:sid],
       target: {Slap.Streams.Introspect, :messages}
     },
@@ -49,6 +52,7 @@ defmodule Slap.Inspect.Operation do
       command: "logical",
       view: :logical,
       options: @stream ++ [:from, :until, :retained],
+      listing: true,
       required: [:path],
       target: {Slap.Streams.Introspect, :messages}
     },
@@ -56,6 +60,7 @@ defmodule Slap.Inspect.Operation do
       command: "retention",
       view: :retention,
       options: @stream ++ [:sid, :pins],
+      listing: true,
       required: [:sid],
       target: {Slap.Streams.Introspect, :retention}
     },
@@ -63,6 +68,7 @@ defmodule Slap.Inspect.Operation do
       command: "retention",
       view: :retention,
       options: @stream ++ [:sid, :pins],
+      listing: true,
       required: [:sid, :path],
       target: {Slap.Streams.Introspect, :retention}
     },
@@ -70,6 +76,7 @@ defmodule Slap.Inspect.Operation do
       command: "kv",
       view: :kv,
       options: [:partition, :key_prefix],
+      listing: true,
       required: [],
       target: {Slap.KV.Introspect, :scan},
       route: :partition,
@@ -79,6 +86,7 @@ defmodule Slap.Inspect.Operation do
       command: "files",
       view: :files,
       options: [:partition, :key_prefix, :instance],
+      listing: true,
       required: [],
       target: {Slap.Files.Introspect, :scan},
       route: :partition,
@@ -104,6 +112,7 @@ defmodule Slap.Inspect.Operation do
       command: "log",
       view: :log,
       options: @log,
+      listing: true,
       required: [:base, :component],
       target: {Slap.SnapshotLog.Introspect, :messages}
     },
@@ -111,6 +120,7 @@ defmodule Slap.Inspect.Operation do
       command: "yjs",
       view: :yjs,
       options: @yjs,
+      listing: true,
       required: [:sid],
       target: {Slap.Yjs.Introspect, :messages}
     },
@@ -226,6 +236,15 @@ defmodule Slap.Inspect.Operation do
   def target(operation), do: Map.fetch!(@definitions, operation).target
 
   def route(operation), do: Map.get(Map.fetch!(@definitions, operation), :route, :stream)
+
+  @doc """
+  Whether a smaller page of `operation` holds fewer rows and nothing else
+  changes. Log catalogs and Yjs logs are not listings: the component reads
+  that recognize their log use the request's byte limits, and recognition
+  needs complete component pages.
+  """
+  def listing?(operation), do: Map.get(Map.fetch!(@definitions, operation), :listing, false)
+
   def budget(operation), do: Map.get(Map.fetch!(@definitions, operation), :budget, 5000)
   def targets, do: for(%{target: target} <- Map.values(@definitions), uniq: true, do: target)
 

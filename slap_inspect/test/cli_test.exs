@@ -185,6 +185,27 @@ defmodule Slap.Inspect.CLITest do
     end
   end
 
+  test "JSON listings read smaller pages unless the command sets their size" do
+    assert {:ok, _, _, %{opts: opts}, _} = CLI.parse(@connection ++ ["--json", "scan"])
+    assert {opts[:limit], opts[:target_bytes]} == {50, 256 * 1024}
+
+    assert {:ok, _, _, %{opts: opts}, _} =
+             CLI.parse(@connection ++ ["--json", "scan", "--limit", "200"])
+
+    assert {opts[:limit], opts[:target_bytes]} == {200, 256 * 1024}
+
+    for args <- [
+          ["scan"],
+          ["--json", "get", "--key", "61"],
+          ["--json", "log", "--base", "/l"],
+          ["--json", "yjs", "--base", "/d", "--sid", "3"]
+        ] do
+      assert {:ok, _, _, %{opts: opts}, _} = CLI.parse(@connection ++ args)
+      refute Keyword.has_key?(opts, :limit)
+      refute Keyword.has_key?(opts, :target_bytes)
+    end
+  end
+
   test "editable queries reject connection and process options" do
     for option <- ["--cluster", "--node", "--cookie-file", "--refresh"] do
       assert {:error, _} = CLI.parse_query(["scan", option, "another"])

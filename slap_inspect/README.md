@@ -440,11 +440,14 @@ received a reply, or never will. Pages and object lookups can observe
 different states; a missing row or object alone does not establish
 corruption.
 
-Pages default to 200 rows and a 1 MiB target, with previews capped at
-4 KiB per key and 512 KiB per value. Use `--limit`, `--target-bytes`,
-`--max-key-bytes` and `--max-value-bytes` to lower these limits. SlateDB still
-loads full rows in native memory. Malformed or truncated records are shown
-with their bytes and a diagnostic.
+Terminal pages default to 200 rows and a 1 MiB target, and `--json`
+listings to 50 rows and 256 KiB. A page includes the row that crosses its
+target. Single-record reads, Yjs content, `log --base` without
+`--component`, and `yjs --base` always use the terminal defaults. Previews
+are capped at 4 KiB per key and 512 KiB per value. Use `--limit`,
+`--target-bytes`, `--max-key-bytes` and `--max-value-bytes` to lower these
+limits. SlateDB still loads full rows in native memory. Malformed or truncated
+records are shown with their bytes and a diagnostic.
 
 A key longer than `--max-key-bytes` is shown cut to that length, and the page
 ends at it. The next page starts after every key that begins with the shown
