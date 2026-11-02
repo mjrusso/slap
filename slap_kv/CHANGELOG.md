@@ -1,21 +1,22 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
-- Adds `Slap.KV.batch/3` and JSON `POST /v1/kv/{partition}`, which apply
-  several puts, deletes and condition checks within one partition
-  atomically.
-- By default, each shard now limits how many writes and linearizable reads,
-  and how many bytes of them, can wait for durability. A request over the
-  limits fails with `{:error, :overloaded}` (HTTP 503), or with
-  `{:error, {:bad_request, :request_too_large}}` (HTTP 413) if it could never
-  fit; in both cases it was not applied. Set the limits in the cluster's
+- Each shard now limits the requests and bytes waiting for durability from
+  writes and linearizable reads. A request that exceeds current capacity
+  returns `{:error, :overloaded}` (HTTP 503). One that exceeds a byte limit by
+  itself returns `{:error, {:bad_request, :request_too_large}}` (HTTP 413).
+  Rejected requests are not applied. Configure the limits in the cluster's
   `child_options`; see
   [Limits on pending work](README.md#limits-on-pending-work).
-- Adds telemetry events for rejected requests and for pending work; see
-  `Slap.KV.Telemetry`.
+- Adds `Slap.KV.batch/3` and JSON `POST /v1/kv/{partition}` for atomic puts,
+  deletes and condition checks within one partition. Batches default to at most
+  1,000 operations and 8 MiB of encoded keys and values. Larger batches return
+  `{:error, {:bad_request, :batch_too_large}}` (HTTP 413).
 - Adds read-only partition inspection for
   [Slap Inspect](https://hexdocs.pm/slap_inspect/).
+- Adds telemetry events for rejected requests and pending work; see
+  `Slap.KV.Telemetry`.
 
 ## 0.4.0
 
@@ -25,9 +26,8 @@
 
 ## 0.3.0
 
-- `Slap.KV.Cluster` now sets SlateDB's `flush_interval` to 10 ms instead of
-  using SlateDB's 100 ms default. Other settings leave this default intact;
-  pass `settings: %{flush_interval: "100ms"}` to restore the old interval.
+- `Slap.KV.Cluster` sets the default SlateDB `flush_interval` to 10 ms. Pass
+  `settings: %{flush_interval: "100ms"}` to restore the previous default.
 - With `probe: :background`, the cluster starts before its store is available.
   Operations return `{:error, :unavailable}` until its shards open.
 
