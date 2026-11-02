@@ -279,7 +279,9 @@ defmodule Slap.SlateDB do
     * `:durability`, `:dirty`, `:cache_blocks`, `:timeout` - as for `get/3`.
   """
   @spec get_range(t(), binary(), keyword()) ::
-          {:ok, Slap.SlateDB.Read.preview() | nil} | {:error, SlateDB.Error.t()}
+          {:ok,
+           %{value: binary(), value_size: non_neg_integer(), offset: non_neg_integer()} | nil}
+          | {:error, SlateDB.Error.t()}
   def get_range(%__MODULE__{} = db, key, opts), do: Read.get_range(db, key, opts)
 
   @doc """

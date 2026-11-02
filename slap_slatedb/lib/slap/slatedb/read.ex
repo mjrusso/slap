@@ -7,8 +7,6 @@ defmodule Slap.SlateDB.Read do
 
   alias Slap.SlateDB.{Native, Options}
 
-  @type preview :: %{value: binary(), value_size: non_neg_integer(), offset: non_neg_integer()}
-
   def get(%{resource: resource}, key, opts) when is_binary(key) do
     read_opts = Options.read(opts)
     Native.call(&Native.read_get(resource, key, read_opts, &1), Native.timeout(opts))
