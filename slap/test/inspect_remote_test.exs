@@ -1,10 +1,10 @@
 defmodule Slap.InspectRemoteTest do
-  # The test owns distributed Erlang and the named Streams clusters on its peers.
+  # The test owns distributed Erlang and the named clusters on its peers.
   use ExUnit.Case, async: false
 
   import Slap.Test.InspectPeers
 
-  alias Slap.{SnapshotLog, Streams}
+  alias Slap.{KV, SnapshotLog, Streams}
   alias Slap.Streams.Introspect
   alias Slap.Yjs.Frame
 
@@ -18,8 +18,8 @@ defmodule Slap.InspectRemoteTest do
     {_entry_peer, entry} = peer("inspect-entry")
     {_owner_peer, owner} = peer("inspect-owner")
     {_inspector_peer, inspector} = peer("inspect-client", [~c"-hidden"])
-    start_cluster(entry, [entry, owner])
-    start_cluster(owner, [entry, owner])
+    start_cluster(entry, Streams.Cluster, nodes: [entry, owner])
+    start_cluster(owner, Streams.Cluster, nodes: [entry, owner])
     assert true = :erpc.call(entry, Node, :connect, [owner], 5000)
 
     for node <- [entry, owner],
@@ -41,16 +41,12 @@ defmodule Slap.InspectRemoteTest do
     assert %{decoded: {:ok, %{value: %{sid: sid}}}} = page.row
 
     assert {:ok, messages} =
-             :erpc.call(
-               inspector,
-               @query,
-               :execute,
-               [
-                 %{entry: entry, cluster: Streams.Cluster},
-                 %{view: :messages, shard: 1, budget: 5000, opts: [sid: sid]}
-               ],
-               10_000
-             )
+             query(inspector, entry, Streams.Cluster, %{
+               view: :messages,
+               shard: 1,
+               budget: 5000,
+               opts: [sid: sid]
+             })
 
     assert [%{value: <<0, 255, 27>>, complete: true}] = messages.messages
 
@@ -69,22 +65,13 @@ defmodule Slap.InspectRemoteTest do
              )
 
     assert {:ok, fork} =
-             :erpc.call(
-               inspector,
-               @query,
-               :execute,
-               [
-                 %{entry: entry, cluster: Streams.Cluster},
-                 %{
-                   view: :logical,
-                   shard: 0,
-                   budget: 5000,
-                   opts: [path: target],
-                   observer: self()
-                 }
-               ],
-               10_000
-             )
+             query(inspector, entry, Streams.Cluster, %{
+               view: :logical,
+               shard: 0,
+               budget: 5000,
+               opts: [path: target],
+               observer: self()
+             })
 
     assert [%{value: <<0, 255, 27>>, complete: true}] = fork.messages
     assert [%{capture: %{source: %{shard: 1, sid: ^sid}}}] = fork.lineage
@@ -93,22 +80,13 @@ defmodule Slap.InspectRemoteTest do
     assert_receive {:inspection_owner, ^owner, 1}
 
     assert {:ok, own} =
-             :erpc.call(
-               inspector,
-               @query,
-               :execute,
-               [
-                 %{entry: entry, cluster: Streams.Cluster},
-                 %{
-                   view: :logical,
-                   shard: 0,
-                   budget: 5000,
-                   opts: [path: target, cursor: fork.cursor],
-                   observer: self()
-                 }
-               ],
-               10_000
-             )
+             query(inspector, entry, Streams.Cluster, %{
+               view: :logical,
+               shard: 0,
+               budget: 5000,
+               opts: [path: target, cursor: fork.cursor],
+               observer: self()
+             })
 
     assert [%{value: "own", complete: true}] = own.messages
     assert_receive {:inspection_owner, ^entry, 0}
@@ -121,21 +99,12 @@ defmodule Slap.InspectRemoteTest do
     assert {:ok, _} = :erpc.call(owner, Application, :ensure_all_started, [:slap_yjs], 10_000)
 
     assert {:ok, %{owner: ^owner, content: {:json, json}, coverage: %{until: ^tail}}} =
-             :erpc.call(
-               inspector,
-               @query,
-               :execute,
-               [
-                 %{entry: entry, cluster: Streams.Cluster},
-                 %{
-                   view: :yjs_content,
-                   shard: 1,
-                   budget: 10_000,
-                   opts: [base: path, roots: [{"body", :text}]]
-                 }
-               ],
-               15_000
-             )
+             query(inspector, entry, Streams.Cluster, %{
+               view: :yjs_content,
+               shard: 1,
+               budget: 10_000,
+               opts: [base: path, roots: [{"body", :text}]]
+             })
 
     assert [%{"value" => "remote content"}] = JSON.decode!(json)["roots"]
 
@@ -158,21 +127,12 @@ defmodule Slap.InspectRemoteTest do
 
     assert {:ok,
             %{owner: ^entry, content: {:json, fork_json}, coverage: %{snapshot_offset: ^tail}}} =
-             :erpc.call(
-               inspector,
-               @query,
-               :execute,
-               [
-                 %{entry: entry, cluster: Streams.Cluster},
-                 %{
-                   view: :yjs_content,
-                   shard: 0,
-                   budget: 10_000,
-                   opts: [base: fork_base, roots: [{"body", :text}]]
-                 }
-               ],
-               15_000
-             )
+             query(inspector, entry, Streams.Cluster, %{
+               view: :yjs_content,
+               shard: 0,
+               budget: 10_000,
+               opts: [base: fork_base, roots: [{"body", :text}]]
+             })
 
     assert [%{"value" => "remote content"}] = JSON.decode!(fork_json)["roots"]
     assert false == :erpc.call(inspector, :code, :is_loaded, [Yex.Doc], 5000)
@@ -205,6 +165,35 @@ defmodule Slap.InspectRemoteTest do
 
     assert {:error, :owner_does_not_support_inspection} =
              read(inspector, entry, 1, :messages, sid: 1)
+  end
+
+  test "an entry with no local shards lists its clusters, and reads go to their owner" do
+    distribute()
+    {_entry_peer, entry} = peer("inspect-discovery-entry")
+    {_owner_peer, owner} = peer("inspect-discovery-owner")
+    {_inspector_peer, inspector} = peer("inspect-discovery-client", [~c"-hidden"])
+    assert true = :erpc.call(entry, Node, :connect, [owner], 5000)
+
+    nodes_and_clusters =
+      for node <- [entry, owner], cluster <- [Streams.Cluster, KV.Cluster], do: {node, cluster}
+
+    # The entry's clusters are ready only once the owner has opened their shards.
+    for {node, cluster} <- nodes_and_clusters,
+        do: start_cluster(node, cluster, assignments: %{owner => [0..1]})
+
+    for {node, cluster} <- nodes_and_clusters,
+        do: assert(:ok == :erpc.call(node, cluster, :await_ready, [10_000], 15_000))
+
+    assert {:ok,
+            [
+              %{cluster: KV.Cluster, shards: 2, local_shards: [], services: [:kv]},
+              %{cluster: Streams.Cluster, shards: 2, local_shards: [], services: [:streams]}
+            ]} = :erpc.call(inspector, Slap.Inspect.Clusters, :discover, [entry])
+
+    streams = %{view: :streams, shard: 0, budget: 5000, opts: []}
+    kv = %{view: :kv, shard: nil, budget: 5000, opts: [partition: "users"]}
+    assert {:ok, %{owner: ^owner}} = query(inspector, entry, Streams.Cluster, streams)
+    assert {:ok, %{owner: ^owner}} = query(inspector, entry, KV.Cluster, kv)
   end
 
   test "an unnamed inspector starts a hidden connection from its cookie file" do
@@ -275,20 +264,33 @@ defmodule Slap.InspectRemoteTest do
     )
   end
 
-  defp start_cluster(node, nodes) do
-    assert {:ok, _} = :erpc.call(node, Application, :ensure_all_started, [:slap_streams], 30_000)
+  defp query(inspector, entry, cluster, request) do
+    connection = %{entry: entry, cluster: cluster}
+    :erpc.call(inspector, @query, :execute, [connection, request], request.budget + 5000)
+  end
+
+  defp start_cluster(node, cluster, static_opts) do
+    assert {:ok, _} =
+             :erpc.call(
+               node,
+               Application,
+               :ensure_all_started,
+               [[:slap_streams, :slap_kv]],
+               30_000
+             )
 
     opts = [
       store: :memory,
       shards: 2,
       settings: %{flush_interval: "2ms"},
-      strategy: {Slap.Cluster.Strategy.Static, nodes: nodes}
+      strategy: {Slap.Cluster.Strategy.Static, static_opts}
     ]
 
     assert {:ok, _} =
              eval(
                node,
-               "{:ok, pid} = Slap.Streams.Cluster.start_link(opts); Process.unlink(pid); :ok",
+               "{:ok, pid} = cluster.start_link(opts); Process.unlink(pid); :ok",
+               cluster: cluster,
                opts: opts
              )
   end
