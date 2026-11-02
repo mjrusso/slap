@@ -48,7 +48,8 @@
 - `probe: :background` starts the cluster before the store passes its probe.
   It retries after 1 s, backs off to at most 30 s, and opens shards only after
   a successful probe.
-- A strategy start failure is now reported under the `Slap.Cluster.Probe`
+- A strategy start failure is now reported under
+  [`Slap.Cluster.Probe`](https://github.com/mjrusso/slap/blob/slap_cluster-v0.3.0/slap_cluster/lib/slap/cluster/probe.ex)
   child id instead of `:strategy`; the reason is unchanged.
 
 ## 0.2.0
