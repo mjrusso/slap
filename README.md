@@ -1,5 +1,7 @@
 ![Slap logo](site/assets/slap.png)
 
+[![slap][slap-badge]][slap-hex] [![slap_streams][slap_streams-badge]][slap_streams-hex] [![slap_kv][slap_kv-badge]][slap_kv-hex] [![slap_files][slap_files-badge]][slap_files-hex] [![slap_yjs][slap_yjs-badge]][slap_yjs-hex] [![slap_slatedb][slap_slatedb-badge]][slap_slatedb-hex] [![slap_cluster][slap_cluster-badge]][slap_cluster-hex] [![slap_snapshot_log][slap_snapshot_log-badge]][slap_snapshot_log-hex] [![slap_inspect][slap_inspect-badge]][slap_inspect-hex]
+
 ***Slap it in a bucket!*** Use object storage as a database.
 
 **Slap** provides Elixir bindings for [SlateDB](https://slatedb.io), and
@@ -72,29 +74,33 @@ same **placement group** on one shard.
 Applications can depend on individual server libraries or on `slap`, which
 includes all seven:
 
-| Package                         | Provides                                                                                                      | Hex                                                                                                                                                                                        |
-|---------------------------------|---------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [`slap_streams`](slap_streams/) | A [Durable Streams](https://durablestreams.com) server, with HTTP, long polling, and SSE.                     | [![Hex](https://img.shields.io/hexpm/v/slap_streams.svg)](https://hex.pm/packages/slap_streams) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_streams) |
-| [`slap_kv`](slap_kv/)           | Partitioned key-value storage with conditional writes, ordered scans, and an HTTP API.                        | [![Hex](https://img.shields.io/hexpm/v/slap_kv.svg)](https://hex.pm/packages/slap_kv) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_kv)                |
-| [`slap_files`](slap_files/)     | File storage. Small bodies go in KV records, which saves object-store PUTs; larger ones go in object storage. | [![Hex](https://img.shields.io/hexpm/v/slap_files.svg)](https://hex.pm/packages/slap_files) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_files)       |
-| [`slap_yjs`](slap_yjs/)         | [Yjs](https://yjs.dev) documents, with replication and presence across nodes.                                 | [![Hex](https://img.shields.io/hexpm/v/slap_yjs.svg)](https://hex.pm/packages/slap_yjs) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_yjs)             |
+| Package                         | Provides                                                                                                      | Hex                                                                                         |
+|---------------------------------|---------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------|
+| [`slap_streams`](slap_streams/) | A [Durable Streams](https://durablestreams.com) server, with HTTP, long polling, and SSE.                     | [![Hex][slap_streams-hex-badge]][slap_streams-hex] [![Docs][docs-badge]][slap_streams-docs] |
+| [`slap_kv`](slap_kv/)           | Partitioned key-value storage with conditional writes, ordered scans, and an HTTP API.                        | [![Hex][slap_kv-hex-badge]][slap_kv-hex] [![Docs][docs-badge]][slap_kv-docs]                |
+| [`slap_files`](slap_files/)     | File storage. Small bodies go in KV records, which saves object-store PUTs; larger ones go in object storage. | [![Hex][slap_files-hex-badge]][slap_files-hex] [![Docs][docs-badge]][slap_files-docs]       |
+| [`slap_yjs`](slap_yjs/)         | [Yjs](https://yjs.dev) documents, with replication and presence across nodes.                                 | [![Hex][slap_yjs-hex-badge]][slap_yjs-hex] [![Docs][docs-badge]][slap_yjs-docs]             |
 
 The services are built on these packages, which you can also use directly:
 
-| Package                                   | Provides                                                                                               | Hex                                                                                                                                                                                                       |
-|-------------------------------------------|--------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [`slap_slatedb`](slap_slatedb/)           | Elixir bindings for SlateDB: reads, writes, transactions, durability subscriptions, and object access. | [![Hex](https://img.shields.io/hexpm/v/slap_slatedb.svg)](https://hex.pm/packages/slap_slatedb) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_slatedb)                |
-| [`slap_cluster`](slap_cluster/)           | Placement, routing, and failover for SlateDB shards across nodes.                                      | [![Hex](https://img.shields.io/hexpm/v/slap_cluster.svg)](https://hex.pm/packages/slap_cluster) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_cluster)                |
-| [`slap_snapshot_log`](slap_snapshot_log/) | An append-only log with snapshots that replace its prefix. Each `slap_yjs` document is a snapshot log. | [![Hex](https://img.shields.io/hexpm/v/slap_snapshot_log.svg)](https://hex.pm/packages/slap_snapshot_log) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap_snapshot_log) |
+| Package                                   | Provides                                                                                               | Hex                                                                                                        |
+|-------------------------------------------|--------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------|
+| [`slap_slatedb`](slap_slatedb/)           | Elixir bindings for SlateDB: reads, writes, transactions, durability subscriptions, and object access. | [![Hex][slap_slatedb-hex-badge]][slap_slatedb-hex] [![Docs][docs-badge]][slap_slatedb-docs]                |
+| [`slap_cluster`](slap_cluster/)           | Placement, routing, and failover for SlateDB shards across nodes.                                      | [![Hex][slap_cluster-hex-badge]][slap_cluster-hex] [![Docs][docs-badge]][slap_cluster-docs]                |
+| [`slap_snapshot_log`](slap_snapshot_log/) | An append-only log with snapshots that replace its prefix. Each `slap_yjs` document is a snapshot log. | [![Hex][slap_snapshot_log-hex-badge]][slap_snapshot_log-hex] [![Docs][docs-badge]][slap_snapshot_log-docs] |
 
 `slap` also provides the standalone Streams and KV server:
 
-| Package                                            | Provides                                                                                 | Hex                                                                                                                                                                |
-|----------------------------------------------------|------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [`slap`](slap/README.md#try-the-standalone-server) | All Slap server libraries and a standalone HTTP server (`mix slap.server`) for Streams and KV. | [![Hex](https://img.shields.io/hexpm/v/slap.svg)](https://hex.pm/packages/slap) [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/slap) |
+| Package                                            | Provides                                                                                       | Hex                                                                 |
+|----------------------------------------------------|------------------------------------------------------------------------------------------------|---------------------------------------------------------------------|
+| [`slap`](slap/README.md#try-the-standalone-server) | All Slap server libraries and a standalone HTTP server (`mix slap.server`) for Streams and KV. | [![Hex][slap-hex-badge]][slap-hex] [![Docs][docs-badge]][slap-docs] |
 
-For read-only terminal and JSON inspection of a running cluster, install
-[`slap_inspect`](slap_inspect/README.md) separately.
+`slap_inspect` browses the data of a running cluster. It is installed
+separately and does not depend on the server libraries:
+
+| Package                         | Provides                                        | Hex                                                                                         |
+|---------------------------------|-------------------------------------------------|---------------------------------------------------------------------------------------------|
+| [`slap_inspect`](slap_inspect/) | A read-only TUI and CLI for browsing Slap data. | [![Hex][slap_inspect-hex-badge]][slap_inspect-hex] [![Docs][docs-badge]][slap_inspect-docs] |
 
 ## Usage Examples
 
@@ -354,3 +360,41 @@ builds the SlateDB NIF from source (this needs Rust).
 Slap is released under the terms of the [Apache License 2.0](LICENSE).
 
 Copyright (c) 2026, [Michael Russo](https://mjrusso.com).
+
+[slap-badge]: https://img.shields.io/hexpm/v/slap?label=slap
+[slap-hex-badge]: https://img.shields.io/hexpm/v/slap.svg
+[slap-hex]: https://hex.pm/packages/slap
+[slap-docs]: https://hexdocs.pm/slap
+[slap_streams-badge]: https://img.shields.io/hexpm/v/slap_streams?label=slap_streams
+[slap_streams-hex-badge]: https://img.shields.io/hexpm/v/slap_streams.svg
+[slap_streams-hex]: https://hex.pm/packages/slap_streams
+[slap_streams-docs]: https://hexdocs.pm/slap_streams
+[slap_kv-badge]: https://img.shields.io/hexpm/v/slap_kv?label=slap_kv
+[slap_kv-hex-badge]: https://img.shields.io/hexpm/v/slap_kv.svg
+[slap_kv-hex]: https://hex.pm/packages/slap_kv
+[slap_kv-docs]: https://hexdocs.pm/slap_kv
+[slap_files-badge]: https://img.shields.io/hexpm/v/slap_files?label=slap_files
+[slap_files-hex-badge]: https://img.shields.io/hexpm/v/slap_files.svg
+[slap_files-hex]: https://hex.pm/packages/slap_files
+[slap_files-docs]: https://hexdocs.pm/slap_files
+[slap_yjs-badge]: https://img.shields.io/hexpm/v/slap_yjs?label=slap_yjs
+[slap_yjs-hex-badge]: https://img.shields.io/hexpm/v/slap_yjs.svg
+[slap_yjs-hex]: https://hex.pm/packages/slap_yjs
+[slap_yjs-docs]: https://hexdocs.pm/slap_yjs
+[slap_slatedb-badge]: https://img.shields.io/hexpm/v/slap_slatedb?label=slap_slatedb
+[slap_slatedb-hex-badge]: https://img.shields.io/hexpm/v/slap_slatedb.svg
+[slap_slatedb-hex]: https://hex.pm/packages/slap_slatedb
+[slap_slatedb-docs]: https://hexdocs.pm/slap_slatedb
+[slap_cluster-badge]: https://img.shields.io/hexpm/v/slap_cluster?label=slap_cluster
+[slap_cluster-hex-badge]: https://img.shields.io/hexpm/v/slap_cluster.svg
+[slap_cluster-hex]: https://hex.pm/packages/slap_cluster
+[slap_cluster-docs]: https://hexdocs.pm/slap_cluster
+[slap_snapshot_log-badge]: https://img.shields.io/hexpm/v/slap_snapshot_log?label=slap_snapshot_log
+[slap_snapshot_log-hex-badge]: https://img.shields.io/hexpm/v/slap_snapshot_log.svg
+[slap_snapshot_log-hex]: https://hex.pm/packages/slap_snapshot_log
+[slap_snapshot_log-docs]: https://hexdocs.pm/slap_snapshot_log
+[slap_inspect-badge]: https://img.shields.io/hexpm/v/slap_inspect?label=slap_inspect
+[slap_inspect-hex-badge]: https://img.shields.io/hexpm/v/slap_inspect.svg
+[slap_inspect-hex]: https://hex.pm/packages/slap_inspect
+[slap_inspect-docs]: https://hexdocs.pm/slap_inspect
+[docs-badge]: https://img.shields.io/badge/hex-docs-blue.svg
