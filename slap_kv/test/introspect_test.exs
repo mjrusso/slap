@@ -7,6 +7,17 @@ defmodule Slap.KV.IntrospectTest do
     use Slap.Cluster, otp_app: :slap_kv
   end
 
+  defmodule AppCluster do
+    use Slap.KV.Cluster, otp_app: :slap_kv
+  end
+
+  test "an application-defined KV cluster is discovered with the kv service" do
+    start_supervised!({AppCluster, store: :memory, shards: 2})
+
+    assert %{shards: 2, services: [:kv]} =
+             Enum.find(Slap.Cluster.clusters(), &(&1.cluster == AppCluster))
+  end
+
   test "invalid partitions are rejected before keys are read" do
     start_supervised!({Cluster, store: :memory, shards: 1})
     assert :ok = Cluster.await_ready(5000)

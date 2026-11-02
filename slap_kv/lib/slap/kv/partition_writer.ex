@@ -21,6 +21,10 @@ defmodule Slap.KV.PartitionWriter do
 
   @doc false
   @impl true
+  def services, do: [:kv]
+
+  @doc false
+  @impl true
   def child_specs(ctx) do
     count = Admission.options!(ctx.child_options).partition_writers
 
