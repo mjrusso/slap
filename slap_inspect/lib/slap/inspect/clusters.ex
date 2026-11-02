@@ -1,27 +1,14 @@
 defmodule Slap.Inspect.Clusters do
   @moduledoc false
 
-  # A server that predates Slap.Cluster.clusters/0 cannot be asked for its
-  # clusters. A cluster named with --cluster on such a server has `:unknown`
-  # services and offers every view.
-
   alias Slap.Inspect.{Operation, Remote}
 
-  def discover(entry) do
-    case Remote.call(entry, Slap.Cluster, :clusters, []) do
-      {:error, :owner_does_not_support_inspection} -> {:error, :discovery_unsupported}
-      result -> result
-    end
-  end
+  def discover(entry), do: Remote.call(entry, Slap.Cluster, :clusters, [])
 
   def load(entry, nil), do: discover(entry)
 
   def load(entry, cluster) do
-    case discover(entry) do
-      {:ok, clusters} -> named(clusters, cluster)
-      {:error, :discovery_unsupported} -> {:ok, [given(cluster)]}
-      error -> error
-    end
+    with {:ok, clusters} <- discover(entry), do: named(clusters, cluster)
   end
 
   defp named(clusters, cluster) do
@@ -30,10 +17,6 @@ defmodule Slap.Inspect.Clusters do
       found -> {:ok, [found]}
     end
   end
-
-  defp given(cluster), do: %{cluster: cluster, services: :unknown}
-
-  defp supports?(%{services: :unknown}, _view), do: true
 
   defp supports?(%{services: services}, view) do
     case Operation.service(view) do

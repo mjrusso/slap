@@ -131,10 +131,7 @@ it exits with `no_cluster_for_view`, or `no_clusters` if the node runs none.
 Pass `--cluster` to choose one.
 
 With `--cluster`, the inspector reads only that cluster, and exits with
-`cluster_not_running` if it does not run on the node. A server whose
-`slap_cluster` predates `Slap.Cluster.clusters/0` cannot list its clusters:
-without `--cluster`, the inspector exits with `discovery_unsupported`; with
-`--cluster`, it offers every view.
+`cluster_not_running` if it does not run on the node.
 
 ### Standalone Slap server
 
