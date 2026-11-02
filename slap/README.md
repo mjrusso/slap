@@ -101,6 +101,17 @@ Keep the demo running. In a second terminal, run one of the `slap-inspect`
 commands the demo prints. [Install Slap Inspect](#slap-inspect) first if
 needed.
 
+When you run the demo from a checkout, build the inspector from the same
+checkout. From the repository root:
+
+```sh
+nix develop
+cd slap_inspect
+MIX_ENV=prod mix escript.build
+```
+
+Then run the demo's commands with `./slap-inspect` in place of `slap-inspect`.
+
 In the Streams view, the fork's first pages show the messages it inherits from
 its source; press `n` to reach its own updates. See
 [Browse a Streams cluster](https://hexdocs.pm/slap_inspect/readme.html#browse-a-streams-cluster)
