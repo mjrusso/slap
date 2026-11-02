@@ -37,6 +37,7 @@ defmodule Slap.Cluster.Supervisor do
       end
 
     Config.put(%{config | db_cache: db_cache})
+    {:ok, _owner} = Registry.register(Slap.Cluster.Instances, cluster, nil)
 
     children = [
       {Registry, keys: :unique, name: Slap.Cluster.registry(cluster)},

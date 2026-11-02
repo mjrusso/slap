@@ -427,6 +427,46 @@ defmodule Slap.Cluster do
   @spec via(module(), non_neg_integer(), term()) :: {:via, Registry, {atom(), term()}}
   def via(cluster, shard, name), do: {:via, Registry, {registry(cluster), {shard, name}}}
 
+  @doc """
+  The clusters running on this node, ordered by module, including clusters
+  with no shards open here. `local_shards` are the shards open on this node.
+  `services` comes from the shard children module's
+  `c:Slap.Cluster.ShardChildren.services/0`, or is `[]`.
+  """
+  @spec clusters() :: [
+          %{
+            cluster: module(),
+            shards: pos_integer(),
+            local_shards: [non_neg_integer()],
+            services: [atom()]
+          }
+        ]
+  def clusters do
+    Slap.Cluster.Instances
+    |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}])
+    |> Enum.uniq()
+    |> Enum.sort()
+    |> Enum.flat_map(&describe/1)
+  end
+
+  # A stopped cluster's registry entry can briefly outlive it. Its config
+  # stays in persistent_term after a stop, but its host has stopped, so the
+  # local_shards call exits and the cluster is left out.
+  defp describe(cluster) do
+    config = Config.get(cluster)
+
+    [
+      %{
+        cluster: cluster,
+        shards: config.shards,
+        local_shards: Host.local_shards(cluster),
+        services: Config.shard_children_callback(config.shard_children, :services, [], [])
+      }
+    ]
+  catch
+    :exit, _reason -> []
+  end
+
   @doc "The shards open on this node, in order."
   @spec local_shards(module()) :: [non_neg_integer()]
   def local_shards(cluster), do: Host.local_shards(cluster)

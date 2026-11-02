@@ -7,7 +7,8 @@ defmodule Slap.Cluster.ShardChildren do
 
   A module used as `shard_children: {module, :child_specs, args}` can implement
   `validate_child_options!/1`. The cluster calls it before starting, so a
-  configuration error does not leave shards retrying their startup.
+  configuration error does not leave shards retrying their startup. It can
+  also implement `services/0`, which `Slap.Cluster.clusters/0` reports.
   """
 
   @callback child_specs(Slap.Cluster.Shard.t()) :: [Supervisor.child_spec() | {module(), term()}]
@@ -15,5 +16,8 @@ defmodule Slap.Cluster.ShardChildren do
   @doc "Raises `ArgumentError` for invalid application settings."
   @callback validate_child_options!(keyword()) :: :ok
 
-  @optional_callbacks validate_child_options!: 1
+  @doc "Names for what the shards serve, such as `[:streams]`."
+  @callback services() :: [atom()]
+
+  @optional_callbacks validate_child_options!: 1, services: 0
 end

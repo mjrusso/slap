@@ -93,7 +93,7 @@ defmodule Slap.Cluster.Config do
 
     SlateDB.validate_store!(c.store)
     validate_settings!(c.settings)
-    validate_child_options!(c.shard_children, c.child_options)
+    shard_children_callback(c.shard_children, :validate_child_options!, [c.child_options], :ok)
 
     %{c | strategy: c.strategy |> normalize_strategy() |> validate_strategy()}
   end
@@ -105,12 +105,16 @@ defmodule Slap.Cluster.Config do
     end
   end
 
-  defp validate_child_options!({mod, _fun, _args}, opts) do
-    if Code.ensure_loaded?(mod) and function_exported?(mod, :validate_child_options!, 1),
-      do: mod.validate_child_options!(opts)
+  @doc false
+  # A node with none of the cluster's shards may not have loaded the shard
+  # children module yet, so function_exported?/3 alone would miss its callbacks.
+  def shard_children_callback({mod, _fun, _args}, name, args, default) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, name, length(args)),
+      do: apply(mod, name, args),
+      else: default
   end
 
-  defp validate_child_options!(_children, _opts), do: :ok
+  def shard_children_callback(_children, _name, _args, default), do: default
 
   defp valid?(:path, value), do: is_binary(value)
   defp valid?(:settings, value), do: is_map(value)

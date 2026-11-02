@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Adds `Slap.Cluster.clusters/0`, which lists the clusters running on this
+  node with their shard counts, local shards and services. A shard children
+  module names its services with the new optional `services/0` callback of
+  `Slap.Cluster.ShardChildren`.
 - A cluster refuses to start when `:shards` differs from the shard count its
   store was created with. Before, it started, and records whose keys now route
   to a different shard read as missing. A store created by 0.4.0 or earlier
