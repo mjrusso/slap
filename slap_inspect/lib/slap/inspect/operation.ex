@@ -209,6 +209,20 @@ defmodule Slap.Inspect.Operation do
     |> Enum.uniq()
   end
 
+  @doc "The option sets that satisfy `view`, with the menu definition's set first."
+  def required(view) do
+    sets =
+      @definitions
+      |> Map.values()
+      |> Enum.filter(&(&1.view == view))
+      |> Enum.sort_by(&is_nil(&1[:menu]))
+      |> Enum.map(& &1.required)
+      |> Enum.uniq()
+
+    # A set that contains another set only adds options to it.
+    Enum.reject(sets, fn set -> Enum.any?(sets, &(&1 != set and &1 -- set == [])) end)
+  end
+
   def target(operation), do: Map.fetch!(@definitions, operation).target
 
   def route(operation), do: Map.get(Map.fetch!(@definitions, operation), :route, :stream)

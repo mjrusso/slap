@@ -357,8 +357,9 @@ arguments support escaped quotes, backslashes, `\n`, `\r`, `\t`, two-digit
 `\xHH` byte escapes and four-digit `\uXXXX` escapes. Opaque binary paths use
 byte escapes so submitting the displayed command preserves their bytes.
 Single quotes preserve their contents literally. View shortcuts open the
-command editor when the selected view needs arguments. Commands submitted in
-the editor read the open cluster.
+command editor when the selected view needs arguments. The status line lists
+the required options, and the editor adds the first one to the command.
+Commands submitted in the editor read the open cluster.
 
 Enter opens the first record when none is selected. Tab switches between
 records and details; the pane label and border identify focus. If a refreshed

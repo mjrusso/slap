@@ -224,17 +224,30 @@ defmodule Slap.Inspect.UXTest do
   end
 
   test "view shortcuts request missing arguments without starting a read" do
-    for {key, command} <- [{"5", "log"}, {"6", "yjs"}] do
+    for {key, status, command} <- [
+          {"5", "Required: --base", "log --shard 0 --base _"},
+          {"6", "Required: --base or --sid", "yjs --shard 0 --base _"}
+        ] do
       session = start(view: :kv, opts: [partition: "users", key_prefix: <<0>>])
       Test.input(session, key)
       screen = Test.render!(session)
+      assert screen =~ status
       assert screen =~ "Filter command: " <> command
-      assert screen =~ "Required:"
       refute screen =~ "--partition users_"
       refute_receive {:read, _, _}
       Test.input(session, "Escape")
       assert Test.render!(session) =~ "kv --shard 0 --partition users"
     end
+  end
+
+  test "a view shortcut prefills the missing option, and Enter reads the value typed after it" do
+    session = start(view: :kv, opts: [partition: "users"])
+    Test.input(session, "6")
+    for key <- String.graphemes("/docs/a"), do: Test.input(session, key)
+    Test.input(session, "Enter")
+    assert_receive {:read, %{view: :yjs, opts: opts}, _worker}
+    assert opts[:base] == "/docs/a"
+    refute Test.render!(session) =~ "Required:"
   end
 
   test "view shortcuts discard unrelated filters and restart pagination" do

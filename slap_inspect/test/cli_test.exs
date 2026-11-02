@@ -130,9 +130,15 @@ defmodule Slap.Inspect.CLITest do
   end
 
   test "programmatic queries reject missing arguments before connecting" do
-    for {view, required} <- [log: [:base], yjs: [:sid], logical: [:path]] do
+    for {view, opts, required} <- [
+          {:log, [], [[:base]]},
+          {:log, [component: "index"], [[:base]]},
+          {:yjs, [], [[:base], [:sid]]},
+          {:yjs, [content: true], [[:base]]},
+          {:logical, [], [[:path]]}
+        ] do
       assert {:error, {:required_options, ^required}} =
-               Query.execute(%{}, %{view: view, shard: nil, budget: 5000, opts: []})
+               Query.execute(%{}, %{view: view, shard: nil, budget: 5000, opts: opts})
     end
   end
 

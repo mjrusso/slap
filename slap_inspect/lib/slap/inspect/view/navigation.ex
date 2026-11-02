@@ -225,10 +225,19 @@ defmodule Slap.Inspect.View.Navigation do
 
       {:error, reason} ->
         term
-        |> Dialogs.editor(CLI.command(candidate))
+        |> Dialogs.editor(prefill(CLI.command(candidate), candidate.opts, reason))
         |> assign(diagnostic: reason, status: Feedback.error(reason))
     end
   end
+
+  defp prefill(command, opts, {:required_options, [first | _]}) do
+    case Enum.find(first, &is_nil(opts[&1])) do
+      nil -> command
+      key -> "#{command} #{Feedback.option(key)} "
+    end
+  end
+
+  defp prefill(command, _opts, _reason), do: command
 
   # Yjs content is reconstructed only on request.
   defp resume(%{assigns: %{request: %{view: :yjs_content}}} = term), do: term

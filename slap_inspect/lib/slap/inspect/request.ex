@@ -21,7 +21,7 @@ defmodule Slap.Inspect.Request do
              shard: {0, nil},
              budget: {1, 30_000}
            ),
-         :ok <- required_read_options(definition.required, opts) do
+         :ok <- required_read_options(definition, opts) do
       {:ok,
        %__MODULE__{
          view: definition.view,
@@ -83,9 +83,9 @@ defmodule Slap.Inspect.Request do
     derive(request, view, Keyword.put(limits ++ opts, :value_range, {offset, length}))
   end
 
-  defp required_read_options(required, opts) do
-    if Enum.any?(required, &is_nil(opts[&1])),
-      do: {:error, {:required_options, required}},
+  defp required_read_options(definition, opts) do
+    if Enum.any?(definition.required, &is_nil(opts[&1])),
+      do: {:error, {:required_options, Operation.required(definition.view)}},
       else: :ok
   end
 

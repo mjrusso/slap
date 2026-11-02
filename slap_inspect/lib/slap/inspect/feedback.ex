@@ -9,8 +9,10 @@ defmodule Slap.Inspect.Feedback do
 
   def error({:invalid, message}), do: message
 
-  def error({:required_options, options}),
-    do: "Required: " <> Enum.map_join(options, ", ", &option/1)
+  def error({:required_options, sets}),
+    do:
+      "Required: " <>
+        Enum.map_join(sets, " or ", &Enum.map_join(&1, " and ", fn key -> option(key) end))
 
   def error({:invalid_hex, key}), do: option(key) <> " needs complete hexadecimal byte pairs"
 
