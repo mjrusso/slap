@@ -16,6 +16,14 @@ deps project="":
 dev:
     cd slap && mix slap.server --streams --store memory
 
+# Runs the kitchen sink demo, for example `just kitchen-sink --ticks 10`.
+kitchen-sink *args: (deps "slap")
+    cd slap && mix run examples/kitchen_sink.exs {{ args }}
+
+# Installs slap-inspect from this checkout into Mix's escripts directory.
+install-inspector: (deps "slap_inspect")
+    cd slap_inspect && MIX_ENV=prod mix escript.install --force
+
 # Everything CI runs for a project (see AGENTS.md): `mix check`, and for
 # slap_slatedb also the NIF's Rust checks.
 check project="":
