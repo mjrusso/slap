@@ -42,11 +42,10 @@ defmodule Mix.Tasks.Slap.Server do
 
   Slap Inspect requires a named server node:
 
-      elixir --sname slap --cookie COOKIE -S mix slap.server ...
+      elixir --sname slap -S mix slap.server ...
 
-  Use `--name` for long names and pass `--longnames` to the inspector.
-  Select `--cluster Slap.Streams.Cluster` or `--cluster Slap.KV.Cluster`
-  in the inspector.
+  Connect with `slap-inspect --node slap@HOST`. If the server was started
+  with `--cookie`, also pass `--cookie-file`.
 
   Without a Mix project, use `Mix.install`:
 

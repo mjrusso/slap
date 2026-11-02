@@ -98,8 +98,8 @@ mix run examples/kitchen_sink.exs
 ### Inspect the demo
 
 Keep the demo running. In a second terminal, run one of the `slap-inspect`
-commands the demo prints; each includes the node name, cookie file and cluster
-module for that view. [Install Slap Inspect](#slap-inspect) first if needed.
+commands the demo prints. [Install Slap Inspect](#slap-inspect) first if
+needed.
 
 In the Streams view, the fork's first pages show the messages it inherits from
 its source; press `n` to reach its own updates. See
@@ -115,8 +115,7 @@ is rejected as a conflict.
 
 The demo also updates a counter in a standalone SlateDB database. The
 inspector reads only cluster databases, so the demo prints that counter in
-its own terminal. It creates a private cookie file and removes it on normal
-exit.
+its own terminal.
 
 Data is lost when the VM exits. Stop the demo with Ctrl+C, then `a`.
 To stop the updates after a number of ticks, or to change the interval:
@@ -141,19 +140,21 @@ mix escript.install hex slap_inspect
 ```
 
 The inspector connects over distributed Erlang, using the server's node name
-and a cookie file. For example, if the standalone server is named
-`slap@127.0.0.1` and its cookie is saved in `~/.slap-cookie`, open it with:
+and cookie. If the standalone server runs on your machine as `slap@127.0.0.1`
+with the default cookie, open it with:
 
 ```sh
-slap-inspect --longnames --node slap@127.0.0.1 --cookie-file ~/.slap-cookie
+slap-inspect --node slap@127.0.0.1
 ```
+
+If the server uses another cookie, pass a file containing it with
+`--cookie-file`.
 
 The inspector lists the clusters running on the node, including those your
 application defines, and browses all of them in one session. Streams, snapshot
 logs and Yjs documents are in Streams clusters; KV and Files data are in KV
 clusters. To read one cluster only, pass `--cluster MODULE`. The
-[kitchen sink demo](#kitchen-sink-demo) prints commands with these values
-filled in. See the
+[kitchen sink demo](#kitchen-sink-demo) prints commands for its node. See the
 [Slap Inspect guide](https://hexdocs.pm/slap_inspect/) for installation,
 connection, commands and JSON output.
 

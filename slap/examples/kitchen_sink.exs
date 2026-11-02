@@ -63,7 +63,7 @@ defmodule Slap.Examples.KitchenSink do
   end
 
   defp run(opts) do
-    cookie_file = distribution()
+    distribution()
     Logger.configure(level: :warning)
     SlateDB.set_log_level(:warning)
 
@@ -79,7 +79,7 @@ defmodule Slap.Examples.KitchenSink do
 
     try do
       state = seed(db)
-      instructions(cookie_file, opts)
+      instructions(opts)
       Process.send_after(self(), :tick, opts.interval)
       loop(state, opts)
     after
@@ -88,32 +88,21 @@ defmodule Slap.Examples.KitchenSink do
     end
   end
 
+  # The printed commands name this node and rely on Erlang's default cookie.
   defp distribution do
-    unless Node.alive?() do
-      {_, 0} = System.cmd("epmd", ["-daemon"])
-      {:ok, _} = Node.start(:"slap_demo_#{System.pid()}@127.0.0.1", :longnames)
-      cookie = :crypto.strong_rand_bytes(32) |> Base.encode16(case: :lower) |> String.to_atom()
-      true = Node.set_cookie(cookie)
+    case {Node.alive?(), :init.get_argument(:setcookie)} do
+      {false, :error} ->
+        {_, 0} = System.cmd("epmd", ["-daemon"])
+        {:ok, _} = Node.start(:"slap_demo_#{System.pid()}@127.0.0.1", :longnames)
+
+      _ ->
+        IO.puts(
+          :stderr,
+          "Run the demo without --name, --sname or --cookie; it starts its own node."
+        )
+
+        exit({:shutdown, 1})
     end
-
-    directory =
-      Path.join(
-        System.tmp_dir!(),
-        "slap-demo-#{System.pid()}-#{System.unique_integer([:positive])}"
-      )
-
-    File.mkdir!(directory)
-    File.chmod!(directory, 0o700)
-    path = Path.join(directory, "cookie")
-    File.write!(path, Atom.to_string(Node.get_cookie()))
-    File.chmod!(path, 0o600)
-
-    System.at_exit(fn _status ->
-      File.rm(path)
-      File.rmdir(directory)
-    end)
-
-    path
   end
 
   defp seed(db) do
@@ -215,11 +204,8 @@ defmodule Slap.Examples.KitchenSink do
     end
   end
 
-  defp instructions(cookie_file, opts) do
-    naming = if :net_kernel.longnames(), do: " --longnames", else: ""
-
-    connection =
-      "slap-inspect#{naming} --node #{Node.self()} --cookie-file #{quote_arg(cookie_file)}"
+  defp instructions(opts) do
+    connection = "slap-inspect --node #{Node.self()}"
 
     shard = Cluster.shard_for(Streams.Cluster, Streams.placement_key(@events))
     partition = Config.partition(Config.get(), :record, "demo")
@@ -257,8 +243,6 @@ defmodule Slap.Examples.KitchenSink do
       )
     end
   end
-
-  defp quote_arg(value), do: "'" <> String.replace(value, "'", "'\\''") <> "'"
 end
 
 Slap.Examples.KitchenSink.main(System.argv())
