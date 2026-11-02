@@ -8,6 +8,18 @@ defmodule Slap.Streams.IntrospectTest do
   alias Slap.Streams.Introspect
   alias Slap.Streams.Store.{Codec, Keys, Meta, Tail}
 
+  defmodule AppCluster do
+    use Slap.Streams.Cluster, otp_app: :slap_streams
+  end
+
+  test "Streams clusters, including application-defined ones, are discovered with the streams service" do
+    start_supervised!({AppCluster, store: :memory, shards: 1})
+    clusters = Map.new(Slap.Cluster.clusters(), &{&1.cluster, &1})
+
+    assert %{services: [:streams]} = clusters[Streams.Cluster]
+    assert %{shards: 1, services: [:streams]} = clusters[AppCluster]
+  end
+
   test "inspection decodes durable records without starting a stream server" do
     path = "/inspection"
     assert {:ok, _, _} = Streams.create(path, body: "hello")

@@ -9,6 +9,10 @@ defmodule Slap.Streams.ShardChildren do
 
   @doc false
   @impl true
+  def services, do: [:streams]
+
+  @doc false
+  @impl true
   def child_specs(ctx) do
     validate_child_options!(ctx.child_options)
 
