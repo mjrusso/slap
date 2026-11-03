@@ -109,17 +109,23 @@ defmodule Slap.Cluster.Probe do
       "the store at #{store(config.store)} failed the conditional write probe, so " <>
         "writers could not be fenced safely. Result: #{inspect(result)}."
 
-  defp describe(config, {:layout_mismatch, %{configured: configured, stored: :unrecorded}}),
-    do:
-      "the store at #{store(config.store)}, path #{inspect(config.path)}, has shard " <>
-        "databases for a different count than the configured #{configured.shards}, and " <>
-        "no _cluster/layout record. " <> moving()
+  defp describe(
+         config,
+         {:layout_mismatch, %{configured: configured, stored: :unrecorded, found: found}}
+       ) do
+    "the store at #{store(config.store)}, path #{inspect(config.path)}, has no " <>
+      "_cluster/layout record. #{evidence(found)} This cluster is configured " <>
+      "with #{shards(configured.shards)}. " <> moving()
+  end
 
-  defp describe(config, {:layout_mismatch, %{configured: configured, stored: stored}}),
-    do:
-      "the store at #{store(config.store)}, path #{inspect(config.path)}, was written " <>
-        "with #{stored.shards} shards (hash #{stored.hash}); this cluster is configured " <>
-        "with #{configured.shards} (hash #{configured.hash}). " <> moving()
+  defp describe(
+         config,
+         {:layout_mismatch, %{configured: configured, stored: %{shards: count, hash: hash}}}
+       ) do
+    "the store at #{store(config.store)}, path #{inspect(config.path)}, was written " <>
+      "with #{shards(count)} (hash #{hash}); this cluster is configured " <>
+      "with #{shards(configured.shards)} (hash #{configured.hash}). " <> moving()
+  end
 
   defp describe(config, {:invalid_layout, body}),
     do:
@@ -136,6 +142,15 @@ defmodule Slap.Cluster.Probe do
       "Records are not moved between shards, so keys on the other shards would read " <>
         "as missing. Set :shards to the count the data was written with, or copy the " <>
         "data into a new :path."
+
+  defp shards(1), do: "1 shard"
+  defp shards(count), do: "#{count} shards"
+
+  defp evidence({:shard_exists, name}),
+    do: "Shard database #{name} exists past the configured last shard."
+
+  defp evidence({:shard_missing, last, first}),
+    do: "The configured last shard, #{last}, has no database, but #{first} does."
 
   # The store without credentials.
   defp store({:url, url, options}) do

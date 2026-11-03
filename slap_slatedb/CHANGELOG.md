@@ -3,10 +3,13 @@
 ## 0.3.0
 
 - If using local storage (`{:local, directory}`), writes now share one
-  exclusive OS lock per store root. Before starting this version, stop all
+  exclusive OS lock per store root, held for each mutation until it is synced
+  to disk. Multiple processes can open the store; SlateDB fencing still
+  enforces one writer per database. Before starting this version, stop all
   processes accessing that store with older `slap_slatedb` versions, which do
   not take this lock. Use the same root in every process accessing the data,
-  and keep the root's `.slap-lock#0` file.
+  and keep the root's `.slap-lock#0` file. Before starting another cluster, see
+  [running another cluster on the same store](https://hexdocs.pm/slap_cluster/readme.html#running-another-cluster-on-the-same-store).
 - Local stores reject recognized network filesystems, including NFS and
   SMB/CIFS.
 - Local stores sync object writes and completed uploads to disk with `fsync`.

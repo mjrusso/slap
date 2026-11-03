@@ -111,7 +111,9 @@ iex> :ok = Slap.KV.delete("user:42", "profile", if_version: v2)
 :ok
 ```
 
-For local storage, see [choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count).
+For local storage, see [choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count);
+before running a script against a store an application is using, see
+[running another cluster on the same store](https://hexdocs.pm/slap_cluster/readme.html#running-another-cluster-on-the-same-store).
 
 An application can define its own cluster module and pass it to KV calls
 and the HTTP router:

@@ -270,7 +270,9 @@ Every write to a local store holds one exclusive lock on the store's root
 directory until the write is synced, so writes to different databases and
 objects under one root run one at a time. Reads do not take the lock. Adding
 shards under one root does not increase write throughput; see
-[choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count).
+[choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count);
+before running a script against a store an application is using, see
+[running another cluster on the same store](https://hexdocs.pm/slap_cluster/readme.html#running-another-cluster-on-the-same-store).
 
 The lock works only if every writer takes it:
 

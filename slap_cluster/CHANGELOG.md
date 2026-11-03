@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Improves shard-layout mismatch messages, including singular shard counts.
+  When `_cluster/layout` is absent, `:layout_mismatch` reasons retain
+  `stored: :unrecorded` and add
+  `found: {:shard_exists, name} | {:shard_missing, last, first}`.
+  In `:shard_missing`, `last` is the configured last shard path; `first` is
+  the shard-0 database path found under one of the checked name widths.
+
 ## 0.5.0
 
 - Refuses to start when `:shards` differs from the store's recorded shard

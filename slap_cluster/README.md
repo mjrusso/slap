@@ -195,6 +195,15 @@ at once, even if that message is still in the shard's mailbox. `shard_for/1`
 uses `xxh64(key) mod shards`; the shard count and hash must stay fixed for
 existing data.
 
+## Running another cluster on the same store
+
+Before running `mix run` or `iex -S mix` with the same store and `:path` as a
+running application, stop the application or configure the script with a
+different store or `:path`. Opening another writer fences the existing shard
+writers. With
+[`Slap.Cluster.Strategy.Local`](#placement-strategies), both clusters retry
+and can keep fencing each other until one stops.
+
 ## Choosing the shard count
 
 For a new, lightly loaded, single-node deployment on local storage, start with

@@ -120,7 +120,9 @@ iex> :ok = Slap.Files.delete(ref, if_version: v2)
 :ok
 ```
 
-For local storage, see [choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count).
+For local storage, see [choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count);
+before running a script against a store an application is using, see
+[running another cluster on the same store](https://hexdocs.pm/slap_cluster/readme.html#running-another-cluster-on-the-same-store).
 
 In an application, put both processes in its supervision tree in the same
 order. `Slap.Files.stream/1` returns the metadata and a lazy body stream.

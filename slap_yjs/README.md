@@ -90,7 +90,9 @@ children = [
 ]
 ```
 
-For local storage, see [choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count).
+For local storage, see [choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count);
+before running a script against a store an application is using, see
+[running another cluster on the same store](https://hexdocs.pm/slap_cluster/readme.html#running-another-cluster-on-the-same-store).
 
 For an application-owned Streams cluster, use the pattern in the
 `slap_streams` README and pass `cluster: MyApp.StreamsCluster` when starting

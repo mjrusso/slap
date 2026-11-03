@@ -130,7 +130,9 @@ children = [
 ```
 
 Bandit serves the router at `/v1/stream/`. For local storage, see
-[choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count).
+[choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count);
+before running a script against a store an application is using, see
+[running another cluster on the same store](https://hexdocs.pm/slap_cluster/readme.html#running-another-cluster-on-the-same-store).
 [Using S3](#using-s3) describes remote storage.
 
 To use an application-owned cluster module:

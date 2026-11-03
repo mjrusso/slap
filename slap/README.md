@@ -320,7 +320,10 @@ elixir -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- 
 
 `--store local:DIR` keeps the data in a local directory. See
 [choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count)
-for local-storage guidance; existing data requires its original shard count.
+for local-storage guidance and
+[running another cluster on the same store](https://hexdocs.pm/slap_cluster/readme.html#running-another-cluster-on-the-same-store)
+before running a script against a store an application is using. Existing
+data requires its original shard count.
 
 To keep an IEx prompt while the server runs:
 

@@ -198,10 +198,12 @@ defmodule Slap.ClusterTest do
     end
 
     defp refused(dir, shards) do
-      assert {:error, {:shutdown, {:failed_to_start_child, Probe, reason}}} =
-               start_layout(dir, shards)
+      ExUnit.CaptureLog.with_log(fn ->
+        assert {:error, {:shutdown, {:failed_to_start_child, Probe, reason}}} =
+                 start_layout(dir, shards)
 
-      reason
+        reason
+      end)
     end
 
     test "a store written with one shard count refuses another", %{dir: dir} do
@@ -210,9 +212,12 @@ defmodule Slap.ClusterTest do
       assert %{"version" => 1, "shards" => 4, "hash" => "xxh64"} =
                JSON.decode!(File.read!(Path.join(dir, "_cluster/layout")))
 
-      for shards <- [1, 8] do
-        assert {:layout_mismatch, %{configured: %{shards: ^shards}, stored: %{shards: 4}}} =
+      for {shards, description} <- [{1, "1 shard"}, {8, "8 shards"}] do
+        assert {{:layout_mismatch, %{configured: %{shards: ^shards}, stored: %{shards: 4}}}, log} =
                  refused(dir, shards)
+
+        assert log =~ "was written with 4 shards (hash xxh64)"
+        assert log =~ "configured with #{description} (hash xxh64)"
       end
 
       start_and_stop(dir, 4)
@@ -223,9 +228,19 @@ defmodule Slap.ClusterTest do
       layout = Path.join(dir, "_cluster/layout")
       File.rm!(layout)
 
-      for shards <- [1, 8] do
-        assert {:layout_mismatch, %{configured: %{shards: ^shards}, stored: :unrecorded}} =
+      for {shards, found, message} <- [
+            {1, {:shard_exists, "shard-001"},
+             "Shard database shard-001 exists past the configured last shard. " <>
+               "This cluster is configured with 1 shard. "},
+            {8, {:shard_missing, "shard-007", "shard-000"},
+             "The configured last shard, shard-007, has no database, but shard-000 does. " <>
+               "This cluster is configured with 8 shards. "}
+          ] do
+        assert {{:layout_mismatch,
+                 %{configured: %{shards: ^shards}, stored: :unrecorded, found: ^found}}, log} =
                  refused(dir, shards)
+
+        assert log =~ message
       end
 
       refute File.exists?(layout)
@@ -242,8 +257,15 @@ defmodule Slap.ClusterTest do
         :ok = SlateDB.close(db)
       end
 
-      assert {:layout_mismatch, %{configured: %{shards: 1001}, stored: :unrecorded}} =
+      assert {{:layout_mismatch,
+               %{
+                 configured: %{shards: 1001},
+                 stored: :unrecorded,
+                 found: {:shard_missing, "shard-1000", "shard-000"}
+               }}, log} =
                refused(dir, 1001)
+
+      assert log =~ "The configured last shard, shard-1000, has no database, but shard-000 does."
     end
 
     test "a background start stops on a mismatch instead of retrying", %{dir: dir} do

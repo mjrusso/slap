@@ -72,20 +72,24 @@ defmodule Slap.Cluster.Layout do
     next = Config.shard_name(config.shards, width)
     firsts = for w <- 3..max(6, width), do: Config.shard_name(0, w)
 
-    with {:ok, last?} <- exists?(store, last),
-         {:ok, next?} <- exists?(store, next),
-         {:ok, empty?} <- none?(store, firsts) do
-      if not next? and (last? or empty?),
-        do: :ok,
-        else: {:error, {:layout_mismatch, %{configured: layout(config), stored: :unrecorded}}}
+    case first_existing(store, Enum.uniq([next, last | firsts])) do
+      {:ok, ^next} -> unrecorded_mismatch(config, {:shard_exists, next})
+      {:ok, found} when found in [nil, last] -> :ok
+      {:ok, first} -> unrecorded_mismatch(config, {:shard_missing, last, first})
+      {:error, _} = error -> error
     end
   end
 
-  defp none?(store, names) do
-    Enum.reduce_while(names, {:ok, true}, fn name, acc ->
+  # Keep :found separate to preserve the :unrecorded value published in 0.5.0.
+  defp unrecorded_mismatch(config, found) do
+    {:error, {:layout_mismatch, %{configured: layout(config), stored: :unrecorded, found: found}}}
+  end
+
+  defp first_existing(store, names) do
+    Enum.reduce_while(names, {:ok, nil}, fn name, acc ->
       case exists?(store, name) do
         {:ok, false} -> {:cont, acc}
-        {:ok, true} -> {:halt, {:ok, false}}
+        {:ok, true} -> {:halt, {:ok, name}}
         {:error, _} = error -> {:halt, error}
       end
     end)
