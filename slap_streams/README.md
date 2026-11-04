@@ -536,7 +536,7 @@ pure protocol model. Set `SLAP_STREAMS_PROP_RUNS` to run more sequences;
 The tests that need the server as an OS process live in
 [`slap`](https://hexdocs.pm/slap/readme.html#development-and-testing): the
 official [Durable Streams conformance suite and
-benchmarks](https://hexdocs.pm/slap/readme.html#durable-streams-conformance-and-benchmarks),
+benchmarks](https://github.com/mjrusso/slap/blob/main/slap/guides/development.md#durable-streams-conformance-and-benchmarks),
 the crash tests and the cluster tests.
 
 ## Benchmarks
@@ -551,8 +551,8 @@ mix run bench/forks_and_copies.exs
 
 These measure the library in-process. `slap` runs the official [Durable
 Streams HTTP
-benchmarks](https://hexdocs.pm/slap/readme.html#durable-streams-conformance-and-benchmarks)
-and an [HTTP append load test](https://hexdocs.pm/slap/readme.html#streams-load)
+benchmarks](https://github.com/mjrusso/slap/blob/main/slap/guides/development.md#durable-streams-conformance-and-benchmarks)
+and an [HTTP append load test](https://github.com/mjrusso/slap/blob/main/slap/guides/development.md#streams-load)
 against a running server.
 
 `bench/append_latency.exs` measures durable append latency on the in-memory
