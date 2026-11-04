@@ -69,8 +69,8 @@ jobs:
           SLAP_TEST_S3_BUCKET: slap-inspection
       - name: Root README library examples
         run: mix run scripts/readme_test.exs ../README.md
-      - name: Package README library examples
-        run: mix run scripts/readme_test.exs README.md
+      - name: Library examples guide
+        run: mix run scripts/readme_test.exs guides/library-examples.md
       - name: Kitchen sink demo
         run: mix run examples/kitchen_sink.exs --ticks 6 --interval 10 --exit
 
