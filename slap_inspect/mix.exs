@@ -3,6 +3,7 @@ defmodule Slap.Inspect.MixProject do
 
   @version "0.1.0"
   @source_url "https://github.com/mjrusso/slap"
+  @package_url "#{@source_url}/tree/main/slap_inspect"
 
   def project do
     [
@@ -17,10 +18,10 @@ defmodule Slap.Inspect.MixProject do
       dialyzer: [plt_add_apps: [:mix, :ex_unit]],
       usage_rules: [file: "AGENTS.md", usage_rules: [:usage_rules]],
       description: "Read-only terminal UI and CLI for browsing Slap data.",
-      source_url: @source_url,
+      source_url: @package_url,
       package: [
         licenses: ["Apache-2.0"],
-        links: %{"GitHub" => @source_url},
+        links: %{"GitHub (Package)" => @package_url, "GitHub (Monorepo)" => @source_url},
         files: ~w(lib config mix.exs mix.lock README.md LICENSE CHANGELOG.md)
       ],
       docs: [
