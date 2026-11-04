@@ -3,6 +3,7 @@ defmodule Slap.MixProject do
 
   @version "0.5.0"
   @source_url "https://github.com/mjrusso/slap"
+  @package_url "#{@source_url}/tree/main/slap"
   @guides [
     "guides/overview.md",
     "guides/kitchen-sink.md",
@@ -23,10 +24,10 @@ defmodule Slap.MixProject do
       dialyzer: [plt_add_apps: [:mix, :iex]],
       usage_rules: [file: "AGENTS.md", usage_rules: [:usage_rules]],
       description: "All Slap server libraries and a standalone Streams and KV server.",
-      source_url: @source_url,
+      source_url: @package_url,
       package: [
         licenses: ["Apache-2.0"],
-        links: %{"GitHub" => @source_url},
+        links: %{"GitHub (Package)" => @package_url, "GitHub (Monorepo)" => @source_url},
         files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md) ++ @guides
       ],
       docs: [
