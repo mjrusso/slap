@@ -91,9 +91,9 @@ The services are built on these packages, which you can also use directly:
 
 `slap` also provides the standalone Streams and KV server:
 
-| Package                                            | Provides                                                                                       | Hex                                                                 |
-|----------------------------------------------------|------------------------------------------------------------------------------------------------|---------------------------------------------------------------------|
-| [`slap`](slap/README.md#try-the-standalone-server) | All Slap server libraries and a standalone HTTP server (`mix slap.server`) for Streams and KV. | [![Hex][slap-hex-badge]][slap-hex] [![Docs][docs-badge]][slap-docs] |
+| Package         | Provides                                                                                       | Hex                                                                 |
+|-----------------|------------------------------------------------------------------------------------------------|---------------------------------------------------------------------|
+| [`slap`](slap/) | All Slap server libraries and a standalone HTTP server (`mix slap.server`) for Streams and KV. | [![Hex][slap-hex-badge]][slap-hex] [![Docs][docs-badge]][slap-docs] |
 
 `slap_inspect` browses the data of a running cluster. It is installed
 separately and does not depend on the server libraries:
