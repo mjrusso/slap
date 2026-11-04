@@ -1,7 +1,7 @@
 defmodule Slap.MixProject do
   use Mix.Project
 
-  @version "0.5.0"
+  @version "0.5.1"
   @source_url "https://github.com/mjrusso/slap"
   @package_url "#{@source_url}/tree/main/slap"
   @guides [

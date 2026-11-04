@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1
+
+- Add guides for the kitchen sink demo, library examples, standalone server,
+  and development tools, included in the Hex package and HexDocs. Move the
+  shared package overview into a guide.
+- Distinguish package and monorepo GitHub links in package metadata.
+
 ## 0.5.0
 
 - Breaking change: if using an existing Streams store written by
