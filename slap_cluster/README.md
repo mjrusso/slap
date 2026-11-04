@@ -77,7 +77,7 @@ application's `mix.exs`:
 ```elixir
 defp deps do
   [
-    {:slap_cluster, "~> 0.5.0"}
+    {:slap_cluster, "~> 0.5.1"}
   ]
 end
 ```

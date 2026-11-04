@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.1
 
 - Improves shard-layout mismatch messages, including singular shard counts.
   When `_cluster/layout` is absent, `:layout_mismatch` reasons retain
