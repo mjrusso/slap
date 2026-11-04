@@ -3,6 +3,7 @@ defmodule Slap.Cluster.MixProject do
 
   @version "0.5.0"
   @source_url "https://github.com/mjrusso/slap"
+  @package_url "#{@source_url}/tree/main/slap_cluster"
 
   def project do
     [
@@ -18,8 +19,11 @@ defmodule Slap.Cluster.MixProject do
       description:
         "Runs N SlateDB databases (shards) in one store, with placement, fencing, " <>
           "durability notifications and routing.",
-      source_url: @source_url,
-      package: [licenses: ["Apache-2.0"], links: %{"GitHub" => @source_url}],
+      source_url: @package_url,
+      package: [
+        licenses: ["Apache-2.0"],
+        links: %{"GitHub (Package)" => @package_url, "GitHub (Monorepo)" => @source_url}
+      ],
       docs: [
         main: "readme",
         extras: ["README.md", "CHANGELOG.md", "LICENSE"],
