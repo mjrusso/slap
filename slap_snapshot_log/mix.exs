@@ -3,6 +3,7 @@ defmodule Slap.SnapshotLog.MixProject do
 
   @version "0.5.0"
   @source_url "https://github.com/mjrusso/slap"
+  @package_url "#{@source_url}/tree/main/slap_snapshot_log"
 
   def project do
     [
@@ -16,8 +17,11 @@ defmodule Slap.SnapshotLog.MixProject do
       dialyzer: [plt_add_apps: [:ex_unit]],
       usage_rules: [file: "AGENTS.md", usage_rules: [:usage_rules]],
       description: "An append-only log with snapshots that replace its prefix, on Slap.Streams.",
-      source_url: @source_url,
-      package: [licenses: ["Apache-2.0"], links: %{"GitHub" => @source_url}],
+      source_url: @package_url,
+      package: [
+        licenses: ["Apache-2.0"],
+        links: %{"GitHub (Package)" => @package_url, "GitHub (Monorepo)" => @source_url}
+      ],
       docs: [
         main: "readme",
         extras: ["README.md", "CHANGELOG.md", "LICENSE"],
