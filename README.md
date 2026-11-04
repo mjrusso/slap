@@ -128,9 +128,9 @@ Then run the examples below, in order, in this IEx session.
 > stores](slap_slatedb/README.md#object-stores), and the [`slap_streams` S3
 > walkthrough](slap_streams/README.md#using-s3) runs a Streams cluster on S3.
 
-The [`slap` README](slap/README.md#try-the-libraries) has additional examples.
-The [kitchen sink demo](slap/README.md#kitchen-sink-demo) updates in-memory
-data and prints inspector commands.
+The [library examples guide](slap/guides/library-examples.md) has additional
+examples. The [kitchen sink demo](slap/README.md#kitchen-sink-demo) updates
+in-memory data and prints inspector commands.
 
 ### SlateDB Bindings
 
@@ -157,7 +157,7 @@ examples.
 ### Streams and KV
 
 These examples show the Elixir API. The [standalone server
-README](slap/README.md#try-the-standalone-server) has HTTP examples and server
+guide](slap/guides/standalone-server.md) has HTTP examples and server
 options.
 
 #### Streams
@@ -266,8 +266,9 @@ to run them on another branch:
   without added network latency.
 - [Durable Streams benchmarks](.github/workflows/slap_streams_bench.yml) run
   the official Durable Streams benchmarks against Slap and the official Caddy
-  server on the same runner. Run them locally with `just streams-bench`;
-  see the [server README](slap/README.md#durable-streams-conformance-and-benchmarks).
+  server on the same runner. Run them locally with `just streams-bench`; see
+  the [server development
+  guide](slap/guides/development.md#durable-streams-conformance-and-benchmarks).
 
 Results appear in each run's job summary; a run on `main` also pushes them to
 the `gh-pages` branch, which GitHub Pages serves as charts of every run on
@@ -297,8 +298,9 @@ mix run bench/streams_http_load.exs --connections 128 --seconds 20
 The values shown are the defaults. The script also takes `--streams`,
 `--bytes`, and `--rate`. To measure an S3-compatible store, start the server
 with `--store s3:s3://bucket/bench` and set its `AWS_*` variables. Before
-sizing a deployment, read [Streams load](slap/README.md#streams-load): the
-store's sustained PUT rate limits the shard count and flush interval.
+sizing a deployment, read [Streams
+load](slap/guides/development.md#streams-load): the store's sustained PUT rate
+limits the shard count and flush interval.
 
 Other scripts measure:
 

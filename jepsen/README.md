@@ -289,7 +289,7 @@ rule, and every client could read each touched stream after recovery. A pass
 does not establish behavior for producer idempotency, long polling, or
 multi-stream atomic transactions; this workload does not issue those
 operations. The official
-[Durable Streams conformance suite](../slap/README.md#durable-streams-conformance-and-benchmarks)
+[Durable Streams conformance suite](../slap/guides/development.md#durable-streams-conformance-and-benchmarks)
 covers additional stream operations.
 
 ### Reference forks and manual copies: the `fork` workload
