@@ -82,11 +82,11 @@ smells project="":
 typecheck project="":
     just _each "{{ project }}" "MIX_ENV=test mix dialyzer"
 
-# Writes scripts/readme_preamble.md into each package README.
+# Updates the shared overview in package READMEs and slap's overview guide.
 readme-preamble:
     scripts/readme_preamble.sh write "{{ projects }}"
 
-# Checks that each package README contains scripts/readme_preamble.md, as CI does.
+# Checks the shared overview copies, as CI does.
 readme-preamble-check:
     scripts/readme_preamble.sh check "{{ projects }}"
 
