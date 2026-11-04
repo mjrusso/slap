@@ -3,6 +3,7 @@ defmodule Slap.Yjs.MixProject do
 
   @version "0.5.0"
   @source_url "https://github.com/mjrusso/slap"
+  @package_url "#{@source_url}/tree/main/slap_yjs"
 
   # Slap.Yjs.DocServer monitors :pg groups; before OTP 26.2, a process that both
   # monitors and joins a group crashes the :pg scope when it exits.
@@ -27,8 +28,11 @@ defmodule Slap.Yjs.MixProject do
       usage_rules: [file: "AGENTS.md", usage_rules: [:usage_rules]],
       dialyzer: [plt_add_apps: [:ex_unit]],
       description: "Yjs documents stored in Durable Streams (y_ex).",
-      source_url: @source_url,
-      package: [licenses: ["Apache-2.0"], links: %{"GitHub" => @source_url}],
+      source_url: @package_url,
+      package: [
+        licenses: ["Apache-2.0"],
+        links: %{"GitHub (Package)" => @package_url, "GitHub (Monorepo)" => @source_url}
+      ],
       docs: [
         main: "readme",
         extras: ["README.md", "CHANGELOG.md", "LICENSE"],
