@@ -3,6 +3,7 @@ defmodule Slap.SlateDB.MixProject do
 
   @version "0.3.0"
   @source_url "https://github.com/mjrusso/slap"
+  @package_url "#{@source_url}/tree/main/slap_slatedb"
 
   def project do
     [
@@ -16,7 +17,7 @@ defmodule Slap.SlateDB.MixProject do
       test_ignore_filters: [&String.starts_with?(&1, "test/support/")],
       description: "Elixir bindings for SlateDB, a key-value store built on object storage.",
       package: package(),
-      source_url: @source_url,
+      source_url: @package_url,
       docs: [
         main: "readme",
         extras: ["README.md", "CHANGELOG.md", "LICENSE"],
@@ -94,7 +95,11 @@ defmodule Slap.SlateDB.MixProject do
   defp package do
     [
       licenses: ["Apache-2.0"],
-      links: %{"GitHub" => @source_url, "SlateDB" => "https://slatedb.io"},
+      links: %{
+        "GitHub (Package)" => @package_url,
+        "GitHub (Monorepo)" => @source_url,
+        "SlateDB" => "https://slatedb.io"
+      },
       files: [
         "lib",
         "native/slatedb_nif/src",
