@@ -12,376 +12,19 @@ benchmarking Streams and KV.
 
 - [Run the kitchen sink demo](#kitchen-sink-demo) to see every service update
   sample data once a second.
-- [Try the libraries](#try-the-libraries) through their Elixir APIs in IEx.
+- [Try the libraries](guides/library-examples.md) in IEx.
 - [Run the standalone server](#try-the-standalone-server) and use its HTTP APIs.
 - [Use Slap in an application](#use-slap-in-an-application) to embed the
   services.
 - [Browse the data with Slap Inspect](#slap-inspect), a read-only TUI and CLI
   installed separately.
 
-## Kitchen sink demo
-
-The [kitchen sink demo](https://github.com/mjrusso/slap/blob/main/slap/examples/kitchen_sink.exs)
-runs all seven server libraries with in-memory storage and prints
-`slap-inspect` commands for browsing the cluster data.
-
-### Run without a checkout
-
-With Elixir 1.18 or later and Erlang/OTP 26.2 or later, download the script
-and run it directly:
-
-```sh
-curl -fsSLo kitchen_sink.exs https://raw.githubusercontent.com/mjrusso/slap/main/slap/examples/kitchen_sink.exs
-elixir kitchen_sink.exs
-```
-
-Outside a Mix project, the script installs the latest `slap` release with
-`Mix.install([:slap])`.
-
-### Run from a checkout
-
-From the repository root:
-
-```sh
-nix develop
-just deps slap
-cd slap
-mix run examples/kitchen_sink.exs
-```
-
-### Inspect the demo
-
-Keep the demo running. In a second terminal, run one of the `slap-inspect`
-commands the demo prints. [Install Slap Inspect](#slap-inspect) first if
-needed.
-
-To use an inspector built from your checkout, run from the repository root:
-
-```sh
-nix develop
-just install-inspector
-```
-
-This installs `slap-inspect` into `.nix-mix/escripts`, which `nix develop`
-puts on `PATH`.
-
-In the Fork view, the first pages show the messages the fork inherits from its
-source; press `n` to reach its own updates. The inspector's README
-[lists the other keys](https://hexdocs.pm/slap_inspect/readme.html#terminal).
-
-### What the demo does
-
-Every second, the demo updates streams and a fork, a snapshot log, a Yjs
-document, KV rows, and inline and object-backed files. It publishes a log
-snapshot every five ticks. During setup, it also attempts a KV write that
-is rejected as a conflict.
-
-The demo also runs a third cluster, `Slap.Examples.CounterCluster`, built
-directly on `slap_cluster`. It has one shard, and the shard's child process
-writes the tick number to the shard's SlateDB database. The demo prints a
-`slap-inspect` command that scans this shard.
-
-Data is lost when the demo exits. Press Enter to exit. Without a terminal on
-stdin, the demo runs until the VM is stopped.
-
-To stop the updates after a number of ticks, or to change the interval:
-
-```sh
-mix run examples/kitchen_sink.exs --ticks 10 --interval 250
-```
-
-After the last tick, the demo keeps its data until you press Enter. Add
-`--exit` to exit after the last tick instead.
-
-The same options work with `elixir kitchen_sink.exs`.
-
-## Slap Inspect
-
-[Slap Inspect](https://hexdocs.pm/slap_inspect/) is a read-only TUI and CLI
-for browsing Slap data. It works with the standalone server and with Slap
-services embedded in your application. Install it on the machine you will
-connect from:
-
-```sh
-mix escript.install hex slap_inspect
-```
-
-The inspector connects over distributed Erlang, using the server's node name
-and cookie. If the standalone server runs on your machine as `slap@127.0.0.1`
-with the default cookie, open it with:
-
-```sh
-slap-inspect --node slap@127.0.0.1
-```
-
-If the server uses another cookie, pass a file containing it with
-`--cookie-file`.
-
-The inspector lists the clusters running on the node, including those your
-application defines, and browses all of them in one session. Streams, snapshot
-logs and Yjs documents are in Streams clusters; KV and Files data are in KV
-clusters. To read one cluster only, pass `--cluster MODULE`. The
-[kitchen sink demo](#kitchen-sink-demo) prints commands for its node. See the
-[Slap Inspect guide](https://hexdocs.pm/slap_inspect/) for installation,
-connection, commands and JSON output.
-
-## Try the libraries
-
-Requires Elixir 1.18 or later and Erlang/OTP 26.2 or later.
-
-Start IEx and install the published `slap` package:
-
-```sh
-iex -e 'Mix.install([:slap])'
-```
-
-Run the examples below, in order, from this IEx session. These examples use
-in-memory storage, which is discarded when the VM exits.
-
-### SlateDB
-
-Open a database, write a durable value, read it, and close the database:
-
-```elixir
-iex> {:ok, db} = Slap.SlateDB.open("example", store: :memory); :ok
-:ok
-iex> {:ok, _seq} = Slap.SlateDB.put(db, "user:1", "Ada", await_durable: true); :ok
-:ok
-iex> Slap.SlateDB.get(db, "user:1")
-{:ok, "Ada"}
-iex> Slap.SlateDB.close(db)
-:ok
-```
-
-### Streams and snapshot logs
-
-Start a Streams cluster, list its local shards through `Slap.Cluster`, then
-create, append to, and read a stream:
-
-```elixir
-iex> {:ok, _} = Slap.Streams.Cluster.start_link(store: :memory, path: "streams", shards: 1); :ok
-:ok
-iex> Slap.Cluster.local_shards(Slap.Streams.Cluster)
-[0]
-iex> {:ok, :created, _} = Slap.Streams.create("/events", content_type: "text/plain"); :ok
-:ok
-iex> {:ok, %{result: :appended}} = Slap.Streams.append("/events", "created"); :ok
-:ok
-iex> {:ok, %{messages: messages}} = Slap.Streams.read("/events", 0); messages
-[{0, "created"}]
-```
-
-Snapshot logs use the running Streams cluster:
-
-```elixir
-iex> base = "/v1/stream/examples/log"
-"/v1/stream/examples/log"
-iex> {:ok, _} = Slap.SnapshotLog.append(base, "one"); :ok
-:ok
-iex> {:ok, %{entries: ["one"], offset: offset}} = Slap.SnapshotLog.next(base, 0, wait: 0); :ok
-:ok
-iex> Slap.SnapshotLog.snapshot(base, offset, "state after one")
-:ok
-```
-
-### Yjs
-
-Start the document supervisor on the Streams cluster and edit a document with
-`y_ex`:
-
-```elixir
-iex> defmodule Example.DocServer do
-...>   use Slap.Yjs.DocServer
-...> end; :ok
-:ok
-iex> {:ok, _} = Slap.Yjs.Docs.start_link(); :ok
-:ok
-iex> {:ok, server} = Slap.Yjs.Docs.join(Example.DocServer, {"examples", "doc-1"}); :ok
-:ok
-iex> {:ok, doc} = Slap.Yjs.DocServer.doc(server, 5_000); :ok
-:ok
-iex> text = Yex.Doc.get_text(doc, "text"); Yex.Text.insert(text, 0, "hello")
-:ok
-iex> :ok = Slap.Yjs.DocServer.sync(server, 5_000)
-:ok
-iex> Yex.Text.to_string(text)
-"hello"
-```
-
-### KV and files
-
-Start a KV cluster, then write and read a row:
-
-```elixir
-iex> {:ok, _} = Slap.KV.Cluster.start_link(store: :memory, path: "kv", shards: 1); :ok
-:ok
-iex> {:ok, version} = Slap.KV.put("users", "42", "Ada", if_version: :absent); :ok
-:ok
-iex> {:ok, %{value: value, version: ^version}} = Slap.KV.get("users", "42"); value
-"Ada"
-```
-
-Files use the running KV cluster. Small bodies are stored in KV records:
-
-```elixir
-iex> {:ok, _} = Slap.Files.start_link(store: :memory, path: "files"); :ok
-:ok
-iex> ref = {"examples", "hello.txt"}
-{"examples", "hello.txt"}
-iex> {:ok, %{storage: :inline}} = Slap.Files.put(ref, "hello", if_version: :absent); :ok
-:ok
-iex> Slap.Files.read(ref)
-{:ok, "hello"}
-```
-
-For production configuration and supervision, follow the package links in
-[Use Slap in an application](#use-slap-in-an-application).
-
-## Try the standalone server
-
-`mix slap.server` serves Streams, KV, or both from one HTTP listener. It does
-not authenticate requests. Use it to evaluate, test and benchmark the services
-without writing an application.
-
-You need Elixir 1.18 or later and Erlang/OTP 26.2 or later. This command
-installs `slap` from Hex with `Mix.install` and starts the server:
-
-```sh
-elixir -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- \
-  --streams --kv --store memory
-```
-
-`--streams` and `--kv` select the services; pass one or both.
-
-To use Slap Inspect, start a named Erlang node as shown in its
-[standalone server connection guide](https://hexdocs.pm/slap_inspect/readme.html#standalone-slap-server).
-
-The SlateDB NIF is precompiled for macOS and Linux (glibc and musl) on x86_64
-and arm64. The first run downloads it and compiles the dependencies; later
-runs reuse them.
-
-The server listens on `http://127.0.0.1:4437`. It serves Streams under
-`/v1/stream/` and KV under `/v1/kv/`, and `GET /health` answers 200 once it is
-up. Use `--ip` to listen on another address, and `--port` for another port.
-
-The memory store loses its data when the server stops. To use S3, create the
-bucket, set `AWS_REGION` and credentials (such as `AWS_ACCESS_KEY_ID` and
-`AWS_SECRET_ACCESS_KEY`) in the server's environment, then run:
-
-```sh
-elixir -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- \
-  --streams --kv --store s3:s3://my-bucket/my-app
-```
-
-`--store local:DIR` keeps the data in a local directory. See
-[choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count)
-for local-storage guidance and
-[running another cluster on the same store](https://hexdocs.pm/slap_cluster/readme.html#running-another-cluster-on-the-same-store)
-before running a script against a store an application is using. Existing
-data requires its original shard count.
-
-To keep an IEx prompt while the server runs:
-
-```sh
-iex -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- \
-  --streams --kv --store memory
-```
-
-### Streams
-
-With the server running, use another terminal for the HTTP examples below.
-Create a JSON stream, then append to it. The JSON extension stores each element
-of an appended array as a separate message.
-
-```sh
-curl -X PUT -H 'Content-Type: application/json' http://localhost:4437/v1/stream/events
-curl -X POST -H 'Content-Type: application/json' \
-  --data '[{"type":"created","id":1},{"type":"updated","id":1}]' \
-  http://localhost:4437/v1/stream/events
-```
-
-Read the stream. The JSON messages are returned as an array.
-
-```sh
-curl 'http://localhost:4437/v1/stream/events?offset=-1'
-```
-
-Fork the stream at its current end, then append to the fork. The source still
-contains only the first two messages.
-
-```sh
-curl -X PUT -H 'Content-Type: application/json' \
-  -H 'Stream-Forked-From: /v1/stream/events' \
-  http://localhost:4437/v1/stream/events-fork
-curl -X POST -H 'Content-Type: application/json' --data '{"type":"deleted","id":1}' \
-  http://localhost:4437/v1/stream/events-fork
-curl 'http://localhost:4437/v1/stream/events-fork?offset=-1'
-curl 'http://localhost:4437/v1/stream/events?offset=-1'
-```
-
-### KV
-
-With KV running, set three rows, get one, then scan a range of keys in the
-`people` partition. The range stops before `c`.
-
-```sh
-curl -X PUT --data-binary 'Ada' http://localhost:4437/v1/kv/people/a
-curl -X PUT --data-binary 'Grace' http://localhost:4437/v1/kv/people/b
-curl -X PUT --data-binary 'Katherine' http://localhost:4437/v1/kv/people/c
-curl http://localhost:4437/v1/kv/people/a
-curl 'http://localhost:4437/v1/kv/people?gte=a&lt=c'
-```
-
-The scan returns JSON with keys and values encoded as unpadded base64url.
-
-### Options
-
-Pass `--help` to the server command to list the options: the store, the
-listener address, each service's shard count and flush interval, the long-poll
-and SSE timeouts, a pid file, and the placement (`local`, `object-lease`,
-`distributed` or `static`) for running as one node of a cluster.
-The server accepts `object-lease` only with an S3 store, although the
-`ObjectLease` strategy in `slap_cluster` also supports local stores. `--peers`
-requires a placement other than `local`.
-
-Each service has its own shards: in a store, the streams' shards are under
-`streams/` and KV's under `kv/`, each with its own leases when the placement
-uses them. Run one server per VM; a cluster can have many shards and span
-several VMs.
-
-### Running from a Mix project
-
-In a Mix project that depends on `slap`, run the task directly:
-
-```sh
-mix slap.server --streams --kv --store memory
-```
-
-The same server options apply. Run `mix help slap.server` for the full list,
-or `iex -S mix slap.server --streams --kv --store memory` to keep an IEx
-prompt while the server runs.
-
-### Supervising the server
-
-The Mix task is not available in a release. To run the server in a release,
-or in a test or benchmark harness, add `slap` as a dependency and add
-`{Slap.Server, opts}` as a child. It starts the selected services and a
-Bandit listener together:
-
-```elixir
-children = [
-  {Slap.Server,
-    store: {:url, "s3://bucket/db"},
-    streams: [shards: 8],
-    kv: [shards: 4],
-    port: 4437}
-]
-```
+See the [package overview](guides/overview.md) for a description of each
+package.
 
 ## Use Slap in an application
 
-Requires Elixir 1.18 or later and Erlang/OTP 26.2 or later, because `slap`
-includes `slap_yjs`.
+Requires Elixir 1.18 or later and Erlang/OTP 26.2 or later.
 
 Add `slap` to the dependencies in your application's `mix.exs`:
 
@@ -395,9 +38,8 @@ end
 
 Run `mix deps.get`.
 
-`slap` makes every library below available. Applications that use only part
-of Slap can depend on those packages directly. In either case, add the
-required processes to the application's supervision tree:
+Add the required processes to your application's supervision tree. Each
+package guide has setup instructions and API examples:
 
 | Package | Integration |
 | --- | --- |
@@ -412,136 +54,77 @@ required processes to the application's supervision tree:
 These packages do not start an HTTP listener. The Streams and KV HTTP routers
 are Plugs: mount them in your application's HTTP pipeline, or serve them with a
 listener you supervise, and put your authentication and authorization in front
-of them. Each package's README shows the children it needs and its in-process
-API.
+of them.
+
+## Kitchen sink demo
+
+To try all seven libraries without creating an application, download and run
+the [kitchen sink demo](guides/kitchen-sink.md):
+
+```sh
+curl -fsSLo kitchen_sink.exs https://raw.githubusercontent.com/mjrusso/slap/main/slap/examples/kitchen_sink.exs
+elixir kitchen_sink.exs
+```
+
+The script installs `slap`, updates sample data once a second, and prints
+commands for browsing it with [Slap Inspect](#slap-inspect). Data is held in
+memory and lost when the demo exits. Press Enter to exit.
+
+The [demo guide](guides/kitchen-sink.md) covers running from a checkout,
+inspection, and options. For an interactive walkthrough of the Elixir APIs,
+see the [library examples](guides/library-examples.md).
+
+## Try the standalone server
+
+`mix slap.server` serves Streams, KV, or both from one HTTP listener. It does
+not authenticate requests. Use it to evaluate, test and benchmark the services
+without writing an application:
+
+```sh
+elixir -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- \
+  --streams --kv --store memory
+```
+
+The server listens on `http://127.0.0.1:4437`. In another terminal, write and
+read a KV row:
+
+```sh
+curl -X PUT --data-binary 'Ada' http://localhost:4437/v1/kv/people/a
+curl http://localhost:4437/v1/kv/people/a
+```
+
+The memory store loses its data when the server stops. The
+[standalone server guide](guides/standalone-server.md) covers Streams and KV
+HTTP examples, S3 and local storage, server options, and supervision in a
+release.
+
+## Slap Inspect
+
+[Slap Inspect](https://hexdocs.pm/slap_inspect/) is a read-only TUI and CLI
+for browsing data in the standalone server or in your application. Install
+it separately:
+
+```sh
+mix escript.install hex slap_inspect
+```
+
+It connects over distributed Erlang using the server's node name and cookie.
+The [inspector guide](https://hexdocs.pm/slap_inspect/) covers connection and
+commands. The [demo guide](guides/kitchen-sink.md#inspect-the-demo) explains
+how to inspect the kitchen sink demo.
 
 ## Development and testing
 
-To run against this checkout, follow the repository's
-[development setup](https://github.com/mjrusso/slap#development), then run
-commands from `slap/` unless a different directory is specified.
-Use `iex -S mix` for the library examples and
-`mix slap.server --streams --kv --store memory` for the standalone server.
+Follow the repository's
+[development setup](https://github.com/mjrusso/slap#development) to work from
+this checkout. The [development guide](guides/development.md) documents the
+server's test and benchmark tools:
 
-This project also holds the tests that run the server as an OS process:
-the official Durable Streams conformance suite and benchmarks, the kill -9
-crash tests, the cluster tests and the streams HTTP load benchmark.
-
-### Library examples
-
-CI checks the IEx examples in the root README and this package's README
-against this checkout, including their expected results. Each walkthrough
-runs in a separate VM so its bindings and named services stay within that
-session. From `slap/`:
-
-```sh
-mix run scripts/readme_test.exs ../README.md
-mix run scripts/readme_test.exs README.md
-```
-
-### Durable Streams conformance and benchmarks
-
-`durable_streams/` runs version 0.3.7 of
-[`@durable-streams/server-conformance-tests`](https://www.npmjs.com/package/@durable-streams/server-conformance-tests)
-against a running server:
-
-```sh
-mix slap.server --streams --store memory --long-poll-timeout 500 &    # the reference servers use 500 ms for this suite
-cd durable_streams && pnpm install && pnpm test
-```
-
-The official suite covers stream operations, including forks, on the
-in-memory and RustFS stores in CI. The suite skips subscriptions, which this
-server does not provide.
-
-`pnpm bench` in `durable_streams/` runs the official HTTP benchmarks,
-[`@durable-streams/benchmarks`](https://www.npmjs.com/package/@durable-streams/benchmarks)
-0.2.7: append-to-long-poll round-trip latency, and append throughput for
-100-byte and 1 MB messages. Both suites read the server's URL from
-`DURABLE_STREAMS_URL` (default `http://127.0.0.1:4437`).
-
-`scripts/streams_bench.sh` runs the benchmarks against `mix slap.server` and
-against the official Caddy server (a pinned release, downloaded and
-checked), one after another, and `durable_streams/summary.js` compares the
-results. These paths are relative to `slap/`. Run the benchmark recipes from
-the repository root:
-
-```sh
-just streams-bench                                  # slap-local caddy-file
-just streams-bench slap-memory caddy-memory slap-local caddy-file
-```
-
-`slap-local` and `caddy-file` both reply to an append once it is on disk, so
-they are the comparable pair. `slap-memory` still waits for a SlateDB flush,
-which `caddy-memory` does not. The memory store keeps the objects SlateDB writes
-in RAM, about twice the bytes appended, and deleting the streams does not free
-it within minutes. The 1 MB benchmark appends a fixed time's worth of data, 1.5
-GB in a typical run, so `slap-memory` needs about 4 GB of free memory, more on a
-faster machine. The `slap_streams_bench.yml` workflow runs `slap-local`,
-`slap-s3` (on RustFS) and `caddy-file`; a run on main also charts the results.
-
-### Without a Mix project
-
-`scripts/mix_install_test.sh` runs the [`Mix.install`
-command](#try-the-standalone-server) against this checkout. CI runs it.
-
-### Crash test
-
-`scripts/crash_test.exs` runs `mix slap.server` as its own OS process. It:
-
-1. has 16 writers append to their own JSON streams (half with idempotent
-   producers)
-2. kills the server with `kill -9` at a random moment between 0.3 and 3 s
-3. restarts the server on the same store
-4. lets the producers retry the appends that were in flight, and all writers
-   append more
-5. reads every stream back
-
-Every acknowledged append must be present exactly once, at the offset its
-acknowledgement gave, so no offset is reused after the crash. Each writer's
-messages must be in order, with no message stored twice.
-
-```sh
-mix run scripts/crash_test.exs --runs 20                         # local directory
-mix run scripts/crash_test.exs --runs 20 --store s3:s3://bucket/crash
-```
-
-CI runs the crash test on local storage and RustFS. An append in flight
-when the process dies may or may not be stored.
-
-### Streams load
-
-`bench/streams_http_load.exs` measures stream append throughput and latency
-against a running server. Choose shard count and `flush_interval` from the
-store's sustained PUT rate: each active shard can write one WAL object per
-flush interval. Run the benchmark on the intended store before sizing a
-deployment.
-
-### Cluster tests
-
-`scripts/cluster.sh start DIR` runs a local cluster of three `mix
-slap.server` nodes (separate OS processes, one store, the `distributed`
-placement). The Durable Streams conformance suite runs through one of them,
-so most requests, long-polls and SSE streams are served by another node.
-
-`scripts/cluster_crash_test.exs` runs 16 writers (half with idempotent
-producers) through the nodes of a 3-node cluster and injects a fault into
-one node at a random moment, then checks every stream as the single-node
-crash test does: every acknowledged append exactly once at its
-acknowledged offset, no duplicates, each writer's messages in order.
-
-- **kill** - SIGKILL the node; the others take its shards (when its
-  leases expire, or at once with `distributed`); it is restarted and takes
-  its share back.
-- **pause** - SIGSTOP the node past its leases (or `net_ticktime`): the
-  others take its shards, fencing it in SlateDB; on SIGCONT it finds it
-  lost them and gives them up.
-
-The test measures how long each shard is unavailable after a kill. With
-`distributed` placement, failover waits for node failure detection and the
-settle interval. With `object-lease`, it waits for the old lease to expire
-and for the shard to reopen. CI runs the Durable Streams conformance suite
-through the cluster and injects both faults under each placement.
+- [Library example checks](guides/development.md#library-examples)
+- [Durable Streams conformance and benchmarks](guides/development.md#durable-streams-conformance-and-benchmarks)
+- [Crash tests](guides/development.md#crash-test)
+- [Streams HTTP load benchmark](guides/development.md#streams-load)
+- [Cluster tests](guides/development.md#cluster-tests)
 
 ## License
 

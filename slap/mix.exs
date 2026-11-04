@@ -3,6 +3,13 @@ defmodule Slap.MixProject do
 
   @version "0.5.0"
   @source_url "https://github.com/mjrusso/slap"
+  @guides [
+    "guides/overview.md",
+    "guides/kitchen-sink.md",
+    "guides/library-examples.md",
+    "guides/standalone-server.md",
+    "guides/development.md"
+  ]
 
   def project do
     [
@@ -17,10 +24,14 @@ defmodule Slap.MixProject do
       usage_rules: [file: "AGENTS.md", usage_rules: [:usage_rules]],
       description: "All Slap server libraries and a standalone Streams and KV server.",
       source_url: @source_url,
-      package: [licenses: ["Apache-2.0"], links: %{"GitHub" => @source_url}],
+      package: [
+        licenses: ["Apache-2.0"],
+        links: %{"GitHub" => @source_url},
+        files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md) ++ @guides
+      ],
       docs: [
         main: "readme",
-        extras: ["README.md", "CHANGELOG.md", "LICENSE"],
+        extras: ["README.md"] ++ @guides ++ ["CHANGELOG.md", "LICENSE"],
         search: [
           %{name: "slap", help: "Search slap"},
           %{
