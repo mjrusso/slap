@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0
+
+- Upgrades SlateDB to 0.18.0. The upstream release includes fixes related to
+  clone retention, compaction watermarks, writer stalls, and sequence-tracker
+  corruption. Databases written by 0.17 open in 0.18, but rollback to 0.17 is
+  not guaranteed: 0.18 can write sequence-tracker metadata that 0.17 cannot
+  read. Upgrade readers and standalone compactors before writers. See the
+  [upstream format change](https://github.com/slatedb/slatedb/pull/2181).
+- Breaking change: removes `snapshot/2`; use `snapshot/1`. `begin/2` no longer
+  accepts `:timeout`; passing it raises `ArgumentError`. Snapshot and
+  transaction creation now run directly on the BEAM scheduler. The `:timeout`
+  option of `transaction/3` now applies only to committing.
+- SlateDB 0.18.0 introduces the experimental
+  `compactor_options.enable_experimental_incremental_compaction` setting,
+  disabled by default and accessible through the binding's existing `:settings`
+  option.
+
 ## 0.3.0
 
 - If using local storage (`{:local, directory}`), writes now share one

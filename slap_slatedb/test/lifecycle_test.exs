@@ -132,6 +132,7 @@ defmodule Slap.SlateDB.LifecycleTest do
       assert {:error, ^closed} = SlateDB.put(db, "k", "v")
       assert {:error, ^closed} = SlateDB.flush(db)
       assert {:error, ^closed} = SlateDB.snapshot(db)
+      assert {:error, ^closed} = SlateDB.begin(db)
       assert {:error, ^closed} = Snapshot.get(snap, "k")
       assert {:error, ^closed} = Transaction.get(tx, "k")
       assert {:error, ^closed} = Transaction.put(tx, "k", "v")

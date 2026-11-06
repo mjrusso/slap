@@ -1,6 +1,6 @@
 # slap_slatedb
 
-`slap_slatedb` provides Elixir bindings for [SlateDB](https://slatedb.io) 0.17,
+`slap_slatedb` provides Elixir bindings for [SlateDB](https://slatedb.io) 0.18,
 an embedded key-value engine that keeps its data in object storage, such as
 S3. Your application opens a database and calls it directly; there is no
 database server to run. SlateDB batches writes to limit object-store requests.
@@ -70,7 +70,7 @@ application's `mix.exs`:
 ```elixir
 defp deps do
   [
-    {:slap_slatedb, "~> 0.3.0"}
+    {:slap_slatedb, "~> 0.4.0"}
   ]
 end
 ```
@@ -388,7 +388,7 @@ its readers need it.
 
 ## Limits and caveats
 
-- SlateDB 0.17 enforces TTL during compaction, not on reads. An expired row
+- SlateDB enforces TTL during compaction, not on reads. An expired row
   may still be returned; `get_key_value/3` includes its `expire_ts` for an
   exact cutoff.
 - Numeric merge operators require an eight-byte base value and the same
@@ -410,13 +410,16 @@ its readers need it.
 
 ## Unsupported SlateDB APIs
 
-Compared with SlateDB's official UniFFI bindings, this binding does not expose:
+SlateDB's Rust API includes these features, which this binding does not expose:
 
 - merge operators and compaction filters written in Elixir
 - filter policies, segments and prefix extractors
 - the WAL reader
 - submitting arbitrary compaction specs, reading compaction state, and
   `delete_db`
+- two-phase checkpoints, which separate capture from durable completion
+- local mirroring of compacted SSTs
+- SST block alignment
 
 SlateDB calls custom merge operators, compaction filters and filter policies
 synchronously from its own threads during reads, flushes and compactions,
@@ -462,7 +465,7 @@ SLAP_TEST_S3_ENDPOINT=http://127.0.0.1:9000 mix test
 `SLAP_TEST_S3_BUCKET`, `_REGION`, `_KEY` and `_SECRET` override the
 defaults (`slatedb-test`, `us-east-1`, `rustfsadmin`, `rustfsadmin`).
 
-The retention suite tests SlateDB **0.17.0** on local directories and RustFS.
+The retention suite runs on local directories and RustFS.
 It covers checkpoint deletion and expiry, removal of the temporary checkpoint
 `clone/3` creates, clones of clones, removal of SlateDB's checkpoints from
 sources, the WAL data copied into clones, and source writes before and after

@@ -48,7 +48,7 @@ defmodule Slap.SlateDB do
 
   ## Timeouts
 
-  Calls wait for their reply with no timeout by default. Pass
+  I/O calls wait for their reply with no timeout by default. Pass
   `timeout: ms` to a call to get
   `{:error, %Slap.SlateDB.Error{kind: :timeout}}` after `ms` milliseconds.
   A timeout does not cancel the operation: a write that timed out may still be
@@ -717,11 +717,9 @@ defmodule Slap.SlateDB do
   def set_log_level(level), do: Native.log_set_level(Options.log_level(level))
 
   @doc "Takes a consistent, read-only snapshot. See `Slap.SlateDB.Snapshot`."
-  @spec snapshot(t(), keyword()) :: {:ok, Snapshot.t()} | {:error, SlateDB.Error.t()}
-  def snapshot(%__MODULE__{resource: db}, opts \\ []) do
-    Keyword.validate!(opts, [:timeout])
-
-    with {:ok, resource} <- Native.call(&Native.db_snapshot(db, &1), Native.timeout(opts)) do
+  @spec snapshot(t()) :: {:ok, Snapshot.t()} | {:error, SlateDB.Error.t()}
+  def snapshot(%__MODULE__{resource: db}) do
+    with {:ok, resource} <- Native.normalize(Native.db_snapshot(db)) do
       {:ok, %Snapshot{resource: resource}}
     end
   end
@@ -735,14 +733,13 @@ defmodule Slap.SlateDB do
   @spec begin(t(), keyword()) ::
           {:ok, Transaction.t()} | {:error, SlateDB.Error.t()}
   def begin(%__MODULE__{resource: db}, opts \\ []) do
-    Keyword.validate!(opts, [:isolation, :timeout])
+    Keyword.validate!(opts, [:isolation])
     isolation = Keyword.get(opts, :isolation, :snapshot)
 
     unless isolation in [:snapshot, :serializable],
       do: raise(ArgumentError, "invalid isolation: #{inspect(isolation)}")
 
-    with {:ok, resource} <-
-           Native.call(&Native.db_begin(db, isolation, &1), Native.timeout(opts)) do
+    with {:ok, resource} <- Native.normalize(Native.db_begin(db, isolation)) do
       {:ok, %Transaction{resource: resource}}
     end
   end
@@ -760,7 +757,7 @@ defmodule Slap.SlateDB do
     * `:isolation` - `:snapshot` (default) or `:serializable`.
     * `:retries` - how many times to run `fun` again after a commit conflict.
       Defaults to `0`. `fun` must be safe to run more than once.
-    * `:timeout` - applies to starting and to committing the transaction.
+    * `:timeout` - applies to committing the transaction.
 
   Use `begin/2` and `Slap.SlateDB.Transaction.commit/2` to commit without
   waiting for durability and receive the commit's sequence number.
@@ -780,12 +777,12 @@ defmodule Slap.SlateDB do
     opts = Keyword.validate!(opts, [:isolation, :retries, :timeout])
     isolation = Keyword.get(opts, :isolation, :snapshot)
     retries = Keyword.get(opts, :retries, 0)
-    commit_opts = [await_durable: true] ++ Keyword.take(opts, [:timeout])
+    commit_opts = [await_durable: true, timeout: Native.timeout(opts)]
     run_transaction(db, fun, isolation, retries, commit_opts)
   end
 
   defp run_transaction(db, fun, isolation, retries, commit_opts) do
-    with {:ok, tx} <- begin(db, [isolation: isolation] ++ Keyword.take(commit_opts, [:timeout])) do
+    with {:ok, tx} <- begin(db, isolation: isolation) do
       result =
         try do
           fun.(tx)

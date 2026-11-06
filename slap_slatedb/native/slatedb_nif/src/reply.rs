@@ -86,6 +86,16 @@ impl From<slatedb::Error> for NifError {
 
 pub(crate) type NifOutcome<T> = Result<T, NifError>;
 
+pub(crate) fn reply_now<'a, T: Encoder>(
+    env: Env<'a>,
+    f: impl FnOnce() -> NifOutcome<T>,
+) -> Term<'a> {
+    match f() {
+        Ok(value) => value.encode(env),
+        Err(err) => err.encode(env),
+    }
+}
+
 /// Builds the success term for a reply inside the message environment.
 pub(crate) type Encode = Box<dyn for<'a> FnOnce(Env<'a>) -> Term<'a> + Send>;
 

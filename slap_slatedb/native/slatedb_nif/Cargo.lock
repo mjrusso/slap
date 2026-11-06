@@ -727,6 +727,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
 name = "http"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1602,11 +1608,11 @@ dependencies = [
 
 [[package]]
 name = "rand_xoshiro"
-version = "0.7.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f703f4665700daf5512dcca5f43afa6af89f09db47fb56be587f80636bda2d41"
+checksum = "662effc7698e08ea324d3acccf8d9d7f7bf79b9785e270a174ea36e56900c91d"
 dependencies = [
- "rand_core 0.9.5",
+ "rand_core 0.10.1",
 ]
 
 [[package]]
@@ -1997,9 +2003,9 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "slatedb"
-version = "0.17.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "543da8a0c19e1a6af286a3c314a1c936af598603f3af98549514fffffb837334"
+checksum = "d4c3416299ebf61cbaa9b2fb2fc574a08ead53c9abf0eeaa1f84b23d6c530d2c"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -2024,11 +2030,12 @@ dependencies = [
  "object_store",
  "ouroboros",
  "parking_lot",
- "rand 0.9.5",
+ "rand 0.10.3",
  "serde",
  "serde_json",
  "siphasher",
  "slatedb-common",
+ "slatedb-mirror",
  "slatedb-txn-obj",
  "smallvec",
  "snap",
@@ -2046,14 +2053,18 @@ dependencies = [
 
 [[package]]
 name = "slatedb-common"
-version = "0.17.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5cb9fe0fa807c333fbb5880b222f5e72889fa22e40b2f13f479490d8b22f192"
+checksum = "9b4bc81b9976656a06649896cc62d44d45eb9b9125a8b8b5c0ffd5469915bca2"
 dependencies = [
+ "async-trait",
+ "bytes",
  "chrono",
  "log",
+ "lru",
  "object_store",
- "rand 0.9.5",
+ "parking_lot",
+ "rand 0.10.3",
  "rand_xoshiro",
  "serde",
  "thread_local",
@@ -2061,10 +2072,34 @@ dependencies = [
 ]
 
 [[package]]
-name = "slatedb-txn-obj"
-version = "0.17.0"
+name = "slatedb-mirror"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "872044a3b57e2846a3761619bab7cb88052034d137cf17afb2382c63a24c3b11"
+checksum = "b7c444accc750b41fa54191fa503ff284ae4921018b7168531b985e5c9fe84ea"
+dependencies = [
+ "async-trait",
+ "backon",
+ "bytes",
+ "chrono",
+ "futures",
+ "hex",
+ "log",
+ "md-5",
+ "object_store",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "slatedb-common",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "slatedb-txn-obj"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "780edc205fafc7a25137979d21bcfa22ec77de511e64dc32d61a33f7c979321e"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3095,27 +3130,27 @@ checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[package]]
 name = "zstd"
-version = "0.13.3"
+version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
+checksum = "db3ae9bf90af6e40197bef767eeefc46ad6397420fe873830bd85e5fbbfb3c70"
 dependencies = [
  "zstd-safe",
 ]
 
 [[package]]
 name = "zstd-safe"
-version = "7.3.0"
+version = "8.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64d80649ab6db9d9f6f9c80a40becd948eda4714a0a5ac8c4d157a32231c7882"
+checksum = "ded520f16b29e1a9b771c722221b2b0a0398c2316d9bb3c42b458a5414d7434b"
 dependencies = [
  "zstd-sys",
 ]
 
 [[package]]
 name = "zstd-sys"
-version = "2.1.0+zstd.1.5.7"
+version = "2.1.2+zstd.1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ef0a8027ec3ee71300ab3bcbcd0393f434aa72b91ca6d635a39941deae8eea0"
+checksum = "481ada9c543b2323cbb7bbdbb5249177fbf0188ed959ed2c15e4b22421c84ed3"
 dependencies = [
  "cc",
  "pkg-config",

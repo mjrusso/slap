@@ -87,7 +87,7 @@ fn db_create_checkpoint<'a>(
     };
     let options = checkpoint_options(lifetime_ms, source, name);
     spawn_reply_with(env, reply_ref, options, |options| async move {
-        let _open = db.enter().await?;
+        let _open = db.gate.enter().await?;
         Ok(encode_created(
             db.db.create_checkpoint(scope, &options).await?,
         ))

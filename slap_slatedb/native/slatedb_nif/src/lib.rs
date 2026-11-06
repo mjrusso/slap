@@ -1,7 +1,7 @@
 //! Rustler NIF for SlateDB.
 //!
-//! Every SlateDB call is async. A NIF must not block a BEAM scheduler, so the
-//! I/O NIFs here do not wait for the result. Each one:
+//! A NIF must not block a BEAM scheduler, so the I/O NIFs here do not wait for
+//! the result. Each one:
 //!
 //! 1. copies its arguments out of the calling process's heap (large binaries
 //!    are shared instead; see `binaries`),
@@ -42,7 +42,7 @@ mod write;
 
 use std::sync::OnceLock;
 
-use rustler::{Encoder, Env, Term};
+use rustler::{Env, Term};
 use tokio::runtime::{Builder, Runtime};
 
 mod atoms {
@@ -108,19 +108,19 @@ impl RuntimeState {
 
 #[rustler::nif(schedule = "DirtyCpu")]
 fn runtime_init<'a>(env: Env<'a>, threads: Option<usize>) -> Term<'a> {
-    if threads == Some(0) {
-        return reply::NifError::invalid("runtime_threads must be positive").encode(env);
-    }
+    reply::reply_now(env, || {
+        if threads == Some(0) {
+            return Err(reply::NifError::invalid("runtime_threads must be positive"));
+        }
 
-    let state = RUNTIME.get_or_init(|| RuntimeState::new(threads));
-    if state.threads == threads {
-        atoms::ok().encode(env)
-    } else {
-        reply::NifError::invalid(
-            "SlateDB runtime already has a different thread count; restart the VM to change it",
-        )
-        .encode(env)
-    }
+        let state = RUNTIME.get_or_init(|| RuntimeState::new(threads));
+        if state.threads != threads {
+            return Err(reply::NifError::invalid(
+                "SlateDB runtime already has a different thread count; restart the VM to change it",
+            ));
+        }
+        Ok(atoms::ok())
+    })
 }
 
 // SlateDB captures `Handle::current()` when a database opens and keeps using

@@ -56,7 +56,7 @@ fn spawn_write<'a>(
     await_durable: bool,
 ) -> Term<'a> {
     spawn_reply_with(env, reply_ref, batch, |batch| async move {
-        let _open = db.enter().await?;
+        let _open = db.gate.enter().await?;
         let handle = db
             .db
             .write_with_options(batch, &WriteOptions::default())

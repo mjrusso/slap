@@ -11,14 +11,15 @@ use slatedb::db_cache::DbCache;
 use slatedb::object_store::path::Path as StorePath;
 use slatedb::CompactorBuilder;
 use slatedb_common::metrics::{DefaultMetricsRecorder, MetricValue};
-use tokio::sync::RwLockReadGuard;
 
 use crate::atoms;
 use crate::compaction_filter::{self, PrefixFilterResource};
 use crate::gate::Gate;
 use crate::merge::Builtin;
 use crate::options::{with_overrides, CacheChoice};
-use crate::reply::{ok_atom, ok_with, spawn_reply, spawn_reply_with, NifError, NifOutcome};
+use crate::reply::{
+    ok_atom, ok_with, reply_now, spawn_reply, spawn_reply_with, NifError, NifOutcome,
+};
 use crate::store::{open_store, StoreSpec};
 
 pub(crate) struct DbResource {
@@ -31,10 +32,6 @@ pub(crate) struct DbResource {
 }
 
 impl DbResource {
-    pub(crate) async fn enter(&self) -> NifOutcome<RwLockReadGuard<'_, bool>> {
-        self.gate.enter().await
-    }
-
     /// Checks a merge operand against the database's merge operator.
     pub(crate) fn validate_operand(&self, operand: &[u8]) -> NifOutcome<()> {
         match self.merge_operator {
@@ -151,10 +148,10 @@ fn parse_settings(json: Option<String>, has_filter: bool) -> NifOutcome<Settings
 
 #[rustler::nif]
 fn db_validate_settings<'a>(env: Env<'a>, settings_json: Option<String>) -> Term<'a> {
-    match parse_settings(settings_json, false) {
-        Ok(_) => atoms::ok().encode(env),
-        Err(error) => error.encode(env),
-    }
+    reply_now(env, || {
+        parse_settings(settings_json, false)?;
+        Ok(atoms::ok())
+    })
 }
 
 /// Closes the database. Waits for calls already in flight to finish. Calls
@@ -189,7 +186,7 @@ fn db_flush<'a>(
         Flush::Memtable => FlushType::MemTable,
     };
     spawn_reply(env, reply_ref, async move {
-        let _open = db.enter().await?;
+        let _open = db.gate.enter().await?;
         db.db
             .flush_with_options(FlushOptions { flush_type })
             .await?;
@@ -198,13 +195,16 @@ fn db_flush<'a>(
 }
 
 #[rustler::nif]
-fn db_snapshot<'a>(env: Env<'a>, db: ResourceArc<DbResource>, reply_ref: Term<'a>) -> Term<'a> {
-    spawn_reply(env, reply_ref, async move {
+fn db_snapshot(env: Env<'_>, db: ResourceArc<DbResource>) -> Term<'_> {
+    reply_now(env, move || {
         let snapshot = {
-            let _open = db.enter().await?;
-            db.db.snapshot().await?
+            let _open = db.gate.try_enter()?;
+            db.db.snapshot()?
         };
-        Ok(ok_with(ResourceArc::new(SnapshotResource { db, snapshot })))
+        Ok((
+            atoms::ok(),
+            ResourceArc::new(SnapshotResource { db, snapshot }),
+        ))
     })
 }
 

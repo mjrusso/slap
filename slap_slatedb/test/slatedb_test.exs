@@ -26,7 +26,7 @@ defmodule Slap.SlateDBTest do
       assert_raise ArgumentError, fn -> SlateDB.close(db, typo: true) end
       assert {:ok, _} = SlateDB.put(db, "still-open", "yes")
 
-      assert_raise ArgumentError, fn -> SlateDB.snapshot(db, typo: true) end
+      assert_raise ArgumentError, fn -> SlateDB.begin(db, typo: true) end
       assert_raise ArgumentError, fn -> SlateDB.probe_store(:memory, "probe", typo: true) end
 
       {:ok, subscription} = SlateDB.subscribe(db, :test)
@@ -313,6 +313,21 @@ defmodule Slap.SlateDBTest do
       assert {:ok, nil} = SlateDB.get(db, "created")
     end
 
+    test "transaction/3 rejects an invalid timeout before running fun", %{db: db} do
+      assert_raise ArgumentError, ~r/:timeout/, fn ->
+        SlateDB.transaction(
+          db,
+          fn _tx ->
+            send(self(), :ran)
+            {:ok, :done}
+          end,
+          timeout: -1
+        )
+      end
+
+      refute_received :ran
+    end
+
     test "transaction/3 commits, rolls back, re-raises and retries", %{db: db} do
       assert {:ok, :done} =
                SlateDB.transaction(db, fn tx ->
@@ -423,6 +438,9 @@ defmodule Slap.SlateDBTest do
 
       assert {:error, %SlateDB.Error{kind: :closed, reason: :fenced}} =
                SlateDB.put(first, "k", "v", await_durable: true)
+
+      assert {:error, %SlateDB.Error{kind: :closed, reason: :fenced}} = SlateDB.snapshot(first)
+      assert {:error, %SlateDB.Error{kind: :closed, reason: :fenced}} = SlateDB.begin(first)
 
       assert {:ok, _} = SlateDB.put(second, "k", "v", await_durable: true)
       :ok = SlateDB.close(second)
