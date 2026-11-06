@@ -198,8 +198,9 @@ defmodule Slap.Cluster.Test.Failover do
   end
 
   def s3_store(prefix) do
-    {:url,
-     "s3://#{System.get_env("SLAP_TEST_S3_BUCKET", "slatedb-test")}/#{prefix}-#{System.unique_integer([:positive])}",
+    suffix = Base.encode16(:crypto.strong_rand_bytes(12), case: :lower)
+
+    {:url, "s3://#{System.get_env("SLAP_TEST_S3_BUCKET", "slatedb-test")}/#{prefix}-#{suffix}",
      [
        aws_endpoint: System.fetch_env!("SLAP_TEST_S3_ENDPOINT"),
        aws_allow_http: "true",
