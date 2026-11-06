@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793929774053,
+  "lastUpdate": 1793930782244,
   "repoUrl": "https://github.com/mjrusso/slap",
   "entries": {
     "Durable Streams (lower is better)": [
@@ -1395,6 +1395,60 @@ window.BENCHMARK_DATA = {
           {
             "name": "slap-s3: Latency - Total RTT p99",
             "value": 13.350569999999607,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "mjr@mjrusso.com",
+            "name": "Michael Russo",
+            "username": "mjrusso"
+          },
+          "committer": {
+            "email": "mjr@mjrusso.com",
+            "name": "Michael Russo",
+            "username": "mjrusso"
+          },
+          "distinct": true,
+          "id": "f2d1a93bbe187a8eaa6dcf3382cad6c50c55ec18",
+          "message": "chore(slap_slatedb): add NIF checksums for 0.4.0",
+          "timestamp": "2026-11-05T21:01:16-05:00",
+          "tree_id": "b672bc1fcb5bb836b415d9d6e5bf3f7ea5f8bd3b",
+          "url": "https://github.com/mjrusso/slap/commit/f2d1a93bbe187a8eaa6dcf3382cad6c50c55ec18"
+        },
+        "date": 1793930781253,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "caddy-file: Latency - Total RTT p50",
+            "value": 1.1622779999997874,
+            "unit": "ms"
+          },
+          {
+            "name": "slap-local: Latency - Total RTT p50",
+            "value": 11.284591999999975,
+            "unit": "ms"
+          },
+          {
+            "name": "slap-s3: Latency - Total RTT p50",
+            "value": 11.283660000000964,
+            "unit": "ms"
+          },
+          {
+            "name": "caddy-file: Latency - Total RTT p99",
+            "value": 5.818199999999706,
+            "unit": "ms"
+          },
+          {
+            "name": "slap-local: Latency - Total RTT p99",
+            "value": 30.085385999998834,
+            "unit": "ms"
+          },
+          {
+            "name": "slap-s3: Latency - Total RTT p99",
+            "value": 23.181821000000127,
             "unit": "ms"
           }
         ]
