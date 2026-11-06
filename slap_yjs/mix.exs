@@ -1,7 +1,7 @@
 defmodule Slap.Yjs.MixProject do
   use Mix.Project
 
-  @version "0.5.0"
+  @version "0.6.0"
   @source_url "https://github.com/mjrusso/slap"
   @package_url "#{@source_url}/tree/main/slap_yjs"
 
@@ -76,10 +76,10 @@ defmodule Slap.Yjs.MixProject do
 
   defp deps do
     [
-      slap_dep(:slap_snapshot_log, "~> 0.5.0"),
-      slap_dep(:slap_streams, "~> 0.5.0"),
-      slap_dep(:slap_cluster, "~> 0.5.0"),
-      slap_dep(:slap_slatedb, "~> 0.3.0"),
+      slap_dep(:slap_snapshot_log, "~> 0.6.0"),
+      slap_dep(:slap_streams, "~> 0.6.0"),
+      slap_dep(:slap_cluster, "~> 0.6.0"),
+      slap_dep(:slap_slatedb, "~> 0.4.0"),
       {:y_ex, "~> 0.13.0"},
       {:telemetry, "~> 1.0"},
       {:rustler, "~> 0.38", optional: true, runtime: false},
