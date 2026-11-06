@@ -1,7 +1,7 @@
 defmodule Slap.SnapshotLog.MixProject do
   use Mix.Project
 
-  @version "0.5.0"
+  @version "0.6.0"
   @source_url "https://github.com/mjrusso/slap"
   @package_url "#{@source_url}/tree/main/slap_snapshot_log"
 
@@ -62,9 +62,9 @@ defmodule Slap.SnapshotLog.MixProject do
 
   defp deps do
     [
-      slap_dep(:slap_streams, "~> 0.5.0"),
-      slap_dep(:slap_cluster, "~> 0.5.0"),
-      slap_dep(:slap_slatedb, "~> 0.3.0"),
+      slap_dep(:slap_streams, "~> 0.6.0"),
+      slap_dep(:slap_cluster, "~> 0.6.0"),
+      slap_dep(:slap_slatedb, "~> 0.4.0"),
       {:stream_data, "~> 1.4", only: [:dev, :test]},
       {:rustler, "~> 0.38", optional: true, runtime: false},
       {:credo, "~> 1.7.19", only: [:dev, :test], runtime: false},
