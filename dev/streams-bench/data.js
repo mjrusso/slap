@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793928868846,
+  "lastUpdate": 1793929771244,
   "repoUrl": "https://github.com/mjrusso/slap",
   "entries": {
     "Durable Streams (lower is better)": [
@@ -1341,6 +1341,60 @@ window.BENCHMARK_DATA = {
           {
             "name": "slap-s3: Latency - Total RTT p99",
             "value": 15.721442000000025,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "mjr@mjrusso.com",
+            "name": "Michael Russo",
+            "username": "mjrusso"
+          },
+          "committer": {
+            "email": "mjr@mjrusso.com",
+            "name": "Michael Russo",
+            "username": "mjrusso"
+          },
+          "distinct": true,
+          "id": "1d6e4da98e3824b1def585c9feb8ba90180e3975",
+          "message": "test(slap_cluster): isolate object-store fixtures across VMs\n\nSystem.unique_integer resets in each VM, so repeated CI runs could reuse an S3 prefix and read counters written by an earlier run. Use a random fixture suffix. The fresh-VM reproduction generated the same prefix five times before this fix and five distinct prefixes afterward.",
+          "timestamp": "2026-11-05T20:43:55-05:00",
+          "tree_id": "fb8eb1b7748920647568d60ec56440668edd9a76",
+          "url": "https://github.com/mjrusso/slap/commit/1d6e4da98e3824b1def585c9feb8ba90180e3975"
+        },
+        "date": 1793929770307,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "caddy-file: Latency - Total RTT p50",
+            "value": 2.01861899999858,
+            "unit": "ms"
+          },
+          {
+            "name": "slap-local: Latency - Total RTT p50",
+            "value": 11.355967999999848,
+            "unit": "ms"
+          },
+          {
+            "name": "slap-s3: Latency - Total RTT p50",
+            "value": 11.13237300000037,
+            "unit": "ms"
+          },
+          {
+            "name": "caddy-file: Latency - Total RTT p99",
+            "value": 5.101345999999467,
+            "unit": "ms"
+          },
+          {
+            "name": "slap-local: Latency - Total RTT p99",
+            "value": 25.34499500000038,
+            "unit": "ms"
+          },
+          {
+            "name": "slap-s3: Latency - Total RTT p99",
+            "value": 13.350569999999607,
             "unit": "ms"
           }
         ]
