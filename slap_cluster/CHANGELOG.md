@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0
+
+- Uses `slap_slatedb` 0.4.0, which upgrades SlateDB from 0.17 to 0.18.
+  Rollback to SlateDB 0.17 is not guaranteed; see the
+  [upgrade precautions](https://hexdocs.pm/slap_slatedb/changelog.html#0-4-0).
+
 ## 0.5.1
 
 - Improves shard-layout mismatch messages, including singular shard counts.
