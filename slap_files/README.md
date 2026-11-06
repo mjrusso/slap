@@ -77,7 +77,7 @@ application's `mix.exs`:
 ```elixir
 defp deps do
   [
-    {:slap_files, "~> 0.5.0"}
+    {:slap_files, "~> 0.6.0"}
   ]
 end
 ```
