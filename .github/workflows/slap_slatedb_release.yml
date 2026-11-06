@@ -21,8 +21,8 @@ jobs:
         # Keep in sync with Slap.SlateDB.Native (lib/slap/slatedb/native.ex).
         nif: ["2.15"]
         job:
-          - { target: aarch64-apple-darwin, os: macos-14 }
-          - { target: x86_64-apple-darwin, os: macos-14 }
+          - { target: aarch64-apple-darwin, os: macos-15 }
+          - { target: x86_64-apple-darwin, os: macos-15-intel }
           # The Linux builds use `cross`, whose images have complete musl
           # toolchains and older glibc versions than the runner, so the gnu
           # libraries load on older distributions too.
