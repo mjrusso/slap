@@ -22,8 +22,8 @@ defmodule Slap.Cluster.DistributedTest do
     %{dir: Failover.tmp_dir()}
   end
 
-  defp node!(ctx) do
-    Failover.start_node({:local, ctx.dir}, {Distributed, interval: 500, settle: 1_000}, [
+  defp node!(store) do
+    Failover.start_node(store, {Distributed, interval: 500, settle: 1_000}, [
       ~c"-kernel",
       ~c"net_ticktime",
       ~c"4"
@@ -236,12 +236,12 @@ defmodule Slap.Cluster.DistributedTest do
   end
 
   test "placement, routing and a clean stop", ctx do
-    Failover.placement(fn -> node!(ctx) end)
+    Failover.placement(fn -> node!({:local, ctx.dir}) end)
   end
 
   test "a remote application's not_owner result is not retried", ctx do
-    a = node!(ctx)
-    b = node!(ctx)
+    a = node!({:local, ctx.dir})
+    b = node!({:local, ctx.dir})
     assert {:ok, owned} = Failover.await_spread([a, b], 4)
     shard = hd(owned[b])
 
@@ -256,10 +256,13 @@ defmodule Slap.Cluster.DistributedTest do
   end
 
   test "kill -9 of a node under load", ctx do
-    Failover.kill(fn -> node!(ctx) end, @detect)
+    Failover.kill(fn -> node!({:local, ctx.dir}) end, @detect)
   end
 
-  test "a paused node under load: the others take its shards, and it gives them up", ctx do
-    Failover.pause(fn -> node!(ctx) end, @detect)
+  @tag :s3
+  # A paused local writer can hold the store-wide lock and prevent failover.
+  test "a paused node under load: the others take its shards, and it gives them up" do
+    store = Failover.s3_store("distributed-pause")
+    Failover.pause(fn -> node!(store) end, @detect)
   end
 end

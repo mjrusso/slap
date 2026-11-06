@@ -89,8 +89,13 @@ defmodule Slap.Cluster.Test.Failover do
     load = start_load(nodes)
     Process.sleep(1_000)
     os_pid = Peers.pause(c)
-    assert {:ok, _} = await_spread([a, b], 4, ttl * 5)
-    Peers.resume(c, os_pid)
+
+    try do
+      assert {:ok, _} = await_spread([a, b], 4, ttl * 5)
+    after
+      Peers.resume(c, os_pid)
+    end
+
     assert {:ok, _} = await_spread(nodes, 3, ttl * 5)
     Process.sleep(1_000)
     check_load(load, nodes)

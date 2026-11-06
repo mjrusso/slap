@@ -281,7 +281,9 @@ atoms, so peers must be discovered or configured before routing to them.
 
 `ObjectLease` requires clocks within `:max_clock_skew_ms` (1 s by default).
 Local stores provide `If-Match` for cooperating processes on one host; network
-filesystem mounts remain unsupported. Lower `net_ticktime` with
+filesystem mounts remain unsupported. A process paused while holding the
+local store's write lock can block writes and shard takeover until it resumes
+or exits. Lower `net_ticktime` with
 `Distributed` if failure detection must be faster.
 
 ## Tests
