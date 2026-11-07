@@ -1,8 +1,9 @@
 defmodule Slap do
   @moduledoc """
-  Starts the Slap services selected by its options: the Streams cluster,
-  the KV cluster, and the services built on them. Add it to a supervision
-  tree:
+  Runs the Slap services under one supervisor: the Streams cluster, the
+  KV cluster, and the services built on them.
+
+  Add `{Slap, opts}` to a supervision tree, or call `start_link/1`:
 
       children = [
         {Slap,
@@ -82,7 +83,7 @@ defmodule Slap do
     }
   end
 
-  @doc "Starts a supervisor for the selected services."
+  @doc "Starts a supervisor that runs the services listed in `opts`."
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts), do: Supervisor.start_link(children(opts), supervisor_opts())
 
