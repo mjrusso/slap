@@ -135,20 +135,14 @@ With `--cluster`, the inspector reads only that cluster, and exits with
 
 ### Standalone Slap server
 
-`mix slap.server` runs `Slap.Streams.Cluster` and `Slap.KV.Cluster`. When the
+[`slap`](https://hexdocs.pm/slap/)'s
+[standalone server](https://hexdocs.pm/slap/standalone-server.html) script,
+`server.exs`, runs `Slap.Streams.Cluster` and `Slap.KV.Cluster`. When the
 server and the inspector run on one machine as the same user, they share
-`~/.erlang.cookie`. In a Mix project that depends on `slap`:
+`~/.erlang.cookie`. Start the script with a node name:
 
 ```sh
-elixir --name slap@127.0.0.1 -S mix slap.server --streams --kv --store local:./data
-```
-
-Without a Mix project:
-
-```sh
-elixir --name slap@127.0.0.1 \
-  -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- \
-  --streams --kv --store local:./data
+elixir --name slap@127.0.0.1 server.exs --store local:./data
 ```
 
 Then, from another terminal:
