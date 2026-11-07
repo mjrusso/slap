@@ -3,13 +3,11 @@ name: slap
 on:
   push:
     paths:
-      - "README.md"
       - "slap/**"
       - "slap_*/**"
       - ".github/workflows/slap.yml"
   pull_request:
     paths:
-      - "README.md"
       - "slap/**"
       - "slap_*/**"
       - ".github/workflows/slap.yml"
@@ -67,10 +65,10 @@ jobs:
         env:
           SLAP_TEST_S3_ENDPOINT: http://127.0.0.1:9000
           SLAP_TEST_S3_BUCKET: slap-inspection
-      - name: Root README library examples
-        run: mix run scripts/readme_test.exs ../README.md
-      - name: Library examples guide
-        run: mix run scripts/readme_test.exs guides/library-examples.md
+      - name: Getting started notebook
+        run: mix run scripts/livebook_test.exs notebooks/getting-started.livemd
+      - name: Inside Slap notebook
+        run: mix run scripts/livebook_test.exs notebooks/inside-slap.livemd
       - name: Kitchen sink demo
         run: mix run examples/kitchen_sink.exs --ticks 6 --interval 10 --exit
 
