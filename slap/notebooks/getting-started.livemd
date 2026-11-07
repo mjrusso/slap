@@ -6,17 +6,18 @@ Mix.install([{:slap, "~> 0.7.0"}])
 
 ## About this notebook
 
-This notebook introduces the Slap APIs: SlateDB, Streams, snapshot
-logs, Yjs, KV and files. It requires Elixir 1.18 or later and Erlang/OTP
-26.2 or later. Run the cells in order. They use in-memory storage, which is
-discarded when the notebook's runtime stops.
+This notebook has a short example for each Slap API: SlateDB, Streams,
+snapshot logs, Yjs, KV and files. It requires Elixir 1.18 or later and
+Erlang/OTP 26.2 or later. Run the cells in order. They keep data in memory,
+so it is lost when the runtime stops.
 
 To run it without Livebook, paste the cells into IEx started with
 `iex -e 'Mix.install([{:slap, "~> 0.7.0"}])'`.
 
 ## SlateDB
 
-Open a database, write a durable value, read it, and close the database:
+Open a database, write a value and wait until it is durable, read it back,
+and close the database:
 
 ```elixir
 {:ok, db} = Slap.SlateDB.open("example", store: :memory)
@@ -27,9 +28,10 @@ Open a database, write a durable value, read it, and close the database:
 
 ## Start the services
 
-`Slap` starts the services selected by its options. This starts the
-Streams cluster with Yjs on it, and the KV cluster with files on it, each
-with one shard:
+`Slap.start_link/1` starts a supervisor, which starts each service listed
+in the options: here `streams`, `yjs`, `kv` and `files`. Yjs stores its
+documents in Streams, and Files stores its records in KV. The Streams and KV
+clusters get one shard each:
 
 ```elixir
 {:ok, _} =
@@ -42,9 +44,10 @@ with one shard:
   )
 ```
 
-Run this cell once per runtime. To start over, restart the runtime from
-Livebook's Runtime panel and run the cells in order. In IEx, start a new
-session.
+Run this cell only once: running it again fails with
+`{:error, {:already_started, pid}}`. To start over, restart the runtime
+from Livebook's Runtime panel and run the cells in order. In IEx, start a
+new session.
 
 The [architecture guide](https://hexdocs.pm/slap/architecture.html) shows
 what `Slap` starts and how the packages depend on each other.
@@ -61,9 +64,10 @@ Create, append to, and read a stream:
 
 ## Snapshot logs
 
-Snapshot logs use the Streams cluster. The caller must supply snapshot bytes
-representing the effects of every entry before the snapshot offset. The log
-cannot verify that state. Publishing a snapshot trims those entries:
+A snapshot log is an append-only log, stored in Streams, whose prefix can be
+replaced by a snapshot. A snapshot at an offset must contain the effects of
+every entry before that offset; the log cannot check this. Publishing the
+snapshot trims those entries:
 
 ```elixir
 base = "/v1/stream/examples/log"
@@ -73,8 +77,8 @@ base = "/v1/stream/examples/log"
 {:reset, %{snapshot: "state after one", offset: ^offset}} = Slap.SnapshotLog.next(base, nil)
 ```
 
-A consumer starts with `next(base, nil)` to get the current snapshot and the
-offset from which to read later entries.
+A new consumer calls `next(base, nil)` to get the current snapshot and the
+offset to read later entries from.
 
 ## Yjs
 
@@ -108,8 +112,8 @@ Write a row only if it does not exist yet, then read it:
 {:ok, %{value: "Ada", version: ^version}} = Slap.KV.get("users", "42")
 ```
 
-A conditional write against a version that is no longer current returns a
-conflict with the current version:
+A conditional write fails if the version it names is no longer current.
+The error includes the current version:
 
 ```elixir
 {:ok, _} = Slap.KV.put("users", "42", "Grace", if_version: version)
