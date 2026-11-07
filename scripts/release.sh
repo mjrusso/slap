@@ -214,6 +214,12 @@ hex_publish() {
         echo "retrying mix deps.get in 15 s ($attempt/20)"
         sleep 15
       done
+      # A one-time password expires in about 30 seconds, so each package
+      # fetches its own. Hex prompts for one if Hex.pm rejects it.
+      if [ -n "${SLAP_HEX_OTP_COMMAND:-}" ]; then
+        HEX_OTP=$(bash -c "$SLAP_HEX_OTP_COMMAND")
+        export HEX_OTP
+      fi
       # shellcheck disable=SC2086 # an empty subcommand adds no argument
       mix hex.publish $subcommand
     )

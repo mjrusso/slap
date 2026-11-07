@@ -75,6 +75,19 @@ The `just` recipes below run in `nix develop`, from the repository root.
    to five minutes. If a package fails, fix the problem and run `just publish`
    again: packages already on Hex are skipped.
 
+   If your Hex account uses two-factor authentication, `mix hex.publish`
+   asks for a one-time password. To have `just publish` and
+   `just publish-docs` fetch it instead, set `SLAP_HEX_OTP_COMMAND` to a
+   command that prints the current code, for example with the 1Password CLI:
+
+   ```sh
+   export SLAP_HEX_OTP_COMMAND='op item get "Hex.pm" --otp'
+   ```
+
+   The command runs before each package's `mix hex.publish`, and its output
+   is passed to Hex as `HEX_OTP`. A code expires in about 30 seconds: if you
+   confirm Hex's prompt later than that, Hex asks you to enter a code.
+
 6. **Check the release.** Each package's page on <https://hex.pm> should show
    the new version, and its documentation should load on <https://hexdocs.pm>.
    Then, outside the checkout, run `slap`'s notebooks in Livebook, and its
