@@ -20,10 +20,12 @@ versions. Use the packages' APIs to read and write application data; the
 ## Start the clusters
 
 Use a local store so you can inspect its files. Two shards per cluster
-and two partition writers per KV shard keep the diagrams small:
+and two partition writers per KV shard keep the diagrams small. The first
+two lines limit SlateDB's and Elixir's logs to warnings and errors:
 
 ```elixir
 Slap.SlateDB.set_log_level(:warning)
+Logger.configure(level: :warning)
 dir = Path.join(System.tmp_dir!(), "slap-#{System.unique_integer([:positive])}")
 
 {:ok, slap} =
@@ -34,8 +36,9 @@ dir = Path.join(System.tmp_dir!(), "slap-#{System.unique_integer([:positive])}")
   )
 ```
 
-Run this cell once per runtime. To start over, restart the runtime from
-Livebook's Runtime panel and run the cells in order.
+Run this cell only once: running it again fails with
+`{:error, {:already_started, pid}}`. To start over, restart the runtime
+from Livebook's Runtime panel and run the cells in order.
 
 ## KV processes
 
@@ -44,7 +47,7 @@ dotted lines show process links. Here, the `Registry` links to the
 processes registered in it.
 
 ```elixir
-Kino.Process.sup_tree(Slap.KV.Cluster.Supervisor)
+Kino.Process.sup_tree(Slap.KV.Cluster.Supervisor, direction: :left_right)
 ```
 
 The tree contains:
@@ -66,13 +69,17 @@ in the message traces below:
 
 ```elixir
 registered = fn registry ->
-  registry
-  |> Registry.select([{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
-  |> Enum.map(fn {key, pid} -> %{key: inspect(key), pid: inspect(pid)} end)
-  |> Enum.sort()
+  Registry.select(registry, [{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
 end
 
-Kino.DataTable.new(registered.(Slap.KV.Cluster.Registry), name: "KV registry")
+registry_table = fn entries, name ->
+  rows = for {key, pid} <- Enum.sort(entries), do: %{key: inspect(key), pid: inspect(pid)}
+  Kino.DataTable.new(rows, name: name, keys: [:pid, :key])
+end
+
+Slap.KV.Cluster.Registry
+|> registered.()
+|> registry_table.("KV registry")
 ```
 
 ## Row placement
@@ -189,16 +196,22 @@ dir
 ## Streams
 
 An active stream has one stream server on its shard. Create a stream and
-append a message, then find its server in the registry:
+append a message, then list the registry entries for the stream's shard:
 
 ```elixir
 {:ok, :created, _} = Slap.Streams.create("/events", content_type: "text/plain")
 {:ok, _} = Slap.Streams.append("/events", "created")
-Kino.DataTable.new(registered.(Slap.Streams.Cluster.Registry), name: "Streams registry")
+stream_shard = Slap.Streams.Cluster.shard_for("/events")
+
+Slap.Streams.Cluster.Registry
+|> registered.()
+|> Enum.filter(&match?({{^stream_shard, _name}, _pid}, &1))
+|> registry_table.("Streams shard #{stream_shard} registry")
 ```
 
 The `{:stream, "/events"}` entry names the stream server. The registry
-also lists the shards' background jobs, including expiry and deletion.
+also lists the stream supervisor and background jobs, including expiry
+and deletion.
 Trace another append: the stream server writes the data and replies after
 it becomes durable.
 
@@ -218,7 +231,6 @@ Each key starts with a byte identifying its kind. Decode that byte and
 the remaining fields to label the rows:
 
 ```elixir
-stream_shard = Slap.Streams.Cluster.shard_for("/events")
 {:ok, {:local, stream_ctx}} = Slap.Streams.Cluster.lookup(stream_shard)
 
 describe = fn
@@ -240,7 +252,9 @@ Kino.DataTable.new(
 ## Shard recovery
 
 Kill the `ShardDb` process for the `users` shard. The host reports the
-crash to the local placement strategy, which reopens the shard.
+crash to the local placement strategy, which reopens the shard. The cell
+output includes the error and warning that `Slap.KV.Cluster` logs for the
+crash.
 
 The cell waits for the cluster's `[:slap, :cluster, :shard, :start]`
 telemetry event, then checks that the reopened shard has a new pid:
@@ -286,7 +300,7 @@ Draw the tree again and compare it with the first one to identify the
 shard's replacement processes:
 
 ```elixir
-Kino.Process.sup_tree(Slap.KV.Cluster.Supervisor)
+Kino.Process.sup_tree(Slap.KV.Cluster.Supervisor, direction: :left_right)
 ```
 
 ## Clean up
