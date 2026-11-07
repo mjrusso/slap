@@ -24,15 +24,15 @@ Building blocks:
 - [slap_snapshot_log](https://hexdocs.pm/slap_snapshot_log/): an append-only
   log of changes that can be condensed into snapshots
 
-Server distribution:
+All-in-one:
 
-- [slap](https://hexdocs.pm/slap/): all Slap server libraries and a standalone
-  HTTP server for evaluating and benchmarking `slap_streams` and `slap_kv`
+- [slap](https://hexdocs.pm/slap/): all Slap server libraries, and `Slap`,
+  which starts the services you select under one supervisor
 
 Inspection:
 
 - [slap_inspect](https://hexdocs.pm/slap_inspect/): a read-only TUI and CLI
-  for browsing Slap data
+  for browsing Slap data; installed separately
 
 The `slap` package pulls in all seven server libraries. If you only need a
 subset, add those packages directly.
