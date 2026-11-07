@@ -22,8 +22,9 @@ scans or cross-partition transactions.
 `Slap.KV.Cluster`, call `Slap.KV` in-process, and can mount
 `Slap.KV.HTTP.Router` in your [`Plug`](https://hexdocs.pm/plug/) pipeline. A
 call for a partition goes to the node that owns its shard. The
-[`slap`](https://hexdocs.pm/slap/) package runs `slap_kv` as a standalone
-server (`mix slap.server --kv --store memory`).
+[`slap`](https://hexdocs.pm/slap/) package's
+[standalone server](https://hexdocs.pm/slap/standalone-server.html) script
+serves `slap_kv` over HTTP.
 
 <!-- slap-preamble -->
 > #### About Slap {: .info}
@@ -312,15 +313,16 @@ pending work.
 ## HTTP
 
 `Slap.KV.HTTP.Router` serves KV over HTTP, under `/v1/kv` by default. To try
-it, install and run the standalone server from
-[`slap`](https://hexdocs.pm/slap/) in another terminal:
+it, download and run the
+[standalone server](https://hexdocs.pm/slap/standalone-server.html) script
+from [`slap`](https://hexdocs.pm/slap/) in another terminal:
 
 ```sh
-elixir -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- \
-  --kv --store memory --kv-shards 4
+curl -fsSLo server.exs https://raw.githubusercontent.com/mjrusso/slap/main/slap/examples/server.exs
+elixir server.exs
 ```
 
-The memory store loses its data when the server stops. Then:
+It keeps its data in memory, which is lost when the server stops. Then:
 
 ```sh
 curl -X PUT --data-binary 'hello' -H 'If-None-Match: *' -i http://localhost:4437/v1/kv/p/greeting
