@@ -248,13 +248,17 @@ config :my_app, MyApp.Cluster,
   strategy: {Slap.Cluster.Strategy.ObjectLease, lease_ttl: 15_000}
 ```
 
-Nodes connect through distributed Erlang. `ObjectLease` stores conditional
-leases and node heartbeats in the bucket. An owner renews its leases and stops
-a shard if renewal fails past its local deadline, before another node can
-claim it. A paused owner that misses the deadline is fenced by SlateDB when a
-new owner opens the database. A clean stop closes shards before freeing their
-leases. Self-fencing runs separately from the renewal loop so a blocked store
-call cannot delay it.
+Nodes connect through distributed Erlang. Any way of connecting them works,
+such as [`libcluster`](https://hexdocs.pm/libcluster/), DNS-based discovery in
+Kubernetes, your own `Node.connect/1` calls, or `Slap.Cluster.Peers`, which
+keeps a node connected to a fixed list of node names.
+
+`ObjectLease` stores conditional leases and node heartbeats in the bucket. An
+owner renews its leases and stops a shard if renewal fails past its local
+deadline, before another node can claim it. A paused owner that misses the
+deadline is fenced by SlateDB when a new owner opens the database. A clean stop
+closes shards before freeing their leases. Self-fencing runs separately from
+the renewal loop so a blocked store call cannot delay it.
 
 `call/4` routes to the owner over `:erpc`. If the reply is `:not_owner` or
 `:unassigned`, or the owner cannot be reached before the call is sent,
