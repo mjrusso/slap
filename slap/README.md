@@ -70,8 +70,9 @@ authentication and authorization in front of the router. The
 shows the listener setup.
 
 To explore the cluster's processes, messages exchanged during a write, and
-stored data, run the [Inside Slap notebook](notebooks/inside-slap.livemd)
-in Livebook.
+stored data, run the
+[Exploring Slap's internals](notebooks/inside-slap.livemd) notebook in
+Livebook.
 
 ## Kitchen sink demo
 

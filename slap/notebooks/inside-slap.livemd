@@ -1,4 +1,4 @@
-# Inside Slap
+# Exploring Slap's internals
 
 ```elixir
 Mix.install([{:slap, "~> 0.7.0"}, {:kino, "~> 0.19.1"}])
