@@ -29,10 +29,12 @@ checks and CI workflow:
 - `slap_inspect/`: read-only TUI and CLI for browsing Slap data; has no
   dependency on the server libraries or the SlateDB NIF.
 - `slap/`: depends on the seven server libraries by path, and on
-  `slap_inspect` by path in tests only. It provides the
-  standalone server (`mix slap.server`) for streams and KV and holds the
+  `slap_inspect` by path in tests only. It provides `Slap`, which starts
+  the selected clusters and services, and `Slap.Router`. It holds the
   Durable Streams conformance suite, benchmarks, crash tests, and cluster
-  tests.
+  tests, which run `mix slap.server`: an HTTP server in `slap/dev/`,
+  compiled only in `:dev` and `:test` and not in the Hex package.
+  `examples/server.exs` is the HTTP server for users.
 
 The path dependencies above, except `slap`'s test-only one on
 `slap_inspect`, are selected by `SLAP_LOCAL_DEPS=1`. With the

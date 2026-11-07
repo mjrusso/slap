@@ -47,8 +47,12 @@ on_hex() {
 has_changelog_entry() { grep -qx "## $(version "$1")" "$1/CHANGELOG.md"; }
 
 stale_install_snippets() {
-  sed -n "s/.*{:$1, \"\([^\"]*\)\"}.*/\1/p" "$1/README.md" |
-    { grep -vxF "~> $(version "$1")" || true; }
+  for file in "$1/README.md" "$1"/examples/*.exs "$1"/notebooks/*.livemd; do
+    [ -f "$file" ] || continue
+    sed -n "s/.*{:$1, \"\([^\"]*\)\"}.*/\1/p" "$file" |
+      { grep -vxF "~> $(version "$1")" || true; } |
+      while read -r requirement; do echo "$file $requirement"; done
+  done
 }
 
 # Tags and publishing use HEAD, so the files checked here must be committed.
@@ -99,8 +103,8 @@ status() {
       echo "  requires $dep $requirement, but $dep is at $dep_version"
     done
 
-    stale_install_snippets "$p" | while read -r requirement; do
-      echo "  README installs $p \"$requirement\", not \"~> $v\""
+    stale_install_snippets "$p" | while read -r file requirement; do
+      echo "  $file installs $p \"$requirement\", not \"~> $v\""
     done
   done
 }
@@ -131,9 +135,9 @@ tags() {
       problems=1
     done <<< "$stale"
     stale=$(stale_install_snippets "$p")
-    while read -r requirement; do
-      [ -n "$requirement" ] || continue
-      echo "$p: $p/README.md installs \"$requirement\", not \"~> $(version "$p")\"" >&2
+    while read -r file requirement; do
+      [ -n "$file" ] || continue
+      echo "$p: $file installs \"$requirement\", not \"~> $(version "$p")\"" >&2
       problems=1
     done <<< "$stale"
   done

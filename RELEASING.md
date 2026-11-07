@@ -22,20 +22,20 @@ The `just` recipes below run in `nix develop`, from the repository root.
    just release-status
    ```
 
-   For each package, this shows its `mix.exs` version, whether that version is
-   tagged and on Hex, whether its `CHANGELOG.md` has an entry for it, whether
-   its README's install snippet specifies a different version, and the commits
-   since the package's latest tag that touch its directory. Read the
-   commits and decide which packages have changes worth releasing; a commit
-   such as adding a lock file does not need one.
+   For each package, the report shows the version in `mix.exs`, its tag and
+   Hex publication status, and whether it has a changelog entry. It flags
+   install snippets in the package's README, examples and notebooks that
+   specify a different version, and lists commits since the latest package
+   tag. Read the commits and decide which packages need a release; adding a
+   lock file alone does not require one.
 
 2. **Prepare the versions.** For each package you are releasing, set `@version`
-   in its `mix.exs` and add a `## <version>` entry to its `CHANGELOG.md`. If
-   its `README.md` has an install snippet, change it to `"~> <version>"`. If a
-   new version no longer meets a requirement in another package (for example,
-   `slap_cluster` 0.2.0 and `slap_kv`'s `~> 0.1.0`), `just release-status`
-   reports it: update the requirement and release that package as well. Run
-   `just check`, commit, and push `main`.
+   in its `mix.exs` and add a `## <version>` entry to its `CHANGELOG.md`.
+   Update install snippets in its README, examples and notebooks to require
+   `"~> <version>"`. If a new version no longer meets a requirement in another
+   package (for example, `slap_cluster` 0.2.0 and `slap_kv`'s `~> 0.1.0`),
+   `just release-status` reports it: update the requirement and release that
+   package as well. Run `just check`, commit, and push `main`.
 
 3. **Release the NIF**, if you are releasing `slap_slatedb`. See
    [The SlateDB NIF](#the-slatedb-nif) below. Do this before tagging the other
@@ -51,9 +51,9 @@ The `just` recipes below run in `nix develop`, from the repository root.
    `just release-tags` tags HEAD `<package>-v<version>` for each package whose
    `mix.exs` version has no tag yet. It lists the tags and asks you to confirm
    before creating them. It refuses to run with uncommitted changes, and
-   refuses a package whose `CHANGELOG.md` has no entry for its version, whose
-   README's install snippet specifies a different version, or whose requirements
-   are not met by its dependencies' current versions.
+   refuses a package whose `CHANGELOG.md` has no entry for its version,
+   whose install snippets specify a different version, or whose dependencies'
+   current versions do not satisfy its requirements.
    HexDocs links each module's source to its package's tag, so push the tags
    before publishing.
 
@@ -77,9 +77,9 @@ The `just` recipes below run in `nix develop`, from the repository root.
 
 6. **Check the release.** Each package's page on <https://hex.pm> should show
    the new version, and its documentation should load on <https://hexdocs.pm>.
-   Then run the examples in the root README's Usage Examples, which use the Hex
-   packages. That step changes `slap/mix.lock`; restore it afterwards with
-   `git restore slap/mix.lock`.
+   Then, outside the checkout, run `slap`'s notebooks in Livebook, and its
+   `examples/server.exs` and `examples/kitchen_sink.exs` with `elixir`; they
+   install the Hex packages with `Mix.install`.
 
 ## Updating documentation
 

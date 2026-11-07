@@ -89,11 +89,11 @@ The services are built on these packages, which you can also use directly:
 | [`slap_cluster`](slap_cluster/)           | Placement, routing, and failover for SlateDB shards across nodes.                                      | [![Hex][slap_cluster-hex-badge]][slap_cluster-hex] [![Docs][docs-badge]][slap_cluster-docs]                |
 | [`slap_snapshot_log`](slap_snapshot_log/) | An append-only log with snapshots that replace its prefix. Each `slap_yjs` document is a snapshot log. | [![Hex][slap_snapshot_log-hex-badge]][slap_snapshot_log-hex] [![Docs][docs-badge]][slap_snapshot_log-docs] |
 
-`slap` also provides the standalone Streams and KV server:
+`slap` installs them together and starts the selected services:
 
-| Package         | Provides                                                                                       | Hex                                                                 |
-|-----------------|------------------------------------------------------------------------------------------------|---------------------------------------------------------------------|
-| [`slap`](slap/) | All Slap server libraries and a standalone HTTP server (`mix slap.server`) for Streams and KV. | [![Hex][slap-hex-badge]][slap-hex] [![Docs][docs-badge]][slap-docs] |
+| Package         | Provides                                                                     | Hex                                                                 |
+|-----------------|------------------------------------------------------------------------------|---------------------------------------------------------------------|
+| [`slap`](slap/) | All Slap server libraries, and `Slap`, which starts the services you select. | [![Hex][slap-hex-badge]][slap-hex] [![Docs][docs-badge]][slap-docs] |
 
 `slap_inspect` browses the data of a running cluster. It is installed
 separately and does not depend on the server libraries:
@@ -102,158 +102,45 @@ separately and does not depend on the server libraries:
 |---------------------------------|-------------------------------------------------|---------------------------------------------------------------------------------------------|
 | [`slap_inspect`](slap_inspect/) | A read-only TUI and CLI for browsing Slap data. | [![Hex][slap_inspect-hex-badge]][slap_inspect-hex] [![Docs][docs-badge]][slap_inspect-docs] |
 
-## Usage Examples
+## Getting started
 
 Requires Elixir 1.18 or later and Erlang/OTP 26.2 or later.
 
-Start IEx and install the published `slap` package:
+[![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fmjrusso%2Fslap%2Fblob%2Fmain%2Fslap%2Fnotebooks%2Fgetting-started.livemd)
 
-```sh
-iex -e 'Mix.install([:slap])'
-```
+Start with the [getting started notebook](slap/notebooks/getting-started.livemd)
+to try SlateDB, Streams, snapshot logs, Yjs, KV, and files from Elixir. It
+uses in-memory storage and runs in Livebook or IEx.
 
-Then run the examples below, in order, in this IEx session.
-
-> [!NOTE]
->
-> For simplicity, the examples use the memory store (`store: :memory`), which
-> does not require object storage. (Data will be lost when the VM exits.)
->
-> `Slap.SlateDB.open/2` and the cluster `start_link/1` functions all take the
-> same `:store` option. To use S3, pass `store: {:url, "s3://bucket/prefix"}`
-> and set `AWS_REGION` and credentials (such as `AWS_ACCESS_KEY_ID` and
-> `AWS_SECRET_ACCESS_KEY`) in the environment.
->
-> The `slap_slatedb` README lists the other [object
-> stores](slap_slatedb/README.md#object-stores), and the [`slap_streams` S3
-> walkthrough](slap_streams/README.md#using-s3) runs a Streams cluster on S3.
-
-The [library examples guide](slap/guides/library-examples.md) has additional
-examples. The [kitchen sink demo](slap/README.md#kitchen-sink-demo) updates
-in-memory data and prints inspector commands.
-
-### SlateDB Bindings
+In an application, add `slap` to your dependencies and start the services you
+need under your supervisor:
 
 ```elixir
-iex> {:ok, db} = Slap.SlateDB.open("example", store: :memory); :ok
-:ok
-
-iex> {:ok, _seq} = Slap.SlateDB.put(db, "user:1", "Ada", await_durable: true); :ok
-:ok
-iex> {:ok, "Ada"} = Slap.SlateDB.get(db, "user:1")
-{:ok, "Ada"}
-
-iex> {:ok, _seq} = Slap.SlateDB.delete(db, "user:1", await_durable: true); :ok
-:ok
-iex> {:ok, nil} = Slap.SlateDB.get(db, "user:1")
-{:ok, nil}
-iex> :ok = Slap.SlateDB.close(db)
-:ok
-```
-
-See the [`slap_slatedb` README](slap_slatedb/README.md) for more usage
-examples.
-
-### Streams and KV
-
-These examples show the Elixir API. The [standalone server
-guide](slap/guides/standalone-server.md) has HTTP examples and server
-options.
-
-#### Streams
-
-Start a Streams cluster.
-
-```elixir
-iex> {:ok, _} = Slap.Streams.Cluster.start_link(store: :memory, path: "streams", shards: 1); :ok
-:ok
-```
-
-Create a JSON stream, then append to it. A JSON array append stores each
-element as a separate message.
-
-```elixir
-iex> {:ok, :created, _} = Slap.Streams.create("/events", content_type: "application/json"); :created
-:created
-iex> {:ok, %{result: result, next_offset: offset}} =
-...>   Slap.Streams.append("/events", ~s([{"type":"created","id":1},{"type":"updated","id":1}])); {result, offset}
-{:appended, 58}
-```
-
-Read the stream. The API returns each message with its offset.
-
-```elixir
-iex> {:ok, %{messages: events}} = Slap.Streams.read("/events", 0); events
-[
-  {0, "{\"type\":\"created\",\"id\":1}"},
-  {29, "{\"type\":\"updated\",\"id\":1}"}
+children = [
+  {Slap, store: {:url, "s3://bucket/prefix"}, streams: [], kv: [], files: []}
 ]
 ```
 
-Fork the stream at its current end, then append to the fork. The source still
-contains only the first two messages.
+Use `store: :memory` to run without object storage. For S3, set `AWS_REGION`
+and credentials (such as `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`)
+in the environment. See the [application setup](slap/README.md#use-slap-in-an-application)
+for dependencies and options, and the `slap_slatedb` README for other
+[object stores](slap_slatedb/README.md#object-stores).
 
-```elixir
-iex> {:ok, :created, _} = Slap.Streams.create("/events-fork", forked_from: "/events"); :created
-:created
-iex> {:ok, %{result: result, next_offset: offset}} =
-...>   Slap.Streams.append("/events-fork", ~s({"type":"deleted","id":1})); {result, offset}
-{:appended, 87}
-iex> {:ok, %{messages: events}} = Slap.Streams.read("/events-fork", 0); events
-[
-  {0, "{\"type\":\"created\",\"id\":1}"},
-  {29, "{\"type\":\"updated\",\"id\":1}"},
-  {58, "{\"type\":\"deleted\",\"id\":1}"}
-]
-iex> {:ok, %{messages: events}} = Slap.Streams.read("/events", 0); events
-[
-  {0, "{\"type\":\"created\",\"id\":1}"},
-  {29, "{\"type\":\"updated\",\"id\":1}"}
-]
-```
+To try the Streams and KV HTTP APIs, run
+[`examples/server.exs`](slap/examples/server.exs); the [standalone server
+guide](slap/guides/standalone-server.md) shows how. The HTTP routers don't
+authenticate requests; put your own authentication in front.
 
-#### KV
+The [kitchen sink demo](slap/README.md#kitchen-sink-demo) runs every service
+with changing in-memory data and prints [Slap Inspect](slap_inspect/)
+commands to browse it.
 
-Start a KV cluster.
-
-```elixir
-iex> {:ok, _} = Slap.KV.Cluster.start_link(store: :memory, path: "kv", shards: 1); :ok
-:ok
-```
-
-Set three rows, get one, then scan a range of keys in the `people` partition.
-The range stops before `c`.
-
-```elixir
-iex> {:ok, version} = Slap.KV.put("people", "a", "Ada"); :ok
-:ok
-iex> {:ok, _} = Slap.KV.put("people", "b", "Grace"); :ok
-:ok
-iex> {:ok, _} = Slap.KV.put("people", "c", "Katherine"); :ok
-:ok
-iex> {:ok, %{value: value, version: ^version}} = Slap.KV.get("people", "a"); value
-"Ada"
-iex> {:ok, %{rows: rows, cursor: nil}} =
-...>   Slap.KV.scan("people", gte: "a", lt: "c"); rows
-[{"a", "Ada"}, {"b", "Grace"}]
-```
-
-### Embedding
-
-The usage examples above start `Slap.Streams.Cluster` and `Slap.KV.Cluster`
-from IEx. In an application, add them as children of your supervisor. The
-[`slap_streams`](slap_streams/README.md#embedding),
-[`slap_kv`](slap_kv/README.md#example),
-[`slap_files`](slap_files/README.md#example),
-[`slap_yjs`](slap_yjs/README.md#example), and
-[`slap_snapshot_log`](slap_snapshot_log/README.md#example) READMEs show the
-children each package needs.
-
-`slap_streams` and `slap_kv` include Plug routers (`Slap.Streams.HTTP.Router`
-and `Slap.KV.HTTP.Router`) but don't start an HTTP server. Mount a router in
-your Plug or Phoenix application, or serve it with a Plug server such as
-Bandit. The routers don't authenticate requests; put your own authentication
-in front.
+To explore the internals, use the [Inside Slap notebook](slap/notebooks/inside-slap.livemd)
+([run in Livebook][inside-slap-livebook]). It traces writes, displays stored
+data, and demonstrates shard recovery. The
+[architecture guide](slap/guides/architecture.md) explains the package and
+service dependencies.
 
 ## Benchmarks
 
@@ -279,28 +166,10 @@ the `gh-pages` branch, which GitHub Pages serves as charts of every run on
 
 Shared runners are noisy, so expect non-trivial variance between runs.
 
-To measure HTTP append throughput and latency on this checkout, use two
-terminals with `SLAP_LOCAL_DEPS=1` set (the Nix shell sets it). In the first,
-from the repository root, start a Streams server:
-
-```sh
-cd slap
-mix slap.server --streams --store memory
-```
-
-In the second, also from the repository root, run the load script:
-
-```sh
-cd slap
-mix run bench/streams_http_load.exs --connections 128 --seconds 20
-```
-
-The values shown are the defaults. The script also takes `--streams`,
-`--bytes`, and `--rate`. To measure an S3-compatible store, start the server
-with `--store s3:s3://bucket/bench` and set its `AWS_*` variables. Before
-sizing a deployment, read [Streams
-load](slap/guides/development.md#streams-load): the store's sustained PUT rate
-limits the shard count and flush interval.
+To measure HTTP append throughput and latency on this checkout, see [Streams
+load](slap/guides/development.md#streams-load). The store's sustained PUT rate
+limits the shard count and flush interval, so run it on the intended store
+before sizing a deployment.
 
 Other scripts measure:
 
@@ -363,6 +232,7 @@ Slap is released under the terms of the [Apache License 2.0](LICENSE).
 
 Copyright (c) 2026, [Michael Russo](https://mjrusso.com).
 
+[inside-slap-livebook]: https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fmjrusso%2Fslap%2Fblob%2Fmain%2Fslap%2Fnotebooks%2Finside-slap.livemd
 [slap-badge]: https://img.shields.io/hexpm/v/slap?label=slap
 [slap-hex-badge]: https://img.shields.io/hexpm/v/slap.svg
 [slap-hex]: https://hex.pm/packages/slap
