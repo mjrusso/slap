@@ -27,8 +27,8 @@ curl -fsSLo kitchen_sink.exs https://raw.githubusercontent.com/mjrusso/slap/main
 elixir kitchen_sink.exs
 ```
 
-Outside a Mix project, the script installs the latest `slap` release with
-`Mix.install([:slap])`.
+Outside a Mix project, the script installs `slap` from Hex with
+`Mix.install`.
 
 ## Run from a checkout
 

@@ -1,7 +1,7 @@
 {:ok, _} = Application.ensure_all_started(:mix)
 
 if is_nil(Mix.Project.get()) do
-  Mix.install([:slap])
+  Mix.install([{:slap, "~> 0.7.0"}])
 end
 
 defmodule Slap.Examples.DemoDoc do
@@ -101,10 +101,8 @@ defmodule Slap.Examples.KitchenSink do
     SlateDB.set_log_level(:warning)
 
     children = [
-      {Streams.Cluster, store: :memory, path: "demo-streams", shards: 2},
-      {KV.Cluster, store: :memory, path: "demo-kv", shards: 2},
-      {Files, store: :memory, path: "demo-files", retention_ms: 5000},
-      Yjs.Docs,
+      {Slap,
+       store: :memory, streams: [shards: 2], kv: [shards: 2], files: [retention_ms: 5000], yjs: []},
       {CounterCluster,
        store: :memory,
        path: "demo-counter",

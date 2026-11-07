@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add the `Slap` module to start the selected Streams, KV, Files and Yjs
+  services under one supervisor.
+
 ## 0.6.0
 
 - Uses `slap_slatedb` 0.4.0, which upgrades SlateDB from 0.17 to 0.18.
