@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
 
 - Add the `Slap` module to start the selected Streams, KV, Files and Yjs
   services under one supervisor.
