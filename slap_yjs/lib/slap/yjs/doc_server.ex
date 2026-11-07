@@ -74,11 +74,12 @@ defmodule Slap.Yjs.DocServer do
 
   Awareness is not stored. The servers of a document form a `:pg` group
   (scope `Slap.Yjs.PG`, started by `Slap.Yjs.Docs`) and send each other their
-  clients' awareness updates. Each monitors the group (`:pg.monitor/2`,
-  which needs OTP 26.2 or later): when a server joins, each of the others
-  sends it the states its own clients set (not those it learned from other
-  servers); when one leaves (it stops, or its node goes down), the others
-  remove the states that came through it.
+  clients' awareness updates. Each monitors the group (`:pg.monitor/2`):
+  when a server joins, each of the others sends it the states its own
+  clients set (not those it learned from other servers); when one leaves
+  (it stops, or its node goes down), the others remove the states that
+  came through it. Before OTP 26.2, a server that both monitors and joins
+  a group crashes the `:pg` scope when it exits.
 
   ## Deletion
 

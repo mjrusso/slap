@@ -5,16 +5,15 @@ defmodule Slap.Yjs.MixProject do
   @source_url "https://github.com/mjrusso/slap"
   @package_url "#{@source_url}/tree/main/slap_yjs"
 
-  # Slap.Yjs.DocServer monitors :pg groups; before OTP 26.2, a process that both
-  # monitors and joins a group crashes the :pg scope when it exits.
-  otp =
-    [:code.root_dir(), "releases", :erlang.system_info(:otp_release), "OTP_VERSION"]
-    |> Path.join()
-    |> File.read!()
-    |> String.trim()
+  # OTP 26.2 (kernel 9.2) fixes a :pg crash when a process that both monitors
+  # and joins a group exits. Bundled runtimes may omit the OTP_VERSION file.
+  kernel = Application.spec(:kernel, :vsn) |> to_string()
 
-  if otp |> String.split(".") |> Enum.map(&String.to_integer/1) < [26, 2],
-    do: Mix.raise("slap_yjs needs OTP 26.2 or later, not #{otp}")
+  if kernel |> String.split(".") |> Enum.map(&String.to_integer/1) < [9, 2] do
+    Mix.raise(
+      "slap_yjs needs OTP 26.2 or later, got OTP #{System.otp_release()} (kernel #{kernel})"
+    )
+  end
 
   def project do
     [

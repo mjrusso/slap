@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Fixes installation in Livebook Desktop by checking the loaded Kernel
+  version instead of reading the `OTP_VERSION` file, which bundled runtimes
+  may omit. OTP 26.2 or later is still required.
+
 ## 0.6.0
 
 - Uses `slap_slatedb` 0.4.0, which upgrades SlateDB from 0.17 to 0.18.
