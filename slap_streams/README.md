@@ -24,8 +24,9 @@ application's state.
 Streams are divided among SlateDB databases called shards, and a call for a
 stream goes to the node that owns its shard.
 
-The [`slap`](https://hexdocs.pm/slap/) package runs `slap_streams` as a
-standalone server (`mix slap.server --streams --store memory`).
+The [`slap`](https://hexdocs.pm/slap/) package's
+[standalone server](https://hexdocs.pm/slap/standalone-server.html) script
+serves `slap_streams` over HTTP.
 
 Section numbers (§) in the API documentation refer to the [Durable Streams
 specification](https://github.com/durable-streams/durable-streams/blob/main/PROTOCOL.md).
@@ -125,11 +126,13 @@ to its supervision tree, with the cluster first:
 ```elixir
 children = [
   {Slap.Streams.Cluster, store: {:local, "/tmp/slap-streams"}, shards: 1},
-  {Bandit, plug: Slap.Streams.HTTP.Router, port: 4437}
+  {Bandit, plug: Slap.Streams.HTTP.Router, port: 4437, ip: :loopback}
 ]
 ```
 
-Bandit serves the router at `/v1/stream/`. For local storage, see
+Bandit serves the router at `/v1/stream/`. `ip: :loopback` accepts
+connections from this machine only; without `ip:`, Bandit listens on every
+interface. For local storage, see
 [choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count);
 before running a script against a store an application is using, see
 [running another cluster on the same store](https://hexdocs.pm/slap_cluster/readme.html#running-another-cluster-on-the-same-store).
@@ -463,9 +466,10 @@ remote stores.
 
 With a placement strategy, `slap_cluster` spreads the shards over several
 nodes and moves them when nodes join, leave, or fail. Connect the nodes with
-distributed Erlang (for example with
-[`libcluster`](https://hexdocs.pm/libcluster/)). Any node can serve any
-request:
+distributed Erlang. Any way of connecting them works, such as
+[`libcluster`](https://hexdocs.pm/libcluster/), DNS-based discovery in
+Kubernetes, your own `Node.connect/1` calls, or `Slap.Cluster.Peers` for a
+fixed list of nodes. Any node can serve any request:
 
 ```elixir
 {Slap.Streams.Cluster, store: {:url, "s3://streams/ds"}, shards: 64,
@@ -492,8 +496,8 @@ request:
 
 ### Placement strategies and consistency
 
-Any of `slap_cluster`'s strategies works (`--placement` for
-`mix slap.server`):
+Any of `slap_cluster`'s strategies works (the cluster's `:strategy`
+option):
 
 - **`ObjectLease`** stores leases as objects in the streams' bucket, so it
   needs S3 or another store with `If-Match`. An owner stops its shards before
