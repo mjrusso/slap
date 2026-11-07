@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.1
 
 - Fixes installation in Livebook Desktop by checking the loaded Kernel
   version instead of reading the `OTP_VERSION` file, which bundled runtimes
