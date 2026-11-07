@@ -1,0 +1,307 @@
+# Inside Slap
+
+```elixir
+Mix.install([{:slap, "~> 0.7.0"}, {:kino, "~> 0.19.1"}])
+```
+
+## About this notebook
+
+Follow a KV write through the cluster's processes, messages and stored
+data. Then inspect a stream append and crash a shard to check recovery.
+`Kino.Process` draws the supervision trees and message traces.
+
+Requires Elixir 1.18 or later and Erlang/OTP 26.2 or later. Run the cells
+in order.
+
+The storage layouts shown here are internal and can change between
+versions. Use the packages' APIs to read and write application data; the
+[getting started notebook](getting-started.livemd) introduces them.
+
+## Start the clusters
+
+Use a local store so you can inspect its files. Two shards per cluster
+and two partition writers per KV shard keep the diagrams small:
+
+```elixir
+Slap.SlateDB.set_log_level(:warning)
+dir = Path.join(System.tmp_dir!(), "slap-#{System.unique_integer([:positive])}")
+
+{:ok, slap} =
+  Slap.start_link(
+    store: {:local, dir},
+    streams: [shards: 2],
+    kv: [shards: 2, child_options: [partition_writers: 2]]
+  )
+```
+
+Run this cell once per runtime. To start over, restart the runtime from
+Livebook's Runtime panel and run the cells in order.
+
+## KV processes
+
+Draw the KV cluster's supervision tree. Solid lines show supervision;
+dotted lines show process links. Here, the `Registry` links to the
+processes registered in it.
+
+```elixir
+Kino.Process.sup_tree(Slap.KV.Cluster.Supervisor)
+```
+
+The tree contains:
+
+* `Slap.Cluster.Probe` checks the store's conditional writes, which support
+  writer fencing. It starts the placement strategy and exits, so the
+  diagram shows it as not started.
+* `StrategySupervisor` runs the placement strategy,
+  `Slap.Cluster.Strategy.Local`, which assigns shards to this node.
+* `Slap.Cluster.Host` opens and closes the assigned shards.
+* `Registry` maps each shard's process names to pids.
+* `ShardSupervisors` runs a supervisor for each shard. Each shard has a
+  `Slap.Cluster.ShardDb` process that owns its SlateDB database,
+  `Slap.KV.Admission` to limit work awaiting durability, and partition
+  writers to handle requests.
+
+List the registry's names and pids. Use this table to identify processes
+in the message traces below:
+
+```elixir
+registered = fn registry ->
+  registry
+  |> Registry.select([{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
+  |> Enum.map(fn {key, pid} -> %{key: inspect(key), pid: inspect(pid)} end)
+  |> Enum.sort()
+end
+
+Kino.DataTable.new(registered.(Slap.KV.Cluster.Registry), name: "KV registry")
+```
+
+## Row placement
+
+A partition selects a shard. All rows in that partition share the shard:
+
+```elixir
+partitions = ~w(users orders carts sessions)
+Map.new(partitions, &{&1, Slap.KV.Cluster.shard_for(&1)})
+```
+
+Within a shard, one partition writer handles all writes for a given
+partition. `assignments/0` shows each shard's owner. The shards here are
+local, so the result includes their `ShardDb` pids:
+
+```elixir
+Slap.KV.Cluster.assignments()
+```
+
+## Trace a KV write
+
+`Kino.Process.seq_trace/3` captures messages sent during a function call.
+Write a warm-up row first so module loading does not add code-server
+traffic to the trace:
+
+```elixir
+{:ok, _} = Slap.KV.put("users", "warm-up", "x")
+
+label = fn
+  {:"$gen_call", _from, {_owner, request}} when is_tuple(request) ->
+    {:ok, "CALL: #{elem(request, 0)}"}
+
+  {tag, _reply} when is_reference(tag) or is_list(tag) ->
+    {:ok, "REPLY"}
+
+  _message ->
+    :continue
+end
+
+{{:ok, version}, diagram} =
+  Kino.Process.seq_trace(:all, fn -> Slap.KV.put("users", "42", "Ada") end,
+    message_label: label
+  )
+
+diagram
+```
+
+Use the registry table to identify the pids, then follow the write:
+
+1. The caller sends `write` to the partition writer for `users`.
+2. The writer reserves capacity with the shard's admission process
+   (`reserve`).
+3. It marks the reservation `submitting`, writes to SlateDB, and reports
+   the resulting sequence number (`submitted`). It then asks `ShardDb`
+   for a durability notification (`notify`).
+4. Once the write is durable, the writer releases its reservation
+   (`release`) and replies to the caller.
+
+The SlateDB write itself is a native call, so it does not appear as a
+message in the trace.
+
+## How rows are stored
+
+Each shard is a SlateDB database. A KV key encodes the partition's byte
+length as a 16-bit integer, followed by the partition and row key. This
+keeps each partition's rows together, ordered by row key. Values are
+stored unchanged; a row's version is SlateDB's sequence number for its
+write.
+
+Read the `users` shard directly and decode its keys:
+
+```elixir
+kv_rows = fn shard ->
+  {:ok, {:local, shard_ctx}} = Slap.KV.Cluster.lookup(shard)
+
+  for {<<length::16, partition::binary-size(length), key::binary>>, value} <-
+        Slap.SlateDB.scan(shard_ctx.db) do
+    %{partition: partition, key: key, value: value}
+  end
+end
+
+{:ok, _} = Slap.KV.put("orders", "1001", "a book")
+users_shard = Slap.KV.Cluster.shard_for("users")
+{:ok, %{value: "Ada", version: ^version}} = Slap.KV.get("users", "42")
+Kino.DataTable.new(kv_rows.(users_shard), name: "KV shard #{users_shard}")
+```
+
+The scan covers the whole shard, so the table can include other partitions
+that map to it.
+
+Each cluster has its own directory in the store. Within each shard's
+directory, SlateDB uses these paths:
+
+| Path | Contents |
+| --- | --- |
+| `wal/` | The write-ahead log, encoded as SST files. |
+| `manifest/` | The database's state. |
+| `compactions/` | The compactor's state. |
+| `compacted/` | Data stored as SST files. |
+
+Each cluster also records its shard count in `_cluster/layout`. List the
+files created so far:
+
+```elixir
+dir
+|> Path.join("**")
+|> Path.wildcard()
+|> Enum.reject(&File.dir?/1)
+|> Enum.map(&Path.relative_to(&1, dir))
+|> Enum.join("\n")
+|> IO.puts()
+```
+
+## Streams
+
+An active stream has one stream server on its shard. Create a stream and
+append a message, then find its server in the registry:
+
+```elixir
+{:ok, :created, _} = Slap.Streams.create("/events", content_type: "text/plain")
+{:ok, _} = Slap.Streams.append("/events", "created")
+Kino.DataTable.new(registered.(Slap.Streams.Cluster.Registry), name: "Streams registry")
+```
+
+The `{:stream, "/events"}` entry names the stream server. The registry
+also lists the shards' background jobs, including expiry and deletion.
+Trace another append: the stream server writes the data and replies after
+it becomes durable.
+
+```elixir
+{{:ok, %{result: :appended}}, diagram} =
+  Kino.Process.seq_trace(:all, fn -> Slap.Streams.append("/events", "updated") end)
+
+diagram
+```
+
+Inspect the stream's metadata, tail and message rows. Metadata is keyed by
+the stream's path; tail and message keys use its stream id. The tail is
+the offset after the last message. Large messages span numbered parts,
+each stored in a separate row.
+
+Each key starts with a byte identifying its kind. Decode that byte and
+the remaining fields to label the rows:
+
+```elixir
+stream_shard = Slap.Streams.Cluster.shard_for("/events")
+{:ok, {:local, stream_ctx}} = Slap.Streams.Cluster.lookup(stream_shard)
+
+describe = fn
+  <<0, "next_sid">> -> "the next stream id"
+  <<1, path::binary>> -> "the metadata of #{path}"
+  <<2, sid::64>> -> "the tail of stream #{sid}"
+  <<4, sid::64, offset::64, part::16>> -> "stream #{sid}'s message at #{offset}, part #{part}"
+  <<kind, _rest::binary>> -> "a row of kind #{kind}"
+end
+
+Kino.DataTable.new(
+  for({key, value} <- Slap.SlateDB.scan(stream_ctx.db),
+    do: %{row: describe.(key), bytes: byte_size(value)}
+  ),
+  name: "Streams shard #{stream_shard}"
+)
+```
+
+## Shard recovery
+
+Kill the `ShardDb` process for the `users` shard. The host reports the
+crash to the local placement strategy, which reopens the shard.
+
+The cell waits for the cluster's `[:slap, :cluster, :shard, :start]`
+telemetry event, then checks that the reopened shard has a new pid:
+
+```elixir
+notebook = self()
+
+:ok =
+  :telemetry.attach(
+    "inside-slap",
+    [:slap, :cluster, :shard, :start],
+    fn _event, _measurements, metadata, _config ->
+      send(notebook, {:shard_started, metadata.cluster, metadata.shard})
+    end,
+    nil
+  )
+
+%{^users_shard => {:local, old_shard_db}} = Slap.KV.Cluster.assignments()
+Process.exit(old_shard_db, :kill)
+
+started =
+  receive do
+    {:shard_started, Slap.KV.Cluster, ^users_shard} -> :ok
+  after
+    30_000 -> :timeout
+  end
+
+:ok = :telemetry.detach("inside-slap")
+:ok = started
+:ok = Slap.KV.Cluster.await_ready(30_000)
+%{^users_shard => {:local, new_shard_db}} = Slap.KV.Cluster.assignments()
+true = new_shard_db != old_shard_db
+```
+
+The traced `put` returned only after its write was durable. Reopening
+the database must preserve both the value and its version:
+
+```elixir
+{:ok, %{value: "Ada", version: ^version}} = Slap.KV.get("users", "42")
+```
+
+Draw the tree again and compare it with the first one to identify the
+shard's replacement processes:
+
+```elixir
+Kino.Process.sup_tree(Slap.KV.Cluster.Supervisor)
+```
+
+## Clean up
+
+Stop the Slap supervisor to close both clusters' databases, then remove
+the local store:
+
+```elixir
+:ok = Supervisor.stop(slap, :normal, 60_000)
+{:ok, _} = File.rm_rf(dir)
+```
+
+## Next steps
+
+* The [architecture guide](https://hexdocs.pm/slap/architecture.html)
+  shows what `Slap` starts and how the store is laid out.
+* [Slap Inspect](https://hexdocs.pm/slap_inspect/readme.html) browses a
+  running node's streams, rows and files from a terminal.

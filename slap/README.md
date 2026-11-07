@@ -9,9 +9,10 @@ with each service's data split into shards that are spread across the nodes.
 Add the `slap` package to install all seven Slap server libraries at once,
 and start the services you use with one child spec, `{Slap, opts}`.
 
-Start with the [library examples](guides/library-examples.md) to try the
-Elixir APIs in IEx. To use Slap in an application, follow the setup below.
-To try the HTTP APIs, run the [standalone server](#try-the-standalone-server).
+Start with the [getting started notebook](notebooks/getting-started.livemd)
+to try the Elixir APIs in Livebook or IEx. To use Slap in an application,
+follow the setup below. To try the HTTP APIs, run the
+[standalone server](#try-the-standalone-server).
 
 ## Use Slap in an application
 
@@ -45,7 +46,8 @@ children = [
 
 `streams:` and `kv:` start the Streams and KV clusters. `files:` requires
 `kv:`, and `yjs:` requires `streams:`. Snapshot logs need only `streams:`.
-See `Slap` for the options.
+See `Slap` for the options and the [architecture guide](guides/architecture.md)
+for the services' dependencies and supervision trees.
 
 You can also supervise each package's processes yourself, for example to
 define your own cluster modules. Each package guide has setup instructions
@@ -67,6 +69,10 @@ authentication and authorization in front of the router. The
 [server guide](guides/standalone-server.md#serving-the-apis-from-an-application)
 shows the listener setup.
 
+To explore the cluster's processes, messages exchanged during a write, and
+stored data, run the [Inside Slap notebook](notebooks/inside-slap.livemd)
+in Livebook.
+
 ## Kitchen sink demo
 
 Download and run the [kitchen sink demo](guides/kitchen-sink.md) to try all
@@ -83,7 +89,7 @@ memory and lost when the demo exits. Press Enter to exit.
 
 The [demo guide](guides/kitchen-sink.md) covers running from a checkout,
 inspection, and options. For an interactive walkthrough of the Elixir APIs,
-see the [library examples](guides/library-examples.md).
+see the [getting started notebook](notebooks/getting-started.livemd).
 
 ## Try the standalone server
 
@@ -132,7 +138,7 @@ this checkout. The [development guide](guides/development.md) documents the
 server's test and benchmark tools:
 
 - [The development server, `mix slap.server`](guides/development.md#development-server)
-- [Library example checks](guides/development.md#library-examples)
+- [Example checks](guides/development.md#examples)
 - [Durable Streams conformance and benchmarks](guides/development.md#durable-streams-conformance-and-benchmarks)
 - [Crash tests](guides/development.md#crash-test)
 - [Streams HTTP load benchmark](guides/development.md#streams-load)

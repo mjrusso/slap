@@ -19,6 +19,8 @@
   any values there that `Slap` should not use, or set those keys in
   `streams:` and `kv:`; see the [migration
   instructions](https://hexdocs.pm/slap/standalone-server.html#migrating-from-slap-server).
+- Replace the library examples guide with Livebook notebooks, and add an
+  architecture guide.
 
 ## 0.6.0
 

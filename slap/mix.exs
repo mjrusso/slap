@@ -6,8 +6,10 @@ defmodule Slap.MixProject do
   @package_url "#{@source_url}/tree/main/slap"
   @guides [
     "guides/overview.md",
+    "guides/architecture.md",
+    "notebooks/getting-started.livemd",
+    "notebooks/inside-slap.livemd",
     "guides/kitchen-sink.md",
-    "guides/library-examples.md",
     "guides/standalone-server.md",
     "guides/development.md"
   ]
@@ -34,6 +36,9 @@ defmodule Slap.MixProject do
       docs: [
         main: "readme",
         extras: ["README.md"] ++ @guides ++ ["CHANGELOG.md", "LICENSE"],
+        before_closing_body_tag: &before_closing_body_tag/1,
+        # These modules are hidden from ExDoc.
+        skip_code_autolink_to: ["Slap.Cluster.Probe", "Slap.Cluster.ShardDb", "Slap.KV.Admission"],
         filter_modules: fn _module, meta ->
           not String.starts_with?(
             List.to_string(meta.source_path),
@@ -75,6 +80,54 @@ defmodule Slap.MixProject do
   defp elixirc_paths(env) when env in [:dev, :test], do: ["lib", "dev"]
   defp elixirc_paths(_env), do: ["lib"]
 
+  # ExDoc needs Mermaid.js to render Mermaid code blocks.
+  defp before_closing_body_tag(:html) do
+    """
+    <script>
+      let mermaidLoaded = null;
+
+      function loadMermaid() {
+        mermaidLoaded ??= new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js";
+          script.onload = () => {
+            mermaid.initialize({
+              startOnLoad: false,
+              theme: document.body.className.includes("dark") ? "dark" : "default"
+            });
+            resolve();
+          };
+          script.onerror = reject;
+          document.head.appendChild(script);
+        });
+        return mermaidLoaded;
+      }
+
+      window.addEventListener("exdoc:loaded", () => {
+        const blocks = document.querySelectorAll("pre code.mermaid");
+        if (blocks.length === 0) return;
+
+        loadMermaid().then(() => {
+          let id = 0;
+          for (const codeEl of blocks) {
+            const preEl = codeEl.parentElement;
+            const graphEl = document.createElement("div");
+            const graphId = "mermaid-graph-" + id++;
+            mermaid.render(graphId, codeEl.textContent).then(({svg, bindFunctions}) => {
+              graphEl.innerHTML = svg;
+              bindFunctions?.(graphEl);
+              preEl.insertAdjacentElement("afterend", graphEl);
+              preEl.remove();
+            });
+          }
+        }).catch(() => {});
+      });
+    </script>
+    """
+  end
+
+  defp before_closing_body_tag(_format), do: ""
+
   def cli do
     [preferred_envs: [check: :test]]
   end
@@ -90,6 +143,7 @@ defmodule Slap.MixProject do
       slap_dep(:slap_slatedb, "~> 0.4.0"),
       {:slap_inspect, path: "../slap_inspect", only: :test, runtime: false},
       {:bandit, "~> 1.12", only: [:dev, :test]},
+      {:kino, "~> 0.19.1", only: [:dev, :test]},
       {:rustler, "~> 0.38", optional: true, runtime: false},
       {:credo, "~> 1.7.19", only: [:dev, :test], runtime: false},
       {:ex_slop, "~> 0.4.5", only: [:dev, :test], runtime: false},

@@ -22,15 +22,21 @@ Run `mix slap.server --help` for the full list of options, or
 while the server runs. Run one server per Erlang VM; a cluster can span
 several Erlang VMs on one or several hosts.
 
-## Library examples
+## Examples
 
-Use `iex -S mix` to try the [library examples](library-examples.md) against
-this checkout. To check their expected results, as CI does, run:
+To try the [getting started notebook](../notebooks/getting-started.livemd)
+against this checkout, start `iex -S mix` and paste its Elixir cells,
+skipping the `Mix.install` setup cell. To check both notebooks without
+Livebook, as CI does, run:
 
 ```sh
-mix run scripts/readme_test.exs ../README.md
-mix run scripts/readme_test.exs guides/library-examples.md
+mix run scripts/livebook_test.exs notebooks/getting-started.livemd
+mix run scripts/livebook_test.exs notebooks/inside-slap.livemd
 ```
+
+The script skips the `Mix.install` setup cell and runs the remaining cells
+in order. Cells match their expected results, so an unexpected result fails
+the check. The script also checks sequence diagrams for unlabeled messages.
 
 ## Durable Streams conformance and benchmarks
 

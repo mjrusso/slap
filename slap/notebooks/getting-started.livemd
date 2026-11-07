@@ -1,0 +1,134 @@
+# Getting started
+
+```elixir
+Mix.install([{:slap, "~> 0.7.0"}])
+```
+
+## About this notebook
+
+This notebook introduces the Slap APIs: SlateDB, Streams, snapshot
+logs, Yjs, KV and files. It requires Elixir 1.18 or later and Erlang/OTP
+26.2 or later. Run the cells in order. They use in-memory storage, which is
+discarded when the notebook's runtime stops.
+
+To run it without Livebook, paste the cells into IEx started with
+`iex -e 'Mix.install([{:slap, "~> 0.7.0"}])'`.
+
+## SlateDB
+
+Open a database, write a durable value, read it, and close the database:
+
+```elixir
+{:ok, db} = Slap.SlateDB.open("example", store: :memory)
+{:ok, _seq} = Slap.SlateDB.put(db, "user:1", "Ada", await_durable: true)
+{:ok, "Ada"} = Slap.SlateDB.get(db, "user:1")
+:ok = Slap.SlateDB.close(db)
+```
+
+## Start the services
+
+`Slap` starts the services selected by its options. This starts the
+Streams cluster with Yjs on it, and the KV cluster with files on it, each
+with one shard:
+
+```elixir
+{:ok, _} =
+  Slap.start_link(
+    store: :memory,
+    streams: [shards: 1],
+    yjs: [],
+    kv: [shards: 1],
+    files: []
+  )
+```
+
+Run this cell once per runtime. To start over, restart the runtime from
+Livebook's Runtime panel and run the cells in order. In IEx, start a new
+session.
+
+The [architecture guide](https://hexdocs.pm/slap/architecture.html) shows
+what `Slap` starts and how the packages depend on each other.
+
+## Streams
+
+Create, append to, and read a stream:
+
+```elixir
+{:ok, :created, _} = Slap.Streams.create("/events", content_type: "text/plain")
+{:ok, %{result: :appended}} = Slap.Streams.append("/events", "created")
+{:ok, %{messages: [{0, "created"}]}} = Slap.Streams.read("/events", 0)
+```
+
+## Snapshot logs
+
+Snapshot logs use the Streams cluster. The caller must supply snapshot bytes
+representing the effects of every entry before the snapshot offset. The log
+cannot verify that state. Publishing a snapshot trims those entries:
+
+```elixir
+base = "/v1/stream/examples/log"
+{:ok, _} = Slap.SnapshotLog.append(base, "one")
+{:ok, %{entries: ["one"], offset: offset}} = Slap.SnapshotLog.next(base, 0, wait: 0)
+:ok = Slap.SnapshotLog.snapshot(base, offset, "state after one")
+{:reset, %{snapshot: "state after one", offset: ^offset}} = Slap.SnapshotLog.next(base, nil)
+```
+
+A consumer starts with `next(base, nil)` to get the current snapshot and the
+offset from which to read later entries.
+
+## Yjs
+
+Define a document server module, join a document, and edit it with `y_ex`:
+
+```elixir
+defmodule Example.DocServer do
+  use Slap.Yjs.DocServer
+end
+
+{:ok, server} = Slap.Yjs.Docs.join(Example.DocServer, {"examples", "doc-1"})
+{:ok, doc} = Slap.Yjs.DocServer.doc(server, 5_000)
+text = Yex.Doc.get_text(doc, "text")
+:ok = Yex.Text.insert(text, 0, "hello")
+```
+
+Call `sync/2` to wait for the document's buffered changes to be stored, then
+read the text:
+
+```elixir
+:ok = Slap.Yjs.DocServer.sync(server, 5_000)
+"hello" = Yex.Text.to_string(text)
+```
+
+## KV
+
+Write a row only if it does not exist yet, then read it:
+
+```elixir
+{:ok, version} = Slap.KV.put("users", "42", "Ada", if_version: :absent)
+{:ok, %{value: "Ada", version: ^version}} = Slap.KV.get("users", "42")
+```
+
+A conditional write against a version that is no longer current returns a
+conflict with the current version:
+
+```elixir
+{:ok, _} = Slap.KV.put("users", "42", "Grace", if_version: version)
+{:error, {:conflict, _current}} = Slap.KV.put("users", "42", "Katherine", if_version: version)
+```
+
+## Files
+
+Files use the KV cluster. Small bodies are stored in KV records:
+
+```elixir
+ref = {"examples", "hello.txt"}
+{:ok, %{storage: :inline}} = Slap.Files.put(ref, "hello", if_version: :absent)
+{:ok, "hello"} = Slap.Files.read(ref)
+```
+
+## Next steps
+
+* For production configuration, see the `Slap` module and each package's
+  guide, linked from the [package overview](https://hexdocs.pm/slap/overview.html).
+* To serve the HTTP APIs, see the
+  [standalone server guide](https://hexdocs.pm/slap/standalone-server.html).
