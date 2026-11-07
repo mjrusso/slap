@@ -1,24 +1,24 @@
 # Standalone server
 
-`mix slap.server` serves Streams, KV, or both from one HTTP listener. It does
-not authenticate requests. Use it to evaluate, test and benchmark the services
-without writing an application.
+[`examples/server.exs`](https://github.com/mjrusso/slap/blob/main/slap/examples/server.exs)
+serves the Streams and KV HTTP APIs from one listener. It does not
+authenticate requests. Use it to try the HTTP APIs.
 
 Requires Elixir 1.18 or later and Erlang/OTP 26.2 or later. The SlateDB NIF is
 precompiled for macOS and Linux (glibc and musl) on x86_64 and arm64. The first
 run downloads it and compiles the dependencies; later runs reuse them.
 
-This command installs `slap` from Hex and starts the server:
+Download the script and run it:
 
 ```sh
-elixir -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- \
-  --streams --kv --store memory
+curl -fsSLo server.exs https://raw.githubusercontent.com/mjrusso/slap/main/slap/examples/server.exs
+elixir server.exs
 ```
 
-`--streams` and `--kv` select the services; pass one or both. The server
+The script installs `slap` and `bandit` with `Mix.install`. The server
 listens on `http://127.0.0.1:4437`, with Streams under `/v1/stream/` and KV
-under `/v1/kv/`. `GET /health` answers 200 once the listener is up.
-The memory store loses its data when the server stops.
+under `/v1/kv/`. `GET /health` answers 200 once the listener is up. By
+default the data is in memory and is lost when the server stops.
 
 ## Streams
 
@@ -54,7 +54,7 @@ curl 'http://localhost:4437/v1/stream/events?offset=-1'
 
 ## KV
 
-With KV running, set three rows, get one, then scan a range of keys in the
+Set three rows, get one, then scan a range of keys in the
 `people` partition. The range stops before `c`.
 
 ```sh
@@ -69,67 +69,97 @@ The scan returns JSON with keys and values encoded as unpadded base64url.
 
 ## Storage
 
+`--store local:DIR` keeps the data in a local directory:
+
+```sh
+elixir server.exs --store local:./data
+```
+
 For S3, create the bucket and set `AWS_REGION` and credentials (such as
 `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`) in the server's environment.
 Start the server with:
 
 ```sh
-elixir -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- \
-  --streams --kv --store s3:s3://my-bucket/my-app
+elixir server.exs --store s3:s3://my-bucket/my-app
 ```
 
-`--store local:DIR` keeps the data in a local directory. See
+See
 [choosing the shard count](https://hexdocs.pm/slap_cluster/readme.html#choosing-the-shard-count)
 for local-storage guidance and
 [running another cluster on the same store](https://hexdocs.pm/slap_cluster/readme.html#running-another-cluster-on-the-same-store)
 before running a script against a store an application is using. Existing
 data requires its original shard count.
 
-## Options
-
-Pass `--help` to the startup command for the full option list. Use `--ip` to
-listen on another address and `--port` for another port.
-
-`--placement object-lease` requires an S3 store. `--peers` requires a
-placement other than `local`.
-
-Each service has its own shards: Streams under `streams/` and KV under
-`kv/`, with separate leases when the placement uses them. Run one server per
-Erlang VM; a cluster can span several Erlang VMs on one or several hosts.
-
-To keep an IEx prompt with the `Mix.install` command, replace `elixir` with
-`iex`.
-
-## Running from a Mix project
-
-In a Mix project that depends on `slap`, run the task directly:
-
-```sh
-mix slap.server --streams --kv --store memory
-```
-
-The same server options apply. Run `mix help slap.server` for the full list,
-or `iex -S mix slap.server --streams --kv --store memory` to keep an IEx
-prompt while the server runs.
+Use `--port PORT` to change the port. For shard counts, placement or other
+service settings, edit the options passed to `Slap` in the script. See
+`Slap` for the available options.
 
 ## Inspection
 
-Slap Inspect requires a named Erlang node. See its
-[standalone server connection guide](https://hexdocs.pm/slap_inspect/readme.html#standalone-slap-server)
-for startup and connection commands.
+Slap Inspect requires a named Erlang node. Start the script with a name:
 
-## Supervising the server
+```sh
+elixir --sname slap server.exs
+```
 
-The Mix task is not available in a release. Add `slap` to your application's
-dependencies and supervise `{Slap.Server, opts}` to start the selected
-services and a Bandit listener:
+Then connect with `slap-inspect --node slap@HOST`. See the
+[inspector guide](https://hexdocs.pm/slap_inspect/readme.html#standalone-slap-server)
+for details.
+
+## Serving the APIs from an application
+
+Add `{:bandit, "~> 1.12"}` alongside `slap` in your application's
+dependencies, then supervise `Slap` and a listener for `Slap.Router`:
 
 ```elixir
 children = [
-  {Slap.Server,
-    store: {:url, "s3://bucket/db"},
-    streams: [shards: 8],
-    kv: [shards: 4],
-    port: 4437}
+  {Slap, store: {:url, "s3://bucket/db"}, streams: [shards: 8], kv: [shards: 4]},
+  {Bandit, plug: {Slap.Router, streams: [], kv: []}, port: 4437, ip: :loopback}
 ]
 ```
+
+`Slap.Router` takes each service's router options (see
+`Slap.Streams.HTTP.Router` and `Slap.KV.HTTP.Router`). Include only the
+services the listener should serve. You can also mount an individual
+service's router directly.
+
+Put authentication and authorization in front of the router.
+`ip: :loopback` accepts connections from this machine only; without `ip:`,
+Bandit listens on every interface.
+
+## Migrating from Slap.Server
+
+`Slap.Server` combined service startup and the HTTP listener. Replace it
+with the two children shown above:
+
+1. Add `bandit` to your dependencies. Move `:store`, `:streams`, `:kv`,
+   `:strategy` and `:peers` from `Slap.Server` to `Slap`.
+2. Move `:port` and `:ip` to the Bandit child. Move any `:http` options
+   nested under `:streams` or `:kv` to that service's options in
+   `Slap.Router`.
+3. Before starting against existing data, preserve each cluster's path,
+   shard count and child options as described below.
+
+The old server always used the paths `"streams"` and `"kv"`. Each cluster
+used the `:shards` and `:child_options` passed directly to `Slap.Server`,
+defaulting to 8 shards and `[]`. It ignored these three keys in
+`config :slap_streams, Slap.Streams.Cluster` and
+`config :slap_kv, Slap.KV.Cluster`.
+
+`Slap` uses application-configured values for keys omitted from `streams:`
+or `kv:`. Set `path:`, `shards:` and `child_options:` explicitly in each
+service's options to preserve the old values, or update its application
+config to match. The path must still point to the existing data, and the
+shard count must match the one recorded in the store.
+
+If you used the installed `slap.server` Mix task, switch to running
+`examples/server.exs` with `elixir`. The script uses the default paths and 8
+shards per cluster. If you started the task with `--streams-shards` or
+`--kv-shards`, set the same `shards:` in the script. The Mix task remains
+available in this repository for development.
+
+## From a checkout
+
+This repository's tests and benchmarks use the `slap.server` Mix task,
+which takes server options as flags. It is available in the checkout's
+`:dev` and `:test` environments. See the [development guide](development.md).

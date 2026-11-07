@@ -1,5 +1,5 @@
-defmodule Slap.ServerTest do
-  # Not async: the server's cluster and listener are named processes.
+defmodule Slap.Dev.ServerTest do
+  # Not async: the server's clusters are named processes.
   use ExUnit.Case, async: false
 
   @moduletag :capture_log
@@ -41,6 +41,11 @@ defmodule Slap.ServerTest do
              RawHTTP.request(conn, "GET", "/v1/stream/idle?offset=#{offset}&live=long-poll")
 
     RawHTTP.close(conn)
+  end
+
+  test "passes Streams child options to the cluster" do
+    assert fork_status([]) == 201
+    assert fork_status(max_fork_depth: 0) == 400
   end
 
   test "serves KV under /v1/kv next to the streams, when configured" do
@@ -137,19 +142,21 @@ defmodule Slap.ServerTest do
     RawHTTP.close(conn)
   end
 
-  test "requires at least one service" do
-    assert_raise ArgumentError, ~r/configure :streams, :kv, or both/, fn ->
-      Slap.Server.child_specs(store: :memory)
-    end
+  test "listens on loopback by default" do
+    server = start_supervised!({Slap.Dev.Server, store: :memory, kv: [shards: 1], port: 0})
+    assert {{127, 0, 0, 1}, _port} = listener_address(server)
+  end
 
-    assert_raise Mix.Error, ~r/select --streams, --kv, or both/, fn ->
-      Mix.Tasks.Slap.Server.run([])
+  test "rejects unknown options when building the child spec" do
+    assert_raise ArgumentError, ~r/prot/, fn ->
+      Slap.Dev.Server.child_spec(store: :memory, kv: [], prot: 4437)
     end
   end
 
-  test "the listener child id is namespaced" do
-    specs = Slap.Server.child_specs(store: :memory, kv: [])
-    assert List.last(specs).id == {Slap.Server, :listener}
+  test "requires at least one service" do
+    assert_raise Mix.Error, ~r/select --streams, --kv, or both/, fn ->
+      Mix.Tasks.Slap.Server.run([])
+    end
   end
 
   test "CLI rejects placement flags that would be ignored and port zero" do
@@ -178,83 +185,6 @@ defmodule Slap.ServerTest do
         "object-lease"
       ])
     end
-  end
-
-  test "rejects unknown server and service options" do
-    assert_raise ArgumentError, ~r/shardz/, fn ->
-      Slap.Server.child_specs(store: :memory, streams: [shardz: 2])
-    end
-
-    assert_raise ArgumentError, ~r/strams/, fn ->
-      Slap.Server.child_specs(store: :memory, streams: [], strams: [shards: 2])
-    end
-
-    assert_raise ArgumentError, ~r/shardz/, fn ->
-      Slap.Server.child_specs(store: :memory, kv: [shardz: 2])
-    end
-
-    assert_raise ArgumentError, ~r/partition_writters/, fn ->
-      Slap.Server.child_specs(store: :memory, kv: [child_options: [partition_writters: 2]])
-    end
-  end
-
-  test "server child spec rejects unknown options in the caller" do
-    assert_raise ArgumentError, ~r/shardz/, fn ->
-      Supervisor.child_spec({Slap.Server, [store: :memory, streams: [shardz: 2]]}, [])
-    end
-  end
-
-  test "passes service child options to each cluster" do
-    specs =
-      Slap.Server.child_specs(
-        store: :memory,
-        streams: [child_options: [idle_timeout: 123]],
-        kv: [child_options: [partition_writers: 3]]
-      )
-
-    assert {Slap.Streams.Cluster, streams_opts} = Enum.at(specs, 0)
-    assert {Slap.KV.Cluster, kv_opts} = Enum.at(specs, 1)
-    assert streams_opts[:child_options] == [idle_timeout: 123]
-    assert kv_opts[:child_options] == [partition_writers: 3]
-  end
-
-  test "rejects invalid service settings" do
-    Process.flag(:trap_exit, true)
-
-    assert {:error,
-            {:shutdown,
-             {:failed_to_start_child, Slap.Streams.Cluster,
-              {:EXIT, {%ArgumentError{message: message}, _stack}}}}} =
-             Slap.Server.start_link(store: :memory, streams: [settings: nil], port: 0)
-
-    assert message =~ ":settings must be a map"
-  end
-
-  test "the standalone listener binds to loopback by default" do
-    specs = Slap.Server.child_specs(store: :memory, kv: [])
-    assert %{start: {Bandit, :start_link, [opts]}} = List.last(specs)
-    assert opts[:ip] == :loopback
-  end
-
-  test "a task server stops with the slap application" do
-    {:ok, server} =
-      DynamicSupervisor.start_child(
-        Slap.ServerSupervisor,
-        {Slap.Server, [store: :memory, kv: [], port: 0]}
-      )
-
-    on_exit(fn ->
-      if Process.whereis(Slap.ServerSupervisor) do
-        DynamicSupervisor.terminate_child(Slap.ServerSupervisor, server)
-      end
-
-      Application.ensure_all_started(:slap)
-    end)
-
-    monitor = Process.monitor(server)
-
-    assert :ok = Application.stop(:slap)
-    assert_receive {:DOWN, ^monitor, :process, ^server, :shutdown}
   end
 
   test "mix task rejects positional arguments" do
@@ -289,15 +219,69 @@ defmodule Slap.ServerTest do
     end
   end
 
-  defp start_server(config) do
-    server = start_supervised!({Slap.Server, [port: 0] ++ config})
+  test "mix task stops the server if it cannot write the pid file" do
+    {:ok, socket} = :gen_tcp.listen(0, [])
+    {:ok, port} = :inet.port(socket)
+    :ok = :gen_tcp.close(socket)
 
+    pid_file =
+      Path.join([System.tmp_dir!(), "slap-missing-#{System.unique_integer([:positive])}", "pid"])
+
+    assert_raise File.Error, fn ->
+      Mix.Tasks.Slap.Server.run(~w(--kv --store memory --port #{port} --pid-file #{pid_file}))
+    end
+
+    assert Process.whereis(Slap.KV.Cluster.Supervisor) == nil
+    assert {:error, :econnrefused} = :gen_tcp.connect(~c"127.0.0.1", port, [])
+  end
+
+  test "a task server stops with the slap application" do
+    {:ok, server} =
+      DynamicSupervisor.start_child(
+        Slap.Dev.ServerSupervisor,
+        {Slap.Dev.Server, [store: :memory, kv: [], port: 0]}
+      )
+
+    on_exit(fn ->
+      Application.stop(:slap)
+      Application.ensure_all_started(:slap)
+    end)
+
+    monitor = Process.monitor(server)
+
+    assert :ok = Application.stop(:slap)
+    assert_receive {:DOWN, ^monitor, :process, ^server, :shutdown}
+  end
+
+  defp fork_status(child_options) do
+    port = start_server(store: :memory, streams: [shards: 1, child_options: child_options])
+    {:ok, conn} = RawHTTP.connect(port)
+    text = [{"content-type", "text/plain"}]
+
+    {:ok, 201, _, _} = RawHTTP.request(conn, "PUT", "/v1/stream/source", text)
+    {:ok, status, _, _} = RawHTTP.request(conn, "POST", "/v1/stream/source", text, "hi")
+    assert status in 200..299
+
+    fork = [{"stream-forked-from", "/v1/stream/source"} | text]
+    {:ok, status, _, _} = RawHTTP.request(conn, "PUT", "/v1/stream/fork", fork)
+    RawHTTP.close(conn)
+    :ok = stop_supervised(Slap.Dev.Server)
+    status
+  end
+
+  defp start_server(config) do
+    server = start_supervised!({Slap.Dev.Server, [port: 0] ++ config})
+    {_ip, port} = listener_address(server)
+    port
+  end
+
+  defp listener_address(server) do
     {_id, listener, _type, _modules} =
       Enum.find(Supervisor.which_children(server), fn {id, _, _, _} ->
-        id == {Slap.Server, :listener}
+        id == {Slap.Dev.Server, :listener}
       end)
 
-    {:ok, {_ip, port}} = ThousandIsland.listener_info(listener)
-    port
+    {:ok, address} = ThousandIsland.listener_info(listener)
+    address
   end
 end

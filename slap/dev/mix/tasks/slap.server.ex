@@ -1,9 +1,9 @@
 defmodule Mix.Tasks.Slap.Server do
   @shortdoc "Runs Durable Streams, KV, or both"
   @moduledoc """
-  Starts a standalone HTTP server (`Slap.Server`) for Durable Streams, KV,
-  or both. Select at least one service. Applications can embed either service
-  directly in their supervision tree and Plug pipeline.
+  Starts an HTTP server for Durable Streams, KV, or both. Select at least
+  one service. Available only in this checkout's `:dev` and `:test`
+  environments. Use `examples/server.exs` without a checkout.
 
       mix slap.server [--help] [--port 4437] [--ip 127.0.0.1]
                     --store memory|local:DIR|s3:URL
@@ -29,10 +29,8 @@ defmodule Mix.Tasks.Slap.Server do
 
   For `s3:URL`, the endpoint and credentials come from the `AWS_*`
   environment variables. `--store` is required; a `memory` store is lost
-  when the server stops.
-  Streams are served under `/v1/stream/` and KV under `/v1/kv/`;
-  `GET /health` answers 200 once the listener is up.
-  Each service has its own shards and databases.
+  when the server stops. Streams are served under `/v1/stream/` and KV
+  under `/v1/kv/`; `GET /health` answers 200 once the listener is up.
   `--pid-file` writes the VM's OS process id, for tests that kill it. There
   is no authentication. The listener binds to loopback unless `--ip`
   selects another address.
@@ -46,11 +44,6 @@ defmodule Mix.Tasks.Slap.Server do
 
   Connect with `slap-inspect --node slap@HOST`. If the server was started
   with `--cookie`, also pass `--cookie-file`.
-
-  Without a Mix project, use `Mix.install`:
-
-      elixir -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- \\
-        --streams --store memory
 
   With a placement other than `local`, the node is one of a cluster: start
   it with a name and a shared cookie, for example `elixir --name
@@ -104,7 +97,7 @@ defmodule Mix.Tasks.Slap.Server do
     validate_placement!(opts)
     validate_port!(opts)
     store = store(opts[:store])
-    start_applications(Mix.Project.get())
+    Mix.Task.run("app.start")
     SlateDB.set_log_level(:warning)
 
     config =
@@ -118,12 +111,15 @@ defmodule Mix.Tasks.Slap.Server do
         streams(opts) ++
         kv(opts)
 
-    case DynamicSupervisor.start_child(Slap.ServerSupervisor, {Slap.Server, config}) do
-      {:ok, _supervisor} -> :ok
-      {:error, reason} -> Mix.raise("server failed to start: #{start_error(reason)}")
-    end
+    server = start_server!(config)
 
-    if file = opts[:pid_file], do: File.write!(file, System.pid())
+    try do
+      if file = opts[:pid_file], do: File.write!(file, System.pid())
+    rescue
+      exception ->
+        DynamicSupervisor.terminate_child(Slap.Dev.ServerSupervisor, server)
+        reraise exception, __STACKTRACE__
+    end
 
     host = url_host(Keyword.get(opts, :ip, "127.0.0.1"))
 
@@ -132,12 +128,31 @@ defmodule Mix.Tasks.Slap.Server do
 
     if config[:kv], do: Mix.shell().info("KV on http://#{host}:#{config[:port]}/v1/kv/")
 
-    if !IEx.started?(), do: Process.sleep(:infinity)
+    if !IEx.started?(), do: await_stop(server)
   end
 
-  # Mix.install has no project and has started the applications.
-  defp start_applications(nil), do: :ok
-  defp start_applications(_project), do: Mix.Task.run("app.start")
+  # Exceeding the server's restart intensity must stop the task.
+  defp start_server!(config) do
+    spec = Supervisor.child_spec({Slap.Dev.Server, config}, restart: :temporary)
+
+    case DynamicSupervisor.start_child(Slap.Dev.ServerSupervisor, spec) do
+      {:ok, server} -> server
+      {:error, reason} -> Mix.raise("server failed to start: #{start_error(reason)}")
+    end
+  end
+
+  @spec await_stop(pid()) :: no_return()
+  defp await_stop(server) do
+    ref = Process.monitor(server)
+
+    receive do
+      {:DOWN, ^ref, :process, _pid, reason} ->
+        # When the VM stops, it stops the server with the application; raising
+        # would halt the VM before the other applications stop.
+        if match?({:stopping, _}, :init.get_status()), do: Process.sleep(:infinity)
+        Mix.raise("server stopped: #{inspect(reason)}")
+    end
+  end
 
   defp start_error({:shutdown, {:failed_to_start_child, _id, reason}}),
     do: start_error(reason)

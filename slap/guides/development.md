@@ -4,6 +4,24 @@ These commands require a repository checkout. Follow the repository's
 [development setup](https://github.com/mjrusso/slap#development), then run
 commands from `slap/` unless a different directory is specified.
 
+## Development server
+
+Use the `slap.server` Mix task to start a server for this checkout's
+conformance suite, benchmarks, and crash and cluster tests. It starts the
+selected services and an HTTP listener, with server options passed as
+flags. The task is available only in the checkout's `:dev` and `:test`
+environments. To try the published HTTP APIs, use the
+[standalone server script](standalone-server.md).
+
+```sh
+mix slap.server --streams --kv --store memory
+```
+
+Run `mix slap.server --help` for the full list of options, or
+`iex -S mix slap.server --streams --kv --store memory` to keep an IEx prompt
+while the server runs. Run one server per Erlang VM; a cluster can span
+several Erlang VMs on one or several hosts.
+
 ## Library examples
 
 Use `iex -S mix` to try the [library examples](library-examples.md) against
@@ -66,8 +84,8 @@ RustFS, and `caddy-file`, and charts the results of runs on main.
 
 ## Mix.install startup
 
-Test the standalone server's [`Mix.install` command](standalone-server.md)
-against this checkout:
+Check that the [standalone server script](standalone-server.md) starts
+outside a Mix project using this checkout's dependencies:
 
 ```sh
 scripts/mix_install_test.sh
@@ -75,7 +93,8 @@ scripts/mix_install_test.sh
 
 ## Crash test
 
-`scripts/crash_test.exs` starts `mix slap.server` as its own OS process. It:
+`scripts/crash_test.exs` runs the `slap.server` Mix task as its own OS
+process. It:
 
 1. has 16 writers append to their own JSON streams (half with idempotent
    producers)
@@ -113,6 +132,17 @@ Run the load generator in another terminal:
 ```sh
 mix run bench/streams_http_load.exs --connections 128 --seconds 20
 ```
+
+The values shown are the defaults. The script also takes `--port` (default
+4437), `--streams` (the number of streams to append to, default 1000),
+and `--bytes` (the body size in bytes, default 256).
+
+Use `--rate` to set the total appends per second across all connections.
+The default, `--rate 0`, sends the next append on each connection as soon
+as the previous append is acknowledged.
+
+To measure an S3-compatible store, start the server with
+`--store s3:s3://bucket/load` and set its `AWS_*` variables.
 
 Choose shard count and `flush_interval` from the store's sustained PUT rate:
 each active shard can write one WAL object per flush interval. Run the

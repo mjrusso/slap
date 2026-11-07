@@ -5,7 +5,7 @@ ex_dna_params = ".ex_dna.exs" |> Code.eval_file() |> elem(0) |> Map.to_list()
     %{
       name: "default",
       files: %{
-        included: ["lib/", "test/"],
+        included: ["lib/", "dev/", "test/"],
         excluded: [~r"/_build/", ~r"/deps/", ~r"/node_modules/"]
       },
       plugins: [{ExSlop, []}],

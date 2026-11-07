@@ -1,12 +1,18 @@
 defmodule Slap.Router do
   @moduledoc """
-  The server's HTTP entry point for the configured services.
+  A Plug that serves the Streams and KV HTTP APIs, through
+  `Slap.Streams.HTTP.Router` and `Slap.KV.HTTP.Router`:
 
-  Options: `:streams` and `:kv` contain each service router's options,
-  or nil when that service is disabled.
+      {Bandit, plug: {Slap.Router, streams: [], kv: []}, port: 4437, ip: :loopback}
 
-  `GET /health` answers 200 once the listener is up. It does not check the
-  services' shards.
+  `:streams` and `:kv` are those routers' options. A service whose key is
+  missing or nil is not served. With the default prefixes, Streams are
+  under `/v1/stream/` and KV under `/v1/kv/`; other paths answer 404.
+
+  `GET /health` answers 200. It does not check the services' shards.
+
+  It does not authenticate requests; put your own authentication in front.
+  Without `ip:`, Bandit listens on every interface.
   """
 
   @behaviour Plug

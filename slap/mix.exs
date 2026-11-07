@@ -18,12 +18,13 @@ defmodule Slap.MixProject do
       version: @version,
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
+      elixirc_paths: elixirc_paths(Mix.env()),
       test_ignore_filters: [&String.starts_with?(&1, "test/support/")],
       deps: deps(),
       aliases: aliases(),
       dialyzer: [plt_add_apps: [:mix, :iex]],
       usage_rules: [file: "AGENTS.md", usage_rules: [:usage_rules]],
-      description: "All Slap server libraries and a standalone Streams and KV server.",
+      description: "All Slap server libraries, started together under one supervisor.",
       source_url: @package_url,
       package: [
         licenses: ["Apache-2.0"],
@@ -33,6 +34,12 @@ defmodule Slap.MixProject do
       docs: [
         main: "readme",
         extras: ["README.md"] ++ @guides ++ ["CHANGELOG.md", "LICENSE"],
+        filter_modules: fn _module, meta ->
+          not String.starts_with?(
+            List.to_string(meta.source_path),
+            Path.expand("dev", __DIR__) <> "/"
+          )
+        end,
         search: [
           %{name: "slap", help: "Search slap"},
           %{
@@ -57,8 +64,16 @@ defmodule Slap.MixProject do
   end
 
   def application do
-    [mod: {Slap.Application, []}, extra_applications: [:logger]]
+    [extra_applications: [:logger]] ++ dev_application(Mix.env())
   end
+
+  # mix slap.server starts its server under this application, so that the
+  # VM stops the server before the slap_* applications it runs on.
+  defp dev_application(env) when env in [:dev, :test], do: [mod: {Slap.Dev.Application, []}]
+  defp dev_application(_env), do: []
+
+  defp elixirc_paths(env) when env in [:dev, :test], do: ["lib", "dev"]
+  defp elixirc_paths(_env), do: ["lib"]
 
   def cli do
     [preferred_envs: [check: :test]]
@@ -74,7 +89,7 @@ defmodule Slap.MixProject do
       slap_dep(:slap_cluster, "~> 0.6.0"),
       slap_dep(:slap_slatedb, "~> 0.4.0"),
       {:slap_inspect, path: "../slap_inspect", only: :test, runtime: false},
-      {:bandit, "~> 1.12"},
+      {:bandit, "~> 1.12", only: [:dev, :test]},
       {:rustler, "~> 0.38", optional: true, runtime: false},
       {:credo, "~> 1.7.19", only: [:dev, :test], runtime: false},
       {:ex_slop, "~> 0.4.5", only: [:dev, :test], runtime: false},

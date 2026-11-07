@@ -1,9 +1,8 @@
 [
-  checks: [source_paths: ["lib"]],
+  checks: [source_paths: ["lib", "dev"]],
   calls: [
     forbidden: [
-      # The server composes Slap.Streams and Slap.KV; it reads and writes
-      # data only through them.
+      # Composition and HTTP layers access data only through service APIs.
       {["Slap", "Slap.*", "Mix.Tasks.Slap.*"],
        [
          "Slap.SlateDB.open",

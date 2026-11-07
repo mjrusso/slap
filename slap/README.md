@@ -6,21 +6,12 @@ and Yjs documents in S3-compatible object storage or a local directory, through
 than as a separate database server. They run on one node or across several,
 with each service's data split into shards that are spread across the nodes.
 
-Add the `slap` package to install all seven Slap server libraries at once. It
-also provides `mix slap.server`, a standalone HTTP server for evaluating and
-benchmarking Streams and KV.
+Add the `slap` package to install all seven Slap server libraries at once,
+and start the services you use with one child spec, `{Slap, opts}`.
 
-- [Run the kitchen sink demo](#kitchen-sink-demo) to see every service update
-  sample data once a second.
-- [Try the libraries](guides/library-examples.md) in IEx.
-- [Run the standalone server](#try-the-standalone-server) and use its HTTP APIs.
-- [Use Slap in an application](#use-slap-in-an-application) to embed the
-  services.
-- [Browse the data with Slap Inspect](#slap-inspect), a read-only TUI and CLI
-  installed separately.
-
-See the [package overview](guides/overview.md) for a description of each
-package.
+Start with the [library examples](guides/library-examples.md) to try the
+Elixir APIs in IEx. To use Slap in an application, follow the setup below.
+To try the HTTP APIs, run the [standalone server](#try-the-standalone-server).
 
 ## Use Slap in an application
 
@@ -31,15 +22,34 @@ Add `slap` to the dependencies in your application's `mix.exs`:
 ```elixir
 defp deps do
   [
-    {:slap, "~> 0.6.0"}
+    {:slap, "~> 0.7.0"}
   ]
 end
 ```
 
 Run `mix deps.get`.
 
-Add the required processes to your application's supervision tree. Each
-package guide has setup instructions and API examples:
+Add `Slap` to your application's supervision tree, with a key for each
+service to start:
+
+```elixir
+children = [
+  {Slap,
+   store: {:url, "s3://bucket/prefix"},
+   streams: [shards: 8],
+   kv: [shards: 8],
+   files: [],
+   yjs: []}
+]
+```
+
+`streams:` and `kv:` start the Streams and KV clusters. `files:` requires
+`kv:`, and `yjs:` requires `streams:`. Snapshot logs need only `streams:`.
+See `Slap` for the options.
+
+You can also supervise each package's processes yourself, for example to
+define your own cluster modules. Each package guide has setup instructions
+and API examples:
 
 | Package | Integration |
 | --- | --- |
@@ -51,15 +61,16 @@ package guide has setup instructions and API examples:
 | [`slap_cluster`](https://hexdocs.pm/slap_cluster/) | Define shard children and supervise your module that uses `Slap.Cluster`. |
 | [`slap_slatedb`](https://hexdocs.pm/slap_slatedb/) | Open a database and use `Slap.SlateDB`. |
 
-These packages do not start an HTTP listener. The Streams and KV HTTP routers
-are Plugs: mount them in your application's HTTP pipeline, or serve them with a
-listener you supervise, and put your authentication and authorization in front
-of them.
+To serve HTTP, mount `Slap.Router` or an individual service's router in
+your application's HTTP pipeline, or supervise a listener. Put your
+authentication and authorization in front of the router. The
+[server guide](guides/standalone-server.md#serving-the-apis-from-an-application)
+shows the listener setup.
 
 ## Kitchen sink demo
 
-To try all seven libraries without creating an application, download and run
-the [kitchen sink demo](guides/kitchen-sink.md):
+Download and run the [kitchen sink demo](guides/kitchen-sink.md) to try all
+seven libraries:
 
 ```sh
 curl -fsSLo kitchen_sink.exs https://raw.githubusercontent.com/mjrusso/slap/main/slap/examples/kitchen_sink.exs
@@ -76,13 +87,13 @@ see the [library examples](guides/library-examples.md).
 
 ## Try the standalone server
 
-`mix slap.server` serves Streams, KV, or both from one HTTP listener. It does
-not authenticate requests. Use it to evaluate, test and benchmark the services
-without writing an application:
+[`examples/server.exs`](https://github.com/mjrusso/slap/blob/main/slap/examples/server.exs) serves the Streams and KV HTTP
+APIs from one listener. It does not authenticate requests. Download it and
+run it:
 
 ```sh
-elixir -e 'Mix.install([:slap]); Mix.Task.run("slap.server", System.argv())' -- \
-  --streams --kv --store memory
+curl -fsSLo server.exs https://raw.githubusercontent.com/mjrusso/slap/main/slap/examples/server.exs
+elixir server.exs
 ```
 
 The server listens on `http://127.0.0.1:4437`. In another terminal, write and
@@ -93,10 +104,10 @@ curl -X PUT --data-binary 'Ada' http://localhost:4437/v1/kv/people/a
 curl http://localhost:4437/v1/kv/people/a
 ```
 
-The memory store loses its data when the server stops. The
+The data is in memory and is lost when the server stops. The
 [standalone server guide](guides/standalone-server.md) covers Streams and KV
-HTTP examples, S3 and local storage, server options, and supervision in a
-release.
+HTTP examples, S3 and local storage, and serving the APIs from an
+application.
 
 ## Slap Inspect
 
@@ -120,6 +131,7 @@ Follow the repository's
 this checkout. The [development guide](guides/development.md) documents the
 server's test and benchmark tools:
 
+- [The development server, `mix slap.server`](guides/development.md#development-server)
 - [Library example checks](guides/development.md#library-examples)
 - [Durable Streams conformance and benchmarks](guides/development.md#durable-streams-conformance-and-benchmarks)
 - [Crash tests](guides/development.md#crash-test)

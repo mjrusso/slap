@@ -4,6 +4,21 @@
 
 - Add the `Slap` module to start the selected Streams, KV, Files and Yjs
   services under one supervisor.
+- Breaking change: remove `Slap.Server`, the `slap` application callback and
+  `Slap.ServerSupervisor`. To serve HTTP, add `bandit` as a dependency and
+  supervise `Slap` and your listener directly. See the [migration
+  instructions](https://hexdocs.pm/slap/standalone-server.html#migrating-from-slap-server).
+- Breaking change: remove the `slap.server` Mix task from the Hex package. Run
+  [`examples/server.exs`](https://github.com/mjrusso/slap/blob/main/slap/examples/server.exs)
+  with `elixir` to try the HTTP APIs. The task remains in the checkout for
+  tests and benchmarks.
+- Breaking change: the `Slap` module applies `:path`, `:shards` and
+  `:child_options` from `config :slap_streams, Slap.Streams.Cluster` and
+  `config :slap_kv, Slap.KV.Cluster` when omitted from `streams:` or `kv:`.
+  `Slap.Server` previously overrode these values. Before upgrading, remove
+  any values there that `Slap` should not use, or set those keys in
+  `streams:` and `kv:`; see the [migration
+  instructions](https://hexdocs.pm/slap/standalone-server.html#migrating-from-slap-server).
 
 ## 0.6.0
 
