@@ -31,7 +31,7 @@ Livebook, as CI does, run:
 
 ```sh
 mix run scripts/livebook_test.exs notebooks/getting-started.livemd
-mix run scripts/livebook_test.exs notebooks/inside-slap.livemd
+mix run scripts/livebook_test.exs notebooks/internals.livemd
 ```
 
 The script skips the `Mix.install` setup cell and runs the remaining cells

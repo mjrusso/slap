@@ -4,7 +4,7 @@ defmodule Slap.MixProject do
   @version "0.7.0"
   @source_url "https://github.com/mjrusso/slap"
   @package_url "#{@source_url}/tree/main/slap"
-  @notebooks ["notebooks/getting-started.livemd", "notebooks/inside-slap.livemd"]
+  @notebooks ["notebooks/getting-started.livemd", "notebooks/internals.livemd"]
   @guides [
     "guides/overview.md",
     "guides/architecture.md",

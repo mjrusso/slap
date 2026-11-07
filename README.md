@@ -136,8 +136,8 @@ The [kitchen sink demo](slap/README.md#kitchen-sink-demo) runs every service
 with changing in-memory data and prints [Slap Inspect](slap_inspect/)
 commands to browse it.
 
-The [Exploring Slap's internals](slap/notebooks/inside-slap.livemd) notebook
-([run in Livebook][inside-slap-livebook]) traces writes, displays stored
+The [Exploring Slap's internals](slap/notebooks/internals.livemd) notebook
+([run in Livebook][internals-livebook]) traces writes, displays stored
 data, and demonstrates shard recovery. The
 [architecture guide](slap/guides/architecture.md) explains the package and
 service dependencies.
@@ -232,7 +232,7 @@ Slap is released under the terms of the [Apache License 2.0](LICENSE).
 
 Copyright (c) 2026, [Michael Russo](https://mjrusso.com).
 
-[inside-slap-livebook]: https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fmjrusso%2Fslap%2Fblob%2Fmain%2Fslap%2Fnotebooks%2Finside-slap.livemd
+[internals-livebook]: https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fmjrusso%2Fslap%2Fblob%2Fmain%2Fslap%2Fnotebooks%2Finternals.livemd
 [slap-badge]: https://img.shields.io/hexpm/v/slap?label=slap
 [slap-hex-badge]: https://img.shields.io/hexpm/v/slap.svg
 [slap-hex]: https://hex.pm/packages/slap

@@ -71,7 +71,7 @@ shows the listener setup.
 
 To explore the cluster's processes, messages exchanged during a write, and
 stored data, run the
-[Exploring Slap's internals](notebooks/inside-slap.livemd) notebook in
+[Exploring Slap's internals](notebooks/internals.livemd) notebook in
 Livebook.
 
 ## Kitchen sink demo

@@ -68,7 +68,7 @@ jobs:
       - name: Getting started notebook
         run: mix run scripts/livebook_test.exs notebooks/getting-started.livemd
       - name: Exploring Slap's internals notebook
-        run: mix run scripts/livebook_test.exs notebooks/inside-slap.livemd
+        run: mix run scripts/livebook_test.exs notebooks/internals.livemd
       - name: Kitchen sink demo
         run: mix run examples/kitchen_sink.exs --ticks 6 --interval 10 --exit
 

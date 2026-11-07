@@ -264,7 +264,7 @@ notebook = self()
 
 :ok =
   :telemetry.attach(
-    "inside-slap",
+    "internals",
     [:slap, :cluster, :shard, :start],
     fn _event, _measurements, metadata, _config ->
       send(notebook, {:shard_started, metadata.cluster, metadata.shard})
@@ -282,7 +282,7 @@ started =
     30_000 -> :timeout
   end
 
-:ok = :telemetry.detach("inside-slap")
+:ok = :telemetry.detach("internals")
 :ok = started
 :ok = Slap.KV.Cluster.await_ready(30_000)
 %{^users_shard => {:local, new_shard_db}} = Slap.KV.Cluster.assignments()
