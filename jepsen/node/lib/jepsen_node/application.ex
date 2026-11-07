@@ -24,8 +24,6 @@ defmodule JepsenNode.Application do
 
   use Application
 
-  alias Slap.Yjs
-
   @impl true
   def start(_type, _args) do
     nodes =
@@ -36,30 +34,24 @@ defmodule JepsenNode.Application do
 
     shards = String.to_integer(System.get_env("JEPSEN_SHARDS", "8"))
 
-    config = [
+    slap = [
       store: {:url, System.fetch_env!("JEPSEN_STORE")},
       streams: [shards: shards, settings: %{flush_interval: "10ms"}],
+      yjs: [],
       kv: [
         shards: shards,
         child_options: kv_admission(System.get_env("JEPSEN_KV_ADMISSION", "normal"))
       ],
-      port: 4437,
-      ip: :any,
+      files: [
+        retention_ms: 2_000,
+        upload_timeout_ms: 10_000,
+        sweep_interval_ms: 1_000,
+        # The containers share the host's clock.
+        max_clock_skew_ms: 0
+      ],
       strategy: strategy(System.get_env("JEPSEN_PLACEMENT", "object-lease")),
       peers: nodes -- [node()]
     ]
-
-    # Files are cleaned up within a test: old bodies are kept 2 s, uploads
-    # expire after 10 s, and every node sweeps each second. The containers
-    # share the host's clock.
-    files =
-      {Slap.Files,
-       store: config[:store],
-       path: "files",
-       retention_ms: 2_000,
-       upload_timeout_ms: 10_000,
-       sweep_interval_ms: 1_000,
-       max_clock_skew_ms: 0}
 
     JepsenNode.Stats.setup()
     JepsenNode.FilesRouter.setup(nodes)
@@ -67,25 +59,23 @@ defmodule JepsenNode.Application do
     JepsenNode.Readiness.setup(nodes)
 
     children =
-      [{Slap.Server, config}] ++
+      [
+        {Slap, slap},
+        listener(4437, {Slap.Router, streams: [], kv: []}, :slap_listener)
+      ] ++
         JepsenNode.Log.child_specs() ++
         [
-          Supervisor.child_spec({Bandit, plug: JepsenNode.LogRouter, port: 4440},
-            id: :log_listener
-          ),
-          Supervisor.child_spec({Bandit, plug: JepsenNode.ForkRouter, port: 4441},
-            id: :fork_listener
-          ),
-          Yjs.Docs,
-          {Bandit, plug: JepsenNode.YjsRouter, port: 4438},
-          files,
-          Supervisor.child_spec({Bandit, plug: JepsenNode.FilesRouter, port: 4439},
-            id: :files_listener
-          )
+          listener(4440, JepsenNode.LogRouter, :log_listener),
+          listener(4441, JepsenNode.ForkRouter, :fork_listener),
+          listener(4438, JepsenNode.YjsRouter, :yjs_listener),
+          listener(4439, JepsenNode.FilesRouter, :files_listener)
         ]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: JepsenNode.Supervisor)
   end
+
+  defp listener(port, plug, id),
+    do: Supervisor.child_spec({Bandit, plug: plug, port: port, ip: :any}, id: id)
 
   defp kv_admission("normal"), do: []
 

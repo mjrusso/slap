@@ -22,6 +22,7 @@ defmodule JepsenNode.MixProject do
       {:slap_yjs, path: "../../slap_yjs"},
       {:slap_files, path: "../../slap_files"},
       {:slap_snapshot_log, path: "../../slap_snapshot_log"},
+      {:bandit, "~> 1.12"},
       {:rustler, "~> 0.38", runtime: false}
     ]
   end

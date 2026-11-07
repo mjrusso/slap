@@ -13,9 +13,10 @@
 [`slap_files`](../slap_files/), and
 [`slap_snapshot_log`](../slap_snapshot_log/) on five nodes in Docker. Each node
 runs a `jepsen_node` release built from `node/`. That release starts
-[`slap`](../slap/)'s Durable Streams and KV listener against a shared RustFS
-bucket, plus small HTTP APIs for Yjs documents and files (bodies in the same
-bucket). Jepsen runs on the host and drives the nodes with `docker exec`.
+[`slap`](../slap/)'s services against a shared RustFS bucket, serves Durable
+Streams and KV over HTTP with `Slap.Router`, and adds small HTTP APIs for Yjs
+documents and files (bodies in the same bucket). Jepsen runs on the host and
+drives the nodes with `docker exec`.
 
 An application sends requests to one of those nodes. A request may be
 interrupted while the nodes change shard ownership or write to storage. The
@@ -100,13 +101,13 @@ both a consistency rule and extra coverage checks.
 ### Nodes and storage
 
 The test runs on five Docker nodes, `n1` through `n5`. Each node runs the
-`jepsen_node` release built from this checkout. The release starts Slap's
-stream and KV server plus small HTTP adapters used only by the Jepsen
-workloads:
+`jepsen_node` release built from this checkout. The release starts `Slap`
+with every service, an HTTP listener for `Slap.Router`, and small HTTP
+adapters used only by the Jepsen workloads:
 
 | Port | API used by the test |
 | --- | --- |
-| 4437 | Durable Streams and KV through the Slap server |
+| 4437 | Durable Streams and KV through `Slap.Router` |
 | 4438 | Yjs document operations, readiness, and statistics |
 | 4439 | File operations and the final file audit |
 | 4440 | Snapshot-log operations and follower checks |
