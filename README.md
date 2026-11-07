@@ -89,7 +89,7 @@ The services are built on these packages, which you can also use directly:
 | [`slap_cluster`](slap_cluster/)           | Placement, routing, and failover for SlateDB shards across nodes.                                      | [![Hex][slap_cluster-hex-badge]][slap_cluster-hex] [![Docs][docs-badge]][slap_cluster-docs]                |
 | [`slap_snapshot_log`](slap_snapshot_log/) | An append-only log with snapshots that replace its prefix. Each `slap_yjs` document is a snapshot log. | [![Hex][slap_snapshot_log-hex-badge]][slap_snapshot_log-hex] [![Docs][docs-badge]][slap_snapshot_log-docs] |
 
-`slap` installs them together and starts the selected services:
+`slap` installs them together:
 
 | Package         | Provides                                                                     | Hex                                                                 |
 |-----------------|------------------------------------------------------------------------------|---------------------------------------------------------------------|
@@ -136,8 +136,8 @@ The [kitchen sink demo](slap/README.md#kitchen-sink-demo) runs every service
 with changing in-memory data and prints [Slap Inspect](slap_inspect/)
 commands to browse it.
 
-To explore the internals, use the [Inside Slap notebook](slap/notebooks/inside-slap.livemd)
-([run in Livebook][inside-slap-livebook]). It traces writes, displays stored
+The [Exploring Slap's internals](slap/notebooks/inside-slap.livemd) notebook
+([run in Livebook][inside-slap-livebook]) traces writes, displays stored
 data, and demonstrates shard recovery. The
 [architecture guide](slap/guides/architecture.md) explains the package and
 service dependencies.
