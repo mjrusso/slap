@@ -4,13 +4,12 @@ defmodule Slap.MixProject do
   @version "0.7.0"
   @source_url "https://github.com/mjrusso/slap"
   @package_url "#{@source_url}/tree/main/slap"
+  @notebooks ["notebooks/getting-started.livemd", "notebooks/inside-slap.livemd"]
   @guides [
     "guides/overview.md",
     "guides/architecture.md",
-    "notebooks/getting-started.livemd",
-    "notebooks/inside-slap.livemd",
-    "guides/kitchen-sink.md",
     "guides/standalone-server.md",
+    "guides/kitchen-sink.md",
     "guides/development.md"
   ]
 
@@ -31,11 +30,13 @@ defmodule Slap.MixProject do
       package: [
         licenses: ["Apache-2.0"],
         links: %{"GitHub (Package)" => @package_url, "GitHub (Monorepo)" => @source_url},
-        files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md) ++ @guides
+        files:
+          ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md) ++ @notebooks ++ @guides
       ],
       docs: [
         main: "readme",
-        extras: ["README.md"] ++ @guides ++ ["CHANGELOG.md", "LICENSE"],
+        extras: ["README.md"] ++ @notebooks ++ @guides ++ ["CHANGELOG.md", "LICENSE"],
+        groups_for_extras: [Notebooks: @notebooks, Guides: @guides],
         before_closing_body_tag: &before_closing_body_tag/1,
         # These modules are hidden from ExDoc.
         skip_code_autolink_to: ["Slap.Cluster.Probe", "Slap.Cluster.ShardDb", "Slap.KV.Admission"],
