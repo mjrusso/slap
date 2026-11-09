@@ -75,7 +75,7 @@ defmodule Slap.InspectClustersTest do
 
     # Menu: 1 raw, 2 kv, 3 files (KV); 4 raw, 5 streams, 6 log, 7 yjs (Streams).
     screen = await_read(session)
-    assert screen =~ "Slap Inspect · Slap.Streams.Cluster · streams"
+    assert screen =~ "Slap.Streams.Cluster · streams"
     assert screen =~ "/inspect-clusters"
 
     Test.input(session, "2")
@@ -86,12 +86,12 @@ defmodule Slap.InspectClustersTest do
     Enum.each(String.graphemes("kv --partition users"), &Test.input(session, &1))
     Test.input(session, "Enter")
     screen = await_read(session)
-    assert screen =~ "Slap Inspect · Slap.KV.Cluster · kv"
-    assert screen =~ ~s("users" / "ada")
+    assert screen =~ "Slap.KV.Cluster · kv"
+    assert screen =~ "1 users / ada"
 
     Test.input(session, "5")
     screen = await_read(session)
-    assert screen =~ "Slap Inspect · Slap.Streams.Cluster · streams"
+    assert screen =~ "Slap.Streams.Cluster · streams"
     assert screen =~ "/inspect-clusters"
   end
 

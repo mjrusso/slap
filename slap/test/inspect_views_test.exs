@@ -4,9 +4,9 @@ defmodule Slap.InspectViewsTest do
 
   alias Slap.{Files, KV, SlateDB, SnapshotLog, Streams}
   alias Slap.Files.Config
-  alias Slap.Inspect.Query
+  alias Slap.Inspect.{Overview, Query, Request}
   alias Slap.Streams.Store.{Codec, Keys, Read}
-  alias Slap.Yjs.Frame
+  alias Slap.Yjs.{Frame, Store}
 
   setup context do
     start_supervised!(
@@ -60,6 +60,76 @@ defmodule Slap.InspectViewsTest do
     end
   end
 
+  test "the shard picker reports owners, status and matching row counts" do
+    paths = for name <- ["a", "b", "c", "d"], do: "/count/" <> name
+    for path <- paths, do: assert({:ok, _, _} = Streams.create(path))
+    assert {:ok, _, _} = Streams.create("/other")
+
+    counts = Enum.frequencies_by(paths, &Streams.Cluster.shard_for/1)
+
+    connection = %{entry: node(), cluster: Streams.Cluster}
+
+    {:ok, listing} =
+      Request.new(%{
+        view: :streams,
+        shard: nil,
+        budget: 5000,
+        opts: [prefix: Streams.Introspect.path_prefix("/count/")]
+      })
+
+    assert {:ok, [%{shard: 0, owner: owner, status: :running} = first, %{shard: 1} = second]} =
+             Query.execute(connection, Request.shards(listing))
+
+    assert owner == node()
+    assert first.rows == {:exactly, Map.get(counts, 0, 0)}
+    assert second.rows == {:exactly, Map.get(counts, 1, 0)}
+  end
+
+  test "home lists every cluster's views with row counts per shard" do
+    for path <- ["/home/a", "/home/b"], do: assert({:ok, _, _} = Streams.create(path))
+    assert {:ok, _} = KV.put("p", "k", "v")
+
+    assert {:ok, %{rows: rows}} = query(Streams.Cluster, :home, [])
+
+    listings =
+      Map.new(rows, fn %{decoded: {:ok, row}} -> {{row.cluster, row.view}, row.counts} end)
+
+    assert Map.fetch!(listings, {Streams.Cluster, :raw}) == nil
+    streams = Map.fetch!(listings, {Streams.Cluster, :streams})
+    assert Enum.map(streams, & &1.shard) == [0, 1]
+    assert Enum.sum(for %{rows: {:exactly, rows}} <- streams, do: rows) == 2
+
+    partitions =
+      for %{rows: {:exactly, rows}} <- Map.fetch!(listings, {KV.Cluster, :kv}), do: rows
+
+    assert Enum.sum(partitions) >= 1
+  end
+
+  test "overviews summarize stream metadata, fork sources and snapshot log state" do
+    assert {:ok, _, _} = Streams.create("/over/source")
+    assert {:ok, _} = Streams.append("/over/source", "a")
+    assert {:ok, _, _} = Streams.create("/over/fork", forked_from: "/over/source")
+    assert {:ok, offset} = SnapshotLog.append("/over/log", "entry")
+    assert :ok = SnapshotLog.snapshot("/over/log", offset, "snapshot")
+
+    assert {:ok, fork} = query(Streams.Cluster, :logical, path: "/over/fork")
+    fields = Map.new(Overview.fields(fork))
+    assert fields["Stream"] == "/over/fork"
+    assert fields["Fork of"] =~ "/over/source (sid "
+    assert fields["Offsets read"] == "0 to #{fork.metadata.logical.until}"
+    refute Map.has_key?(fields, "Tail")
+
+    sid = fork.metadata.logical.sid
+    assert {:ok, messages} = query(Streams.Cluster, :messages, [sid: sid], fork.metadata.shard)
+    assert Map.new(Overview.fields(messages))["Tail"] == "offset #{messages.offsets.tail}"
+
+    assert {:ok, log} = query(Streams.Cluster, :log, base: "/over/log")
+    fields = Map.new(Overview.fields(log))
+    assert fields["Log"] == "snapshot_log, ordinary"
+    assert fields["Current snapshot"] == "at offset #{offset}"
+    assert fields["Component updates"] =~ "/over/log/.updates (sid "
+  end
+
   test "an unassigned shard includes the cluster's owner status" do
     assert {:error, %{reason: :unassigned, shard: 9, status: {:ok, {:ok, status}}}} =
              query(Streams.Cluster, :streams, [], 9)
@@ -84,6 +154,55 @@ defmodule Slap.InspectViewsTest do
              query(KV.Cluster, :object, [object_key: key, value_range: {2, 3}], page.shard)
   end
 
+  test "kv without a partition lists each shard's partitions once" do
+    for partition <- ["p", "q"],
+        key <- ["a", "b"],
+        do: assert({:ok, _} = KV.put(partition, key, "v"))
+
+    listed =
+      for shard <- [0, 1],
+          {:ok, page} = query(KV.Cluster, :kv, [], shard),
+          %{decoded: {:ok, %{kind: :partition, partition: partition}}} <- page.rows,
+          do: partition
+
+    assert Enum.sort(listed) == ["p", "q"]
+  end
+
+  test "files without a partition lists only Files partitions" do
+    start_supervised!({Files, store: :memory, inline_max_bytes: 4, inline_limit: 8})
+    assert {:ok, _} = KV.put("plain", "k", "v")
+    for partition <- ["p", "q"], do: assert({:ok, _} = Files.put({partition, "f"}, "ab"))
+    large = Config.partition(Config.get(), :intent, "large")
+    # Partition discovery must work even when a value exceeds the 512 KiB preview limit.
+    assert {:ok, _} = KV.put(large, "k", String.duplicate("v", 600 * 1024))
+
+    expected =
+      Enum.sort([
+        large | for(suffix <- ["p", "q"], do: Config.partition(Config.get(), :record, suffix))
+      ])
+
+    listed =
+      for shard <- [0, 1],
+          {:ok, page} = query(KV.Cluster, :files, [], shard),
+          row <- page.rows do
+        assert %{decoded: {:ok, %{kind: :files_partition, partition: partition}}} = row
+        partition
+      end
+
+    assert Enum.sort(listed) == expected
+
+    paged =
+      for shard <- [0, 1], row <- partition_pages(shard, nil), do: elem(row.decoded, 1).partition
+
+    assert Enum.sort(paged) == expected
+  end
+
+  defp partition_pages(shard, cursor) do
+    opts = if cursor, do: [limit: 1, cursor: cursor], else: [limit: 1]
+    assert {:ok, page} = query(KV.Cluster, :files, opts, shard)
+    if page.cursor, do: page.rows ++ partition_pages(shard, page.cursor), else: page.rows
+  end
+
   test "current log control, snapshot index and interrupted snapshots stay distinguishable" do
     base = "/inspect/log"
     assert {:ok, offset} = SnapshotLog.append(base, "entry")
@@ -102,6 +221,48 @@ defmodule Slap.InspectViewsTest do
     assert {:ok, refreshed} = query(Streams.Cluster, :log, base: base)
     assert refreshed.log.current.offset == offset
     assert [%{selection: :current}, %{selection: :not_selected}] = refreshed.log.stored_snapshots
+  end
+
+  test "a log lookup on the wrong shard reports log_not_found" do
+    base = "/inspect/placed-log"
+    assert {:ok, _offset} = SnapshotLog.append(base, "entry")
+    assert {:ok, %{shard: shard}} = query(Streams.Cluster, :log, base: base)
+    other = 1 - shard
+
+    for view <- [:log, :yjs] do
+      assert {:error, {:log_not_found, ^other}} =
+               query(Streams.Cluster, view, [base: base], other)
+    end
+
+    assert {:error, {:log_not_found, _shard}} =
+             query(Streams.Cluster, :log, base: "/inspect/absent-log")
+  end
+
+  test "log and yjs without a base list snapshot logs and Yjs documents by shard" do
+    assert {:ok, _offset} = SnapshotLog.append("/inspect/listed-log", "entry")
+    doc = Yex.Doc.new()
+    :ok = Yex.Text.insert(Yex.Doc.get_text(doc, "text"), 0, "x")
+
+    assert {:ok, _} =
+             Store.append(
+               {"svc", "doc1"},
+               Frame.frames([Yex.encode_state_as_update!(doc)])
+             )
+
+    yjs_base = Store.base({"svc", "doc1"})
+
+    listed = fn view ->
+      for shard <- [0, 1],
+          {:ok, page} = query(Streams.Cluster, view, [], shard),
+          %{decoded: {:ok, decoded}} <- page.rows,
+          do: decoded
+    end
+
+    logs = listed.(:log)
+    assert %{kind: :log, base: "/inspect/listed-log"} in logs
+    assert %{kind: :log, base: yjs_base} in logs
+
+    assert listed.(:yjs) == [%{kind: :yjs_document, base: yjs_base, service: "svc", name: "doc1"}]
   end
 
   test "log component reads keep the catalog's byte limits and stay within their bounds" do

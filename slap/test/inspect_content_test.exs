@@ -34,6 +34,27 @@ defmodule Slap.InspectContentTest do
     assert size > 0
   end
 
+  test "log content returns the current snapshot and later entries without Yjs" do
+    base = "/content/plain"
+    assert {:ok, first} = SnapshotLog.append(base, ~s({"n":1}))
+    assert :ok = SnapshotLog.snapshot(base, first, ~s({"sum":1}))
+    assert {:ok, _} = SnapshotLog.append(base, ~s({"n":2}))
+    assert {:ok, tail} = SnapshotLog.append(base, ~s({"n":3}))
+    assert {:ok, page} = log_content(base)
+
+    assert [
+             %{decoded: {:ok, %{kind: :snapshot}}, value: ~s({"sum":1})},
+             %{decoded: {:ok, %{kind: :entry}}, value: ~s({"n":2})},
+             %{decoded: {:ok, %{kind: :entry}}, value: ~s({"n":3})}
+           ] = page.rows
+
+    assert page.coverage == %{from: first, until: tail, snapshot_offset: first, exact: false}
+
+    assert {:error, {:history_unavailable, ^first}} = log_content(base, at_offset: tail)
+    assert {:ok, %{encoded_bytes: size}} = log_content(base, preflight: true)
+    assert size > 0
+  end
+
   test "reconstruction agrees with a document server on reordered stored updates" do
     start_supervised!(Docs)
     doc_id = {"inspect", "reordered"}
@@ -224,6 +245,15 @@ defmodule Slap.InspectContentTest do
       shard: nil,
       budget: budget,
       opts: Keyword.merge([base: base, roots: [{"text", :text}]], opts)
+    })
+  end
+
+  defp log_content(base, opts \\ []) do
+    Query.execute(%{entry: node(), cluster: Streams.Cluster}, %{
+      view: :log_content,
+      shard: nil,
+      budget: 10_000,
+      opts: Keyword.put(opts, :base, base)
     })
   end
 
