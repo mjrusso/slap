@@ -19,7 +19,7 @@ defmodule Slap.Inspect.ViewContentTest do
     reply(session, worker, {:ok, capture})
     Test.input(session, "y")
     editing = Test.render!(session)
-    assert editing =~ "Filter command: y_"
+    assert editing =~ "Command: y_"
     refute editing =~ "1024 wire bytes"
     Test.input(session, "Escape")
     screen = Test.render!(session)

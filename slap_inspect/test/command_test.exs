@@ -31,6 +31,35 @@ defmodule Slap.Inspect.CommandTest do
     end
   end
 
+  test "Tab completes unquoted, unescaped words at the cursor" do
+    complete = fn text, left ->
+      editor =
+        Enum.reduce(
+          List.duplicate("ArrowLeft", left),
+          Editor.new(text, []),
+          &Editor.input(&2, &1)
+        )
+
+      editor = Editor.input(editor, "Tab")
+      {left, right} = String.split_at(editor.text, editor.cursor)
+      left <> "|" <> right
+    end
+
+    assert complete.("retention", 5) == "retention |"
+    assert complete.("kv --par x", 2) == "kv --partition |x"
+    assert complete.("logical --limit 1", 15) == "log| --limit 1"
+    assert complete.("界 --pr", 0) == "界 --prefix |"
+
+    for text <- [
+          ~S(scan --prefix "a --li),
+          ~S(scan --prefix '--li'),
+          ~S(scan \xZZ --li),
+          ~S(scan --\x6Ci)
+        ] do
+      assert complete.(text, 0) == text <> "|"
+    end
+  end
+
   test "editing combining marks keeps the cursor on grapheme boundaries" do
     editor = Editor.new("", [])
     editor = Enum.reduce(["e", "́", "界"], editor, &Editor.input(&2, &1))
@@ -39,6 +68,6 @@ defmodule Slap.Inspect.CommandTest do
     editor = Editor.input(editor, "Delete")
     assert Editor.line(editor, 80) =~ ~S(e\u{301}_)
     editor = Editor.input(editor, "Backspace")
-    assert Editor.line(editor, 80) == "Filter command: _"
+    assert Editor.line(editor, 80) == "Command: _"
   end
 end

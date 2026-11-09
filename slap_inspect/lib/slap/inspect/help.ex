@@ -5,7 +5,7 @@ defmodule Slap.Inspect.Help do
   def lines(%{editor: %Editor{}}, _row),
     do: [
       "←→ Move · Home/End · Backspace/Delete · ↑↓ History",
-      "Enter Submit · Esc Cancel · Ctrl-U Clear"
+      "Enter Submit · Tab Complete · Esc Cancel · Ctrl-U Clear"
     ]
 
   def lines(%{overlay: %{body: {:shards, _, _}}}, _row),
@@ -93,7 +93,7 @@ defmodule Slap.Inspect.Help do
         "m loads the next byte range; M returns to the previous range.",
         "n/p next/previous record page; Esc/b back to list or previous query.",
         "/ edits the current query; only Enter submits; Esc cancels.",
-        "Editor: ←→, Home/End, Backspace/Delete, ↑↓ history, Ctrl-U clear.",
+        "Editor: ←→, Home/End, Backspace/Delete, ↑↓ history, Tab completes, Ctrl-U clear.",
         "1-9 open the views listed by cluster in the navigation pane;",
         "each cluster keeps its own query, selection and history.",
         menu(assigns.menu),

@@ -153,7 +153,7 @@ defmodule Slap.Inspect.View.Dialogs do
     else
       {:error, reason} ->
         {:noreply,
-         assign(term, status: "Filter error: " <> Feedback.error(reason), diagnostic: reason)}
+         assign(term, status: "Command error: " <> Feedback.error(reason), diagnostic: reason)}
     end
   end
 

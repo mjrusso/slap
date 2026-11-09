@@ -1,6 +1,8 @@
 defmodule Slap.Inspect.Feedback do
   @moduledoc false
 
+  alias Slap.Inspect.CLI
+
   def error({:invalid_option, key, 0, nil}), do: option(key) <> " must be zero or greater"
   def error({:invalid_option, key, 1, nil}), do: option(key) <> " must be greater than zero"
 
@@ -17,7 +19,14 @@ defmodule Slap.Inspect.Feedback do
   def error({:invalid_hex, key}), do: option(key) <> " needs complete hexadecimal byte pairs"
 
   def error({:invalid_query_options, options}),
-    do: "Unsupported query options: " <> Enum.join(options, ", ")
+    do:
+      "Unsupported query options: " <>
+        Enum.map_join(options, ", ", &suggest(&1, CLI.query_options()))
+
+  def error({:unsupported_options, command, options}),
+    do:
+      "#{command} does not take " <>
+        Enum.map_join(options, ", ", &suggest(&1, CLI.query_options(command)))
 
   def error({:unsupported_api, version}),
     do:
@@ -38,6 +47,14 @@ defmodule Slap.Inspect.Feedback do
   def error(reason) when is_binary(reason), do: reason
   def error(reason) when is_atom(reason), do: "Error: #{reason}. Press e for diagnostics."
   def error(_reason), do: "Read failed. Press e for diagnostics; r to retry."
+
+  defp suggest(option, options) do
+    known = Enum.max_by(options, &String.jaro_distance(&1, option))
+
+    if String.jaro_distance(known, option) >= 0.9,
+      do: "#{option} (did you mean #{known}?)",
+      else: option
+  end
 
   def option(key), do: "--" <> String.replace(Atom.to_string(key), "_", "-")
 end

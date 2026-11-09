@@ -99,7 +99,7 @@ defmodule Slap.Inspect.ViewClustersTest do
     Test.input(session, "4")
     refute_receive {:read, _, _}
     screen = Test.render!(session)
-    assert screen =~ "Filter command: yjs --shard 0 --base _"
+    assert screen =~ "Command: yjs --shard 0 --base _"
     assert screen =~ "Slap Inspect · Demo.Streams · raw"
     assert screen =~ ~s(1 raw "a")
   end

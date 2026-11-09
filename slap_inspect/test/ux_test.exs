@@ -232,7 +232,7 @@ defmodule Slap.Inspect.UXTest do
       Test.input(session, key)
       screen = Test.render!(session)
       assert screen =~ status
-      assert screen =~ "Filter command: " <> command
+      assert screen =~ "Command: " <> command
       refute screen =~ "--partition users_"
       refute_receive {:read, _, _}
       Test.input(session, "Escape")
@@ -299,7 +299,7 @@ defmodule Slap.Inspect.UXTest do
     Test.input(session, "\x15")
     type(session, "draft")
     answer(session, {:ok, [0, 1]})
-    assert Test.render!(session) =~ "Filter command: draft_"
+    assert Test.render!(session) =~ "Command: draft_"
     Test.input(session, "Escape")
     assert Test.render!(session) =~ "Select shard"
     Test.input(session, "Escape")

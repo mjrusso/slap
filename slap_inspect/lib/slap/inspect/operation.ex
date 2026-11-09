@@ -174,6 +174,18 @@ defmodule Slap.Inspect.Operation do
             |> Enum.reject(fn {_operation, definition} -> Map.has_key?(definition, :flags) end)
             |> Map.new(fn {_operation, definition} -> {definition.command, definition.view} end)
 
+  @doc "The options and flags of the operations that `command` names."
+  def command_options(command) do
+    @definitions
+    |> Map.values()
+    |> Enum.filter(&(&1.command == command))
+    |> Enum.flat_map(&(&1.options ++ Map.get(&1, :flags, [])))
+    |> Enum.uniq()
+  end
+
+  @doc "The query command names."
+  def commands, do: Map.keys(@commands)
+
   def command([]), do: {:ok, :raw}
 
   def command([name]) do

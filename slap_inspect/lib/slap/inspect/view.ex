@@ -46,6 +46,9 @@ defmodule Slap.Inspect.View do
        ),
        do: Dialogs.edit("\x15", term)
 
+  defp event("pane", :switch_pane, %{assigns: %{mode: {:editor, _, _}}} = term),
+    do: Dialogs.edit("Tab", term)
+
   defp event("pane", :switch_pane, %{assigns: %{rows: []}} = term), do: {:noreply, term}
 
   defp event("pane", :switch_pane, %{assigns: %{mode: :browse}} = term) do

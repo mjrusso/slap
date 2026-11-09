@@ -34,7 +34,8 @@ defmodule Slap.Inspect.CLI do
   retention, kv, files, object, log, yjs. Use --shard N for raw scans or sid
   lookups, --path PATH for a stream, --base PATH for a log, --partition NAME
   for KV, and --sid N for messages or retention. --placement-key overrides stream
-  routing. --prefix, --key, --key-prefix and --cursor take hexadecimal pairs.
+  routing. A command rejects options it does not use.
+  --prefix, --key, --key-prefix and --cursor take hexadecimal pairs.
   Use --offset N --length N for a value or object byte range.
 
   A listing is read one page at a time. A page that has more includes a
@@ -207,6 +208,22 @@ defmodule Slap.Inspect.CLI do
     end
   end
 
+  @doc "The options a query accepts, as they are written."
+  def query_options,
+    do:
+      for({key, _type} <- Keyword.drop(@switches, @connection_options), do: Feedback.option(key))
+
+  # Read options that other switches set, or that no switch sets.
+  @from_switches %{roots: [:root], value_range: [:offset, :length], preflight: [], retained: []}
+
+  @doc "The options that `command` accepts, as they are written."
+  def query_options(command) do
+    (Operation.command_options(command) ++ Request.page_options() ++ [:shard, :budget])
+    |> Enum.flat_map(&Map.get(@from_switches, &1, [&1]))
+    |> Enum.uniq()
+    |> Enum.map(&Feedback.option/1)
+  end
+
   def parse_query(args) do
     case OptionParser.parse(args, strict: Keyword.drop(@switches, @connection_options)) do
       {opts, commands, []} ->
@@ -219,9 +236,24 @@ defmodule Slap.Inspect.CLI do
 
   defp query(opts, commands) do
     with {:ok, view} <- Operation.command(commands),
+         :ok <- accepted(opts, List.first(commands, "scan")),
          {:ok, read_opts} <- read_opts(opts, view),
          do:
            Request.new(%{view: view, shard: opts[:shard], budget: opts[:budget], opts: read_opts})
+  end
+
+  # Without this check, a read would ignore an option its command does not use.
+  defp accepted(opts, command) do
+    accepted = query_options(command)
+
+    case for {key, _value} <- Keyword.drop(opts, @connection_options),
+             option = Feedback.option(key),
+             option not in accepted,
+             uniq: true,
+             do: option do
+      [] -> :ok
+      unsupported -> {:error, {:unsupported_options, command, unsupported}}
+    end
   end
 
   defp required(opts, key) do

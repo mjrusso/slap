@@ -3,7 +3,18 @@ defmodule Slap.Inspect.CLITest do
 
   import ExUnit.CaptureIO
 
-  alias Slap.Inspect.{Bytes, CLI, Clusters, Command, JSON, Query, Remote, Request}
+  alias Slap.Inspect.{
+    Bytes,
+    CLI,
+    Clusters,
+    Command,
+    Feedback,
+    JSON,
+    Operation,
+    Query,
+    Remote,
+    Request
+  }
 
   @connection [
     "--node",
@@ -127,6 +138,26 @@ defmodule Slap.Inspect.CLITest do
 
     assert {:ok, _, _, _, _} =
              CLI.parse(@connection ++ ["get", "--key", "61", "--offset", "0", "--length", "0"])
+  end
+
+  test "command option lists contain only query options" do
+    for command <- Operation.commands() do
+      assert CLI.query_options(command) -- CLI.query_options() == []
+    end
+  end
+
+  test "a command rejects options that only other commands use" do
+    assert {:error, {:unsupported_options, "kv", ["--path"]}} =
+             CLI.parse_query(["kv", "--path", "/x", "--partition", "p"])
+
+    assert {:error, {:unsupported_options, "scan", ["--root"]}} =
+             CLI.parse_query(["--root", "text:a"])
+
+    assert {:error, reason} = CLI.parse_query(["streams", "--content"])
+    assert Feedback.error(reason) == "streams does not take --content"
+
+    assert {:ok, _, _, %{view: :kv}, _} =
+             CLI.parse(@connection ++ ["--json", "kv", "--partition", "p", "--limit", "5"])
   end
 
   test "programmatic queries reject missing arguments before connecting" do

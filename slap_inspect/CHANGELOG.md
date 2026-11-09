@@ -6,6 +6,9 @@
   and other stored binaries as `{"$bytes": "<hex>"}`. Previously, these were
   hexadecimal strings. Page cursors remain hexadecimal. See
   [Commands](README.md#commands) for map key encoding.
+- Rejects options that a command does not use, and suggests the closest
+  option for a typo. The command editor completes command names and
+  options with Tab.
 
 ## 0.1.0
 

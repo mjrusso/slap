@@ -176,6 +176,9 @@ slap-inspect --node my_app@my-host --json kv --partition users
 | `yjs --base PATH` | The selected snapshot, and the number and size of update frames. |
 | `yjs --content --base PATH --root text:body` | Yjs content with `body` read as text. |
 
+A command rejects options that it does not use, such as `--path` for `kv`,
+instead of reading without them.
+
 A listing reads one shard: the first, unless `--shard N`, or `s` in the
 terminal, selects another. An empty listing therefore does not mean the
 cluster is empty. Commands that take `--path` or `--partition` find the shard
@@ -304,7 +307,9 @@ If a refresh fails, the previous results stay on screen, labelled
 `Last good data`.
 
 The command editor accepts query options; connection, output and refresh
-options are set at startup. Outside single quotes, a backslash escapes the
+options are set at startup. Tab completes the command name or a
+query option, and lists the matches when several remain. An unsupported option is reported with the
+closest query option, as in `--partiton (did you mean --partition?)`. Outside single quotes, a backslash escapes the
 next character: `\n`, `\r`, `\t`, `\b`, `\f`, two-digit `\xHH` and four-digit
 `\uXXXX` are recognized, and any other escaped character stands for itself.
 The editor shows binary paths with byte escapes, so submitting the displayed

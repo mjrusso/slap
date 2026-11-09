@@ -1,51 +1,83 @@
 defmodule Slap.Inspect.Command do
   @moduledoc false
 
-  def split(text), do: split(text, nil, false, "", [])
-
-  defp split(<<>>, nil, started, word, words),
-    do: {:ok, Enum.reverse(if(started, do: [word | words], else: words))}
-
-  defp split(<<>>, _quote, _started, _word, _words),
-    do: {:error, "Unterminated quote; close it and submit again"}
-
-  defp split(<<"\\x", bytes::binary>>, quote, _started, word, words) when quote != ?' do
-    with <<hex::binary-size(2), rest::binary>> <- bytes,
-         {:ok, byte} <- Base.decode16(hex, case: :mixed) do
-      split(rest, quote, true, word <> byte, words)
-    else
-      _ -> {:error, "Invalid byte escape; use two hexadecimal digits"}
+  def split(text) do
+    case words(text) do
+      {:ok, words} -> {:ok, Enum.map(words, & &1.value)}
+      {:error, message, _words, _at} -> {:error, message}
     end
   end
 
-  defp split(<<"\\u", hex::binary-size(4), rest::binary>>, quote, _started, word, words)
+  @doc """
+  Tokenizes `text` into maps with `value`, `start`, `stop` and `plain` fields.
+  `start` and `stop` are byte offsets; `plain` marks words without quotes or
+  escapes.
+
+  Returns `{:ok, words}` or `{:error, message, words, at}`. On error, `words`
+  contains the completed tokens and `at` is the start of the invalid token.
+  """
+  def words(text), do: scan(text, 0, nil, nil, [])
+
+  defp scan(<<>>, pos, nil, word, words), do: {:ok, Enum.reverse(close(word, pos, words))}
+
+  defp scan(<<>>, _pos, _quote, word, words),
+    do: error("Unterminated quote; close it and submit again", word, words)
+
+  defp scan(<<"\\x", bytes::binary>>, pos, quote, word, words) when quote != ?' do
+    with <<hex::binary-size(2), rest::binary>> <- bytes,
+         {:ok, byte} <- Base.decode16(hex, case: :mixed) do
+      scan(rest, pos + 4, quote, escape(word, pos, byte), words)
+    else
+      _ -> error("Invalid byte escape; use two hexadecimal digits", open(word, pos), words)
+    end
+  end
+
+  defp scan(<<"\\u", hex::binary-size(4), rest::binary>>, pos, quote, word, words)
        when quote != ?' do
     case Base.decode16(hex, case: :mixed) do
       {:ok, <<codepoint::16>>} when codepoint not in 0xD800..0xDFFF ->
-        split(rest, quote, true, word <> <<codepoint::utf8>>, words)
+        scan(rest, pos + 6, quote, escape(word, pos, <<codepoint::utf8>>), words)
 
       _ ->
-        {:error, "Invalid Unicode escape; use four hexadecimal digits"}
+        error("Invalid Unicode escape; use four hexadecimal digits", open(word, pos), words)
     end
   end
 
-  defp split(<<"\\", char::utf8, rest::binary>>, quote, _started, word, words) when quote != ?',
-    do: split(rest, quote, true, word <> escaped(char), words)
+  defp scan(<<"\\", char::utf8, rest::binary>>, pos, quote, word, words) when quote != ?' do
+    size = byte_size(<<char::utf8>>)
+    scan(rest, pos + 1 + size, quote, escape(word, pos, escaped(char)), words)
+  end
 
-  defp split("\\", quote, _started, _word, _words) when quote != ?',
-    do: {:error, "Trailing backslash; escape it or finish the command"}
+  defp scan("\\", pos, quote, word, words) when quote != ?',
+    do: error("Trailing backslash; escape it or finish the command", open(word, pos), words)
 
-  defp split(<<char, rest::binary>>, nil, _started, word, words) when char in [?', ?"],
-    do: split(rest, char, true, word, words)
+  defp scan(<<char, rest::binary>>, pos, nil, word, words) when char in [?', ?"],
+    do: scan(rest, pos + 1, char, escape(word, pos, ""), words)
 
-  defp split(<<char, rest::binary>>, char, _started, word, words) when char in [?', ?"],
-    do: split(rest, nil, true, word, words)
+  defp scan(<<char, rest::binary>>, pos, char, word, words) when char in [?', ?"],
+    do: scan(rest, pos + 1, nil, word, words)
 
-  defp split(<<char, rest::binary>>, nil, started, word, words) when char in [32, 9, 10, 13],
-    do: split(rest, nil, false, "", if(started, do: [word | words], else: words))
+  defp scan(<<char, rest::binary>>, pos, nil, word, words) when char in [32, 9, 10, 13],
+    do: scan(rest, pos + 1, nil, nil, close(word, pos, words))
 
-  defp split(<<char::utf8, rest::binary>>, quote, _started, word, words),
-    do: split(rest, quote, true, word <> <<char::utf8>>, words)
+  defp scan(<<char::utf8, rest::binary>>, pos, quote, word, words) do
+    word = open(word, pos)
+    character = <<char::utf8>>
+    scan(rest, pos + byte_size(character), quote, %{word | value: word.value <> character}, words)
+  end
+
+  defp open(nil, pos), do: %{value: "", start: pos, plain: true}
+  defp open(word, _pos), do: word
+
+  defp escape(word, pos, value) do
+    word = open(word, pos)
+    %{word | value: word.value <> value, plain: false}
+  end
+
+  defp close(nil, _pos, words), do: words
+  defp close(word, pos, words), do: [Map.put(word, :stop, pos) | words]
+
+  defp error(message, word, words), do: {:error, message, Enum.reverse(words), word.start}
 
   def quote(value) do
     cond do

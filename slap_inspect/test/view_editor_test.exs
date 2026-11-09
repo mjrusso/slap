@@ -19,12 +19,52 @@ defmodule Slap.Inspect.ViewEditorTest do
       Test.input(session, "Enter")
       screen = Test.render!(session)
       assert screen =~ "Unsupported query options"
-      assert screen =~ "Filter command: " <> command
+      assert screen =~ "Command: " <> command
       assert screen =~ "durable seq 4"
       refute_receive {:read, _, _}
       Test.input(session, "Escape")
       refute Test.render!(session) =~ String.replace_prefix(command, "scan ", "")
     end
+  end
+
+  test "Tab completes commands and options and lists ambiguous matches" do
+    session = start_view(size: {140, 24})
+    answer(session, {:ok, page()})
+    edit(session, "lo")
+    Test.input(session, "\t")
+    assert Test.render!(session) =~ "Command: log_"
+    Test.input(session, "\t")
+    assert Test.render!(session) =~ "Command: log_  · log logical"
+    edit(session, "ret")
+    Test.input(session, "\t")
+    assert Test.render!(session) =~ "Command: retention _"
+
+    edit(session, "kv --par")
+    Test.input(session, "\t")
+    assert Test.render!(session) =~ "Command: kv --partition _"
+
+    edit(session, "kv --p")
+    Test.input(session, "\t")
+    assert Test.render!(session) =~ "Command: kv --partition _"
+
+    edit(session, "logical --p")
+    Test.input(session, "\t")
+    assert Test.render!(session) =~ "Command: logical --p_  · --path --placement-key"
+    type(session, "a")
+    screen = Test.render!(session)
+    assert screen =~ "Command: logical --pa_"
+    refute screen =~ "--placement-key"
+    refute_receive {:read, _, _}
+  end
+
+  test "misspelled options get suggestions" do
+    session = start_view(size: {140, 24})
+    answer(session, {:ok, page()})
+    edit(session, "kv --partiton demo --zzz 1")
+    Test.input(session, "Enter")
+    screen = Test.render!(session)
+    assert screen =~ "Unsupported query options: --partiton (did you mean --partition?), --zzz"
+    refute_receive {:read, _, _}
   end
 
   test "unclosed quotes leave the command editable and preserve the current page" do
@@ -36,7 +76,7 @@ defmodule Slap.Inspect.ViewEditorTest do
       edit(session, command)
       Test.input(session, "Enter")
       screen = Test.render!(session)
-      assert screen =~ "Filter error:"
+      assert screen =~ "Command error:"
       assert screen =~ command <> "_"
       assert screen =~ "durable seq 4"
       refute_receive {:read, _, _}
@@ -53,7 +93,7 @@ defmodule Slap.Inspect.ViewEditorTest do
       answer(session, {:ok, page()})
 
       commands = [
-        "yjs --content --base /v1/stream/yjs/demo/docs/notes --root text:text",
+        "yjs --content --base /v1/stream/yjs/demo/docs/notes-with-a-long-name --root text:text",
         "yjs --content --base /" <> String.duplicate("界", 32) <> " --root text:text"
       ]
 
@@ -61,8 +101,8 @@ defmodule Slap.Inspect.ViewEditorTest do
         edit(session, command)
         screen = Test.render!(session)
         assert screen =~ "text:text_"
-        refute screen =~ "Filter command: yjs"
-        prompt = screen |> lines() |> Enum.find(&String.contains?(&1, "Filter command:"))
+        refute screen =~ "Command: yjs"
+        prompt = screen |> lines() |> Enum.find(&String.contains?(&1, "Command:"))
         assert Utils.string_length(prompt) <= elem(size, 0)
         Test.input(session, "Backspace")
         assert Test.render!(session) =~ "text:tex_"
@@ -72,7 +112,7 @@ defmodule Slap.Inspect.ViewEditorTest do
       end
 
       edit(session, "k")
-      assert Test.render!(session) =~ "Filter command: k_"
+      assert Test.render!(session) =~ "Command: k_"
     end
   end
 
@@ -87,7 +127,7 @@ defmodule Slap.Inspect.ViewEditorTest do
       Test.render!(session)
       edit(session, "yjs --base /jk")
       editing = Test.render!(session)
-      assert editing =~ "Filter command: yjs --base /jk_"
+      assert editing =~ "Command: yjs --base /jk_"
       for key <- ["ArrowDown", "ArrowRight", "PageDown"], do: Test.input(session, key)
       assert Test.render!(session) == editing
       Test.input(session, "Escape")
