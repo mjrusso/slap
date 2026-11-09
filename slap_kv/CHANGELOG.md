@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Adds a KV partition listing for `slap_inspect` that reads keys only and
+  includes the shard's ownership-confirmation row. Malformed keys appear
+  with an `:unknown_key` diagnostic.
+
 ## 0.6.0
 
 - Uses `slap_slatedb` 0.4.0, which upgrades SlateDB from 0.17 to 0.18.

@@ -71,7 +71,7 @@ defmodule Slap.KV.ModelTest do
         {:scan, p, Enum.random(@prefixes), Enum.random(1..4), Enum.random([false, true])}
 
       n when n <= 99 ->
-        {:restart_partition_writer, p}
+        Enum.random([{:restart_partition_writer, p}, {:inspect_partition, p}])
 
       _ ->
         {:restart}
@@ -160,6 +160,20 @@ defmodule Slap.KV.ModelTest do
 
   defp execute({:get, p, k, consistency}, run, _context),
     do: KV.get(run <> p, k, consistency: consistency)
+
+  defp execute({:inspect_partition, p}, run, _context) do
+    partition = run <> p
+    ctx = ctx_for(partition)
+
+    {:ok, page} =
+      KV.Introspect.list_partitions(KV.Cluster, ctx.n, 1, 5000,
+        cursor: KV.Keys.encode(partition, ""),
+        max_key_bytes: byte_size(partition) + 2,
+        limit: 1
+      )
+
+    Enum.any?(page.rows, &match?(%{decoded: {:ok, %{partition: ^partition}}}, &1))
+  end
 
   defp execute({:scan, p, prefix, limit, with_versions}, run, _context) do
     opts =
@@ -289,6 +303,10 @@ defmodule Slap.KV.ModelTest do
   end
 
   defp expect(model, {:restart_partition_writer, _}, _actual), do: {:ok, model}
+
+  defp expect(model, {:inspect_partition, p}, _actual),
+    do: {Enum.any?(model.rows, fn {{partition, _key}, _row} -> partition == p end), model}
+
   defp expect(model, {:restart}, _actual), do: {:ok, model}
 
   defp batch_condition({:put, _, _}), do: nil

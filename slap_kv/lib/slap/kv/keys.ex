@@ -57,13 +57,35 @@ defmodule Slap.KV.Keys do
     key
   end
 
-  def parse(<<0, 0>>), do: {:ok, %{kind: :confirm}}
+  def parse(key) when is_binary(key) do
+    case partition(key, byte_size(key)) do
+      {:ok, :confirm} ->
+        {:ok, %{kind: :confirm}}
 
-  def parse(<<size::16, partition::binary-size(size), key::binary>>)
-      when size > 0 and byte_size(key) > 0,
-      do: {:ok, %{kind: :row, partition: partition, key: key}}
+      {:ok, {:partition, _prefix, partition}} ->
+        {:ok, %{kind: :row, partition: partition, key: decode(partition, key)}}
+
+      error ->
+        error
+    end
+  end
 
   def parse(_key), do: {:error, :malformed_key}
+
+  @doc """
+  Identifies a partition or the ownership-confirmation row from a stored
+  key or a truncated preview. Partition keys must have a row key after the
+  partition prefix, as determined by the full key size.
+  Returns `{:ok, :confirm}`, `{:ok, {:partition, prefix, partition}}`,
+  or `{:error, :malformed_key}`.
+  """
+  def partition(<<0, 0>>, 2), do: {:ok, :confirm}
+
+  def partition(<<size::16, partition::binary-size(size), _rest::binary>> = preview, key_size)
+      when size > 0 and key_size > size + 2,
+      do: {:ok, {:partition, binary_part(preview, 0, size + 2), partition}}
+
+  def partition(_preview, _key_size), do: {:error, :malformed_key}
 
   @spec validate(term(), term()) :: :ok | {:error, {:bad_request, atom()}}
   def validate(partition, _key) when not is_binary(partition) or partition == "",
