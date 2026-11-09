@@ -20,7 +20,8 @@ defmodule Slap.Streams.Introspect.Logical do
 
   @doc "Plans a logical read of the stream on `shard` from its stored state (`Introspect.state/3`)."
   def describe(state, shard, opts) do
-    with {:ok, %{meta: stored, tail: tail, trim: trim}} <- known(state),
+    with :ok <- Cursor.validate(opts),
+         {:ok, %{meta: stored, tail: tail, trim: trim}} <- known(state),
          meta = Map.merge(Map.from_struct(stored), metadata(stored)),
          :ok <- identity(meta, opts[:expected_sid]),
          :ok <- visible(meta, opts),
@@ -49,14 +50,28 @@ defmodule Slap.Streams.Introspect.Logical do
     with {:ok, remaining} <- reference_budget(cap, opts[:reference_budget]) do
       from = max(opts[:from], cap.start)
       until = min(opts[:until], cap.offset)
+      own = Keyword.put(opts, :from, max(opts[:from], cap.offset))
 
-      if from < until do
-        source_plan(cap, opts, from, until, remaining)
-      else
-        own_plan(meta, shard, Keyword.put(opts, :from, max(opts[:from], cap.offset)))
+      cond do
+        # Prefer the fork's own range for backward pages that overlap it.
+        opts[:before] && own[:from] < ending(opts[:before], opts[:from], opts[:until]) ->
+          own_plan(meta, shard, own)
+
+        from < until ->
+          source_plan(cap, opts, from, until, remaining)
+
+        true ->
+          own_plan(meta, shard, own)
       end
     end
   end
+
+  @doc """
+  Returns the end offset of a `:before` page.
+  `:end` uses `until`.
+  """
+  def ending(:end, _from, until), do: until
+  def ending(before, from, until), do: before |> min(until) |> max(from)
 
   defp reference_budget(%{depth: depth}, nil) when is_integer(depth) and depth >= 0,
     do: {:ok, depth}

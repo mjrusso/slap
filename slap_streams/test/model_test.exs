@@ -80,6 +80,40 @@ defmodule Slap.Streams.ModelTest do
     end
   end
 
+  property "backward inspection returns the model's last messages" do
+    check all(
+            bodies <- list_of(binary(min_length: 1, max_length: 32), min_length: 2, max_length: 6),
+            limit <- integer(1..3),
+            max_runs: 10
+          ) do
+      path = "/inspect-model-#{System.unique_integer([:positive])}"
+      [first | rest] = bodies
+      commands = [{:create, path, [body: first]} | Enum.map(rest, &{:append, path, &1, []})]
+
+      model =
+        Enum.reduce(commands, Model.new(FakeClock.now_ms(), @max_fork_depth), fn command, model ->
+          {expected, model} = Model.run(model, command)
+          assert execute(command, model) == expected
+          model
+        end)
+
+      {:ok, %{sid: sid}} = Streams.metadata_fenced(path)
+
+      assert {:ok, page} =
+               Streams.Introspect.messages(Streams.Cluster, ctx_for(path).n, 1, 5000,
+                 sid: sid,
+                 before: :end,
+                 limit: limit
+               )
+
+      actual =
+        for %{decoded: {:ok, %{offset: offset}}, value: value} <- page.rows, do: {offset, value}
+
+      assert actual == Enum.take(model.streams[path].messages, -limit)
+      assert :ok = Streams.delete(path)
+    end
+  end
+
   property "an idle stream stays at its tail after a bounded wait" do
     check all(timeout <- integer(60..100), max_runs: 5) do
       path = "/idle-#{System.unique_integer([:positive])}"

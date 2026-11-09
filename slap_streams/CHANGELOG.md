@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Adds backward message paging for `slap_inspect`, bounded by `:from` and
+  `:until`. For forks, backward reads use the fork's own messages when they
+  overlap the requested range, or its source's messages otherwise.
+  Backward reads reject continuation cursors.
+
 ## 0.6.0
 
 - Uses `slap_slatedb` 0.4.0, which upgrades SlateDB from 0.17 to 0.18.

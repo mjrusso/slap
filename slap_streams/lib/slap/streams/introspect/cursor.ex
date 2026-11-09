@@ -16,8 +16,16 @@ defmodule Slap.Streams.Introspect.Cursor do
          do: {:ok, offset(suffix)}
   end
 
-  def options(opts, sid),
-    do: options(Keyword.delete(opts, :fragment_state), sid, opts[:cursor])
+  def validate(opts) do
+    if opts[:before] && opts[:cursor],
+      do: {:error, {:invalid, "before cannot be combined with a cursor"}},
+      else: :ok
+  end
+
+  def options(opts, sid) do
+    with :ok <- validate(opts),
+         do: options(Keyword.delete(opts, :fragment_state), sid, opts[:cursor])
+  end
 
   defp options(opts, _sid, nil), do: {:ok, opts}
 

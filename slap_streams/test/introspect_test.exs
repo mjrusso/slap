@@ -101,6 +101,63 @@ defmodule Slap.Streams.IntrospectTest do
              Introspect.logical(Streams.Cluster, ctx.n, 1, 5000, path: target, cursor: "invalid")
   end
 
+  test "backward pages start at a message boundary" do
+    path = "/inspection/before"
+    large = String.duplicate("x", 2 * 1024 * 1024)
+    assert {:ok, _, _} = Streams.create(path, body: "a")
+    for body <- ["b", large, "c", "d"], do: assert({:ok, _} = Streams.append(path, body))
+    ctx = ctx_for(path)
+    {:ok, %{sid: sid}} = Streams.metadata_fenced(path)
+    read = &Introspect.messages(Streams.Cluster, ctx.n, 1, 5000, Keyword.put(&1, :sid, sid))
+
+    bodies = fn page ->
+      for %{part: 0} = row <- Enum.map(page.rows, &decoded/1), do: row.offset
+    end
+
+    assert {:ok, %{cursor: nil, before: tail} = last} = read.(before: :end, limit: 2)
+    assert [c, d] = bodies.(last)
+    assert tail == d + 5
+
+    # The preceding page starts at the large message's first part. The message
+    # exceeds the byte target, so the page ends mid-message and returns a
+    # continuation cursor.
+    assert {:ok, %{cursor: cursor, before: ^c} = large_page} = read.(before: c)
+    assert [%{value: "x" <> _, decoded: {:ok, %{part: 0}}} | _] = large_page.rows
+    assert is_binary(cursor)
+
+    assert {:ok, %{rows: [%{value: "a"}, %{value: "b"}], cursor: cursor}} =
+             read.(before: hd(bodies.(large_page)))
+
+    assert {:ok, %{rows: [%{value: "x" <> _} | _]}} = read.(cursor: cursor)
+
+    assert {:ok, %{rows: [%{value: "a"}], before: 5}} = read.(before: 5)
+    assert {:ok, %{rows: [], before: 0}} = read.(before: 0)
+    assert {:ok, %{rows: [%{value: "c"}, %{value: "d"}]}} = read.(before: :end, from: c)
+    assert {:error, {:invalid, _}} = read.(before: -1)
+
+    # The page's key limit does not cut the keys that find its start.
+    assert {:ok, %{before: ^tail}} = read.(before: :end, limit: 2, max_key_bytes: 8)
+  end
+
+  test "backward logical reads use fork messages when they overlap the requested range" do
+    source = "/inspection/before-source"
+    target = "/inspection/before-target"
+    assert {:ok, _, _} = Streams.create(source, body: "inherited")
+    assert {:ok, _, _} = Streams.create(target, forked_from: source)
+    ctx = ctx_for(target)
+    logical = &Introspect.logical(Streams.Cluster, ctx.n, 1, 5000, [path: target] ++ &1)
+
+    assert {:ok, %{logical: %{read_plan: %{kind: :source, opts: opts}}}} = logical.(before: :end)
+    assert opts[:before] == :end
+
+    assert {:ok, _} = Streams.append(target, "own")
+    assert {:ok, %{logical: %{read_plan: %{kind: :messages}}}} = logical.(before: :end)
+
+    # "inherited" is the source's 13 bytes: its tail is the fork offset.
+    assert {:ok, %{logical: %{read_plan: %{kind: :source}, reference: %{offset: 13}}}} =
+             logical.(before: 13)
+  end
+
   test "message fragments carry validation and accounting across pagination" do
     path = "/inspection/fragments"
     body = String.duplicate("x", 512 * 1024) <> "tail"
@@ -138,6 +195,34 @@ defmodule Slap.Streams.IntrospectTest do
 
     for page <- [first, middle, last],
         do: assert(:erlang.external_size(page) <= page.hard_max_bytes)
+  end
+
+  test "backward reads reject continuation cursors before interpreting fragment state" do
+    path = "/inspection/backward-cursor"
+    assert {:ok, _, _} = Streams.create(path, body: String.duplicate("x", 512 * 1024 + 1))
+    assert {:ok, _} = Streams.append(path, "last")
+    ctx = ctx_for(path)
+    {:ok, %{sid: sid}} = Streams.metadata_fenced(path)
+
+    assert {:ok, first} = Introspect.messages(Streams.Cluster, ctx.n, 1, 5000, sid: sid, limit: 1)
+    assert [%{status: :more}] = first.fragments
+
+    for cursor <- [first.cursor, Keys.msg(sid, 0, 0)] do
+      assert {:error, {:invalid, "before cannot be combined with a cursor"}} =
+               Introspect.messages(Streams.Cluster, ctx.n, 1, 5000,
+                 sid: sid,
+                 before: :end,
+                 limit: 1,
+                 cursor: cursor
+               )
+    end
+
+    assert {:error, {:invalid, "before cannot be combined with a cursor"}} =
+             Introspect.logical(Streams.Cluster, ctx.n, 1, 5000,
+               path: path,
+               before: :end,
+               cursor: first.cursor
+             )
   end
 
   test "a missing part between pages invalidates the final fragment" do
@@ -237,6 +322,16 @@ defmodule Slap.Streams.IntrospectTest do
 
     assert {:ok, %{rows: [%{value: "second"}], cursor: nil}} =
              Introspect.messages(Streams.Cluster, ctx.n, 1, 5000, sid: sid, cursor: cursor)
+
+    {:ok, %{next_offset: tail}} = Streams.metadata_fenced(path)
+    last = Keys.msg(sid, 9, 0) <> <<0>>
+    assert {:ok, _} = SlateDB.put(ctx.db, last, "bad", await_durable: true)
+    read = &Introspect.messages(Streams.Cluster, ctx.n, 1, 5000, [sid: sid, before: :end] ++ &1)
+
+    assert {:ok, %{rows: [%{key: ^last, decoded: {:error, _}}], before: ^tail}} =
+             read.(limit: 1)
+
+    assert {:ok, %{rows: [%{value: "second"}, %{key: ^last}]}} = read.(limit: 2)
   end
 
   test "malformed, legacy and compressed records retain bytes and diagnostics" do
@@ -336,4 +431,6 @@ defmodule Slap.Streams.IntrospectTest do
       assert ^error = Introspect.logical(Streams.Cluster, ctx.n, 1, 5000, path: path)
     end
   end
+
+  defp decoded(%{decoded: {:ok, decoded}}), do: decoded
 end

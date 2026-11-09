@@ -27,6 +27,14 @@ defmodule Slap.Streams.Introspect do
   @doc "The scan prefix of the metadata rows of streams whose path starts with `prefix`."
   def path_prefix(prefix), do: Keys.meta(prefix)
 
+  @doc "Returns `{:ok, path}` for a stream's metadata key, or `:error`."
+  def path(key) do
+    case Keys.parse(key) do
+      {:ok, %{kind: :meta, path: path}} -> {:ok, path}
+      _other -> :error
+    end
+  end
+
   def list(cluster, shard, version, budget, opts),
     do: scan(cluster, shard, version, budget, Keyword.put_new(opts, :prefix, Keys.prefix(:meta)))
 
@@ -183,9 +191,10 @@ defmodule Slap.Streams.Introspect do
          {:ok, tail} <- row(ctx, values.tail, opts),
          {:ok, trim} <- row(ctx, values.trim, opts),
          {:ok, deleted} <- row(ctx, values.deletion, opts),
+         {:ok, opts, ending} <- ending(ctx, deadline, sid, opts, offsets.tail),
          {:ok, page} <-
            Read.page(ctx, deadline, page_opts(sid, opts, offsets.tail), &decode/2) do
-      page = message_page(sid, opts, offsets.tail, page)
+      page = sid |> message_page(opts, offsets.tail, page) |> continue(sid, ending)
 
       {:ok,
        Map.merge(page, %{
@@ -200,6 +209,68 @@ defmodule Slap.Streams.Introspect do
        })}
     end
   end
+
+  # `:before` bounds the page by an offset, or the tail for `:end`.
+  # The reverse scan finds a page of trailing rows; start/2 aligns the start
+  # to a message boundary, which can precede those rows for a large message.
+  defp ending(ctx, deadline, sid, opts, tail) do
+    case Keyword.pop(opts, :before) do
+      {nil, opts} ->
+        {:ok, opts, nil}
+
+      {_before, _opts} when is_nil(tail) ->
+        {:error, :tail_unavailable}
+
+      {before, opts} when before == :end or (is_integer(before) and before >= 0) ->
+        bound = end_offset(tail, opts)
+        from = Keyword.get(opts, :from, 0)
+        stop = Logical.ending(before, from, bound)
+        # Omit :max_key_bytes so the reverse scan counts full-sized message
+        # keys. It must not select more rows than a forward page can hold;
+        # start/2 also needs the keys to find a message boundary.
+        limits = Keyword.take(opts, [:limit, :target_bytes, :max_value_bytes])
+
+        with {:ok, last} <-
+               Read.last(ctx, deadline, limits ++ Keys.msg_range(sid, from, stop), &decode/2) do
+          opts = Keyword.merge(opts, [until: stop] ++ start(last, from))
+          {:ok, opts, %{stop: stop, bound: bound}}
+        end
+
+      {_before, _opts} ->
+        {:error, {:invalid, "before must be a nonnegative offset or :end"}}
+    end
+  end
+
+  defp start(%{stopped: :end}, from), do: [from: from]
+
+  # A message whose first part is not among the rows starts before them. A
+  # row whose key is not a message key starts the page at that key, so the
+  # page shows its diagnostic.
+  defp start(%{rows: rows}, _from) do
+    rows
+    |> Enum.map(&{&1.key, message_key(&1.key)})
+    |> Enum.chunk_by(fn {key, parsed} -> if parsed, do: parsed.offset, else: key end)
+    |> first_whole()
+  end
+
+  defp first_whole([[{key, nil} | _] | _rest]), do: [cursor: key, cursor_exclusive: false]
+  defp first_whole([[{_key, %{part: 0, offset: offset}} | _] | _rest]), do: [from: offset]
+  defp first_whole([[{_key, %{offset: offset}} | _]]), do: [from: offset]
+  defp first_whole([_partial | rest]), do: first_whole(rest)
+
+  defp message_key(key) do
+    case Keys.parse(key) do
+      {:ok, %{kind: :message} = parsed} -> parsed
+      _malformed -> nil
+    end
+  end
+
+  defp continue(page, _sid, nil), do: page
+
+  defp continue(%{cursor: nil} = page, sid, %{stop: stop, bound: bound}) when stop < bound,
+    do: Map.merge(page, %{cursor: Keys.msg(sid, stop, 0), cursor_exclusive: false, before: stop})
+
+  defp continue(page, _sid, %{stop: stop}), do: Map.put(page, :before, stop)
 
   # A capture can end inside a message, so the physical boundary of the
   # page's last message is the next message key, found past `until`.
