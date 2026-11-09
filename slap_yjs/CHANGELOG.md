@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Inspection infers map and text roots when no type is requested and marks
+  them `"inferred": true`.
+- Inspection reports root type mismatches when the contents rule out the
+  requested type. An empty text or XML result is ambiguous when the root
+  contains nonempty sequence content: an array, XML or text containing only
+  embeds. Results use `"status": "wrong_type"` or `"status": "ambiguous"`;
+  `"holds"` describes the detected content as `map`, `text` or `sequence`.
+
 ## 0.6.1
 
 - Fixes installation in Livebook Desktop by checking the loaded Kernel

@@ -35,7 +35,11 @@ defmodule Slap.Yjs.IntrospectTest do
     update = Yex.encode_state_as_update!(doc)
     input = %{snapshot: nil, updates: [Frame.frame(update)], roots: []}
     assert {:ok, %{content: {:json, json}}} = reconstruct(input)
-    assert Enum.all?(JSON.decode!(json)["roots"], &(&1["type"] == "untyped"))
+
+    assert Enum.all?(
+             JSON.decode!(json)["roots"],
+             &(&1["inferred"] == true or &1["type"] == "untyped")
+           )
 
     roots = [
       {"map", :map},
@@ -99,6 +103,56 @@ defmodule Slap.Yjs.IntrospectTest do
              )
   end
 
+  test "inspection infers map and text roots when no type is requested" do
+    doc = Yex.Doc.new()
+    :ok = Yex.Map.set(Yex.Doc.get_map(doc, "map"), "key", "value")
+    :ok = Yex.Text.insert(Yex.Doc.get_text(doc, "text"), 0, "hello")
+    :ok = Yex.Array.push(Yex.Doc.get_array(doc, "array"), 1)
+    :ok = Yex.XmlFragment.push(Yex.Doc.get_xml_fragment(doc, "xml"), Yex.XmlTextPrelim.from("x"))
+    empty = Yex.Doc.get_text(doc, "empty")
+    :ok = Yex.Text.insert(empty, 0, "gone")
+    :ok = Yex.Text.delete(empty, 0, 4)
+
+    input = %{snapshot: Yex.encode_state_as_update!(doc), updates: [], roots: []}
+    assert {:ok, %{content: {:json, json}}} = reconstruct(input)
+
+    assert JSON.decode!(json)["roots"] == [
+             %{
+               "name" => "array",
+               "type" => "untyped",
+               "status" => "uninterpreted",
+               "holds" => "sequence"
+             },
+             %{"name" => "empty", "type" => "untyped", "status" => "uninterpreted"},
+             %{
+               "name" => "map",
+               "interpretation" => "map",
+               "value" => %{"key" => "value"},
+               "inferred" => true
+             },
+             %{
+               "name" => "text",
+               "interpretation" => "text",
+               "value" => "hello",
+               "inferred" => true
+             },
+             %{
+               "name" => "xml",
+               "type" => "untyped",
+               "status" => "uninterpreted",
+               "holds" => "sequence"
+             }
+           ]
+  end
+
+  test "infers every nonempty map root when no types are requested" do
+    doc = Yex.Doc.new()
+    for n <- 1..60, do: :ok = Yex.Map.set(Yex.Doc.get_map(doc, "map#{n}"), "key", n)
+    input = %{snapshot: Yex.encode_state_as_update!(doc), updates: [], roots: []}
+    assert {:ok, %{content: {:json, json}}} = reconstruct(input)
+    assert Enum.all?(JSON.decode!(json)["roots"], &(&1["inferred"] == true))
+  end
+
   test "input limits include each entry header and the snapshot header" do
     doc = Yex.Doc.new()
     :ok = Yex.Text.insert(Yex.Doc.get_text(doc, "body"), 0, "stored")
@@ -115,22 +169,43 @@ defmodule Slap.Yjs.IntrospectTest do
     assert limit == wire_bytes - 1
   end
 
-  test "a replayed map root can be projected as text without a type error" do
+  test "inspection distinguishes root type mismatches from ambiguous sequences" do
     doc = Yex.Doc.new()
     :ok = Yex.Map.set(Yex.Doc.get_map(doc, "map"), "key", "value")
     :ok = Yex.Text.insert(Yex.Doc.get_text(doc, "text"), 0, "hello")
+    :ok = Yex.Array.push(Yex.Doc.get_array(doc, "array"), 1)
+    empty = Yex.Doc.get_text(doc, "empty")
+    :ok = Yex.Text.insert(empty, 0, "gone")
+    :ok = Yex.Text.delete(empty, 0, 4)
 
     input = %{
       snapshot: Yex.encode_state_as_update!(doc),
       updates: [],
-      roots: [{"map", :text}, {"text", :text}]
+      roots: [{"array", :text}, {"empty", :text}, {"map", :text}, {"text", :map}]
     }
 
     assert {:ok, %{content: {:json, json}}} = reconstruct(input)
 
     assert JSON.decode!(json)["roots"] == [
-             %{"name" => "map", "interpretation" => "text", "value" => ""},
-             %{"name" => "text", "interpretation" => "text", "value" => "hello"}
+             %{
+               "name" => "array",
+               "interpretation" => "text",
+               "status" => "ambiguous",
+               "holds" => "sequence"
+             },
+             %{"name" => "empty", "interpretation" => "text", "value" => ""},
+             %{
+               "name" => "map",
+               "interpretation" => "text",
+               "status" => "wrong_type",
+               "holds" => "map"
+             },
+             %{
+               "name" => "text",
+               "interpretation" => "map",
+               "status" => "wrong_type",
+               "holds" => "text"
+             }
            ]
 
     assert {:ok, %{content: {:json, json}}} = reconstruct(%{input | roots: [{"map", :map}]})
@@ -138,6 +213,56 @@ defmodule Slap.Yjs.IntrospectTest do
     assert Enum.find(JSON.decode!(json)["roots"], &(&1["name"] == "map"))["value"] == %{
              "key" => "value"
            }
+  end
+
+  test "embed-only text is ambiguous when its string projection is empty" do
+    doc = Yex.Doc.new()
+    :ok = Yex.Text.insert_embed(Yex.Doc.get_text(doc, "body"), 0, %{"image" => "example.png"})
+    input = %{snapshot: Yex.encode_state_as_update!(doc), updates: [], roots: [{"body", :text}]}
+
+    assert {:ok, %{content: {:json, json}}} = reconstruct(input)
+
+    assert [%{"status" => "ambiguous", "holds" => "sequence", "interpretation" => "text"}] =
+             JSON.decode!(json)["roots"]
+
+    assert {:ok, %{content: {:json, json}}} = reconstruct(%{input | roots: [{"body", :map}]})
+
+    assert [%{"status" => "wrong_type", "holds" => "sequence", "interpretation" => "map"}] =
+             JSON.decode!(json)["roots"]
+  end
+
+  test "nonempty sequences with empty XML results are ambiguous" do
+    for source <- [:xml_fragment, :array] do
+      doc = Yex.Doc.new()
+
+      case source do
+        :xml_fragment ->
+          :ok =
+            Yex.XmlFragment.push(
+              Yex.Doc.get_xml_fragment(doc, "body"),
+              Yex.XmlTextPrelim.from("")
+            )
+
+        :array ->
+          :ok = Yex.Array.push(Yex.Doc.get_array(doc, "body"), "")
+      end
+
+      snapshot = Yex.encode_state_as_update!(doc)
+
+      for type <- [:text, :xml_fragment] do
+        input = %{snapshot: snapshot, updates: [], roots: [{"body", type}]}
+        assert {:ok, %{content: {:json, json}}} = reconstruct(input)
+        assert [%{"status" => "ambiguous", "holds" => "sequence"}] = JSON.decode!(json)["roots"]
+      end
+
+      input = %{snapshot: snapshot, updates: [], roots: [{"body", :array}]}
+      assert {:ok, %{content: {:json, json}}} = reconstruct(input)
+
+      assert [%{"interpretation" => "array", "value" => [""]} = root] =
+               JSON.decode!(json)["roots"]
+
+      refute Map.has_key?(root, "status")
+    end
   end
 
   test "reconstruction reports updates waiting for missing predecessors" do

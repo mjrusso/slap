@@ -120,30 +120,98 @@ defmodule Slap.Yjs.Reconstruction do
     |> Enum.concat(Map.keys(requested))
     |> Enum.uniq()
     |> Enum.sort()
-    |> Enum.reduce_while({:ok, []}, fn name, {:ok, acc} ->
+    |> Enum.reduce_while({:ok, [], %{doc: doc, update: nil, copies: %{}}}, fn name,
+                                                                              {:ok, acc, probes} ->
       case Read.check_deadline(deadline) do
-        :ok -> {:cont, {:ok, [root(doc, name, available, requested) | acc]}}
-        error -> {:halt, error}
+        :ok ->
+          {root, probes} = root(probes, name, available, requested)
+          {:cont, {:ok, [root | acc], probes}}
+
+        error ->
+          {:halt, error}
       end
     end)
     |> case do
-      {:ok, roots} -> {:ok, %{roots: Enum.reverse(roots)}}
+      {:ok, roots, _probes} -> {:ok, %{roots: Enum.reverse(roots)}}
       error -> error
     end
   end
 
-  defp root(doc, name, available, requested) do
+  defp root(probes, name, available, requested) do
     case {Map.fetch(available, name), Map.fetch(requested, name)} do
       {:error, _} ->
-        %{name: name, status: :absent}
+        {%{name: name, status: :absent}, probes}
 
       {{:ok, type}, :error} ->
-        %{name: name, type: type, status: :uninterpreted}
+        {holds, probes} = holds(probes, name)
+        {uninterpreted(probes.doc, name, type, holds), probes}
 
       {{:ok, _type}, {:ok, type}} ->
-        %{name: name, interpretation: type, value: value(doc, name, type)}
+        interpret(probes, name, type)
     end
   end
+
+  defp uninterpreted(doc, name, _type, holds) when holds in [:map, :text],
+    do: %{name: name, interpretation: holds, value: value(doc, name, holds), inferred: true}
+
+  defp uninterpreted(_doc, name, type, nil), do: %{name: name, type: type, status: :uninterpreted}
+
+  defp uninterpreted(_doc, name, type, holds),
+    do: %{name: name, type: type, status: :uninterpreted, holds: holds}
+
+  # An empty result can mean either empty content or an incompatible root type.
+  defp interpret(probes, name, type) do
+    case value(probes.doc, name, type) do
+      empty when empty in ["", [], %{}] ->
+        case holds(probes, name) do
+          {nil, probes} ->
+            {%{name: name, interpretation: type, value: empty}, probes}
+
+          {:sequence, probes} when type in [:text, :xml_fragment] ->
+            {%{name: name, interpretation: type, status: :ambiguous, holds: :sequence}, probes}
+
+          {holds, probes} ->
+            {%{name: name, interpretation: type, status: :wrong_type, holds: holds}, probes}
+        end
+
+      value ->
+        {%{name: name, interpretation: type, value: value}, probes}
+    end
+  end
+
+  # Replayed roots do not retain their declared types. Map entries and text
+  # identify those types; arrays, XML and embed-only text can all produce a
+  # nonempty array with an empty text result.
+  defp holds(probes, name) do
+    Enum.reduce_while([:map, :text, :sequence], {nil, probes}, fn holds, {nil, probes} ->
+      {copy, probes} = probe(probes, holds)
+      if size(copy, name, holds) > 0, do: {:halt, {holds, probes}}, else: {:cont, {nil, probes}}
+    end)
+  end
+
+  # Reading a root fixes its type in that document. Probe each type in a
+  # separate copy of the state.
+  defp probe(%{update: nil} = probes, holds),
+    do: probe(%{probes | update: Yex.encode_state_as_update!(probes.doc)}, holds)
+
+  defp probe(probes, holds) do
+    case probes.copies do
+      %{^holds => copy} ->
+        {copy, probes}
+
+      copies ->
+        copy = Yex.Doc.new()
+        :ok = Yex.apply_update(copy, probes.update)
+        {copy, %{probes | copies: Map.put(copies, holds, copy)}}
+    end
+  end
+
+  defp size(copy, name, :map), do: copy |> Yex.Doc.get_map(name) |> Yex.Map.size()
+  # Use the rendered string's size; Yex.Text.length/1 also counts array items.
+  defp size(copy, name, :text),
+    do: copy |> Yex.Doc.get_text(name) |> Yex.Text.to_string() |> byte_size()
+
+  defp size(copy, name, :sequence), do: copy |> Yex.Doc.get_array(name) |> Yex.Array.length()
 
   defp value(doc, name, :text), do: doc |> Yex.Doc.get_text(name) |> Yex.Text.to_string()
 
