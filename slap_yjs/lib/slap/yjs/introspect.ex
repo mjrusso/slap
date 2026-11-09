@@ -2,10 +2,10 @@ defmodule Slap.Yjs.Introspect do
   @moduledoc false
 
   alias Slap.Cluster.Inspection
+  alias Slap.SnapshotLog.Introspect, as: SnapshotLog
   alias Slap.Streams.Introspect, as: Streams
   alias Slap.Streams.Introspect.Messages
-  alias Slap.Yjs.Frame
-  alias Slap.Yjs.Reconstruction
+  alias Slap.Yjs.{Frame, Paths, Reconstruction}
 
   def limits, do: Reconstruction.limits()
 
@@ -16,6 +16,17 @@ defmodule Slap.Yjs.Introspect do
       Inspection.exclusive(version, budget, fn deadline ->
         Reconstruction.run(input, deadline)
       end)
+
+  def list(cluster, shard, version, budget, opts),
+    do:
+      Inspection.request(cluster, shard, version, budget, fn ctx, deadline ->
+        SnapshotLog.logs(ctx, deadline, opts, &document/1)
+      end)
+
+  defp document(base) do
+    with {:ok, {service, name}} <- Paths.parse_base(base),
+         do: {:ok, %{kind: :yjs_document, base: base, service: service, name: name}}
+  end
 
   def messages(cluster, shard, version, budget, opts) do
     Inspection.request(cluster, shard, version, budget, fn ctx, deadline ->

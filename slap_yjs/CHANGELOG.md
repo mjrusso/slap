@@ -9,6 +9,7 @@
   contains nonempty sequence content: an array, XML or text containing only
   embeds. Results use `"status": "wrong_type"` or `"status": "ambiguous"`;
   `"holds"` describes the detected content as `map`, `text` or `sequence`.
+- Lists a shard's Yjs documents for `slap_inspect`.
 
 ## 0.6.1
 

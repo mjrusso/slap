@@ -26,6 +26,7 @@ defmodule Slap.Yjs.Store do
 
   alias Slap.SnapshotLog
   alias Slap.Yjs
+  alias Slap.Yjs.Paths
 
   @typedoc "A document: `{service, name}`, each a non-empty path segment."
   @type doc :: {String.t(), String.t()}
@@ -44,27 +45,16 @@ defmodule Slap.Yjs.Store do
     validate_options!(opts, [:prefix, :cluster, :timeout])
     validate_options!(opts)
 
-    unless valid_doc?(doc), do: raise(ArgumentError, "invalid Yjs document: #{inspect(doc)}")
-    {service, name} = doc
+    unless Paths.valid_doc?(doc),
+      do: raise(ArgumentError, "invalid Yjs document: #{inspect(doc)}")
 
-    prefix = Keyword.get(opts, :prefix, "/v1/stream")
-    "#{prefix}/yjs/#{service}/docs/#{name}"
+    Paths.base(Keyword.get(opts, :prefix, "/v1/stream"), doc)
   end
-
-  defp valid_segment?(segment),
-    do:
-      is_binary(segment) and segment != "" and not String.starts_with?(segment, ".") and
-        not String.contains?(segment, "/")
-
-  defp valid_doc?({service, name}),
-    do: valid_segment?(service) and valid_segment?(name)
-
-  defp valid_doc?(_doc), do: false
 
   @doc false
   @spec check_doc(doc()) :: :ok | {:error, {:bad_request, :invalid_document}}
   def check_doc(doc) do
-    if valid_doc?(doc), do: :ok, else: {:error, {:bad_request, :invalid_document}}
+    if Paths.valid_doc?(doc), do: :ok, else: {:error, {:bad_request, :invalid_document}}
   end
 
   defp check_doc(doc, opts) do

@@ -1,8 +1,8 @@
 defmodule Slap.Yjs.StoreTest do
   use Slap.Yjs.Test.ClusterCase, async: false
 
-  alias Slap.Streams
-  alias Slap.Yjs.{Docs, DocServer, Frame, Store}
+  alias Slap.{SnapshotLog, Streams}
+  alias Slap.Yjs.{Docs, DocServer, Frame, Introspect, Paths, Store}
   alias Slap.Yjs.Test.Server
 
   defmodule OtherCluster do
@@ -28,6 +28,25 @@ defmodule Slap.Yjs.StoreTest do
     assert {:error, :not_found} = Streams.head(Store.path(doc, :updates))
     assert :ok = Docs.delete(doc, docs: OtherDocs)
     assert {:error, :deleted} = Store.load(doc, cluster: OtherCluster, prefix: "/other")
+  end
+
+  test "Yjs document listings exclude unrelated snapshot logs" do
+    doc = {"listed", "doc"}
+    assert {:ok, _} = Store.append(doc, Frame.frame("u"))
+    assert {:ok, _} = SnapshotLog.append("/v1/stream/yjs/listed/other", "x")
+    base = Store.base(doc)
+
+    listed =
+      for shard <- 0..1,
+          {:ok, %{rows: rows}} = Introspect.list(Streams.Cluster, shard, 1, 5000, []),
+          %{decoded: {:ok, %{kind: :yjs_document} = decoded}} <- rows,
+          do: decoded
+
+    assert Enum.any?(listed, &match?(%{base: ^base, service: "listed", name: "doc"}, &1))
+
+    refute Enum.any?(listed, &String.ends_with?(&1.base, "/listed/other"))
+    assert Paths.parse_base("/v1/stream/yjs/s/docs/d/extra") == :error
+    assert Paths.parse_base("/p/yjs/s/docs/.d") == :error
   end
 
   test "a new document loads empty, and appends load back as updates" do
