@@ -20,6 +20,32 @@ defmodule Slap.SnapshotLog.Introspect do
     }
   end
 
+  def list(cluster, shard, version, budget, opts),
+    do:
+      Inspection.request(cluster, shard, version, budget, fn ctx, deadline ->
+        logs(ctx, deadline, opts, &{:ok, %{kind: :log, base: &1}})
+      end)
+
+  @doc """
+  Lists each snapshot log on the shard using its updates stream's metadata
+  row. `parse.(base)` returns `{:ok, fields}` to include the log with those
+  decoded fields; anything else skips it.
+  """
+  def logs(ctx, deadline, opts, parse) do
+    opts = Keyword.put(opts, :prefix, Streams.path_prefix(""))
+    Read.filtered(ctx, deadline, opts, &log(&1, parse))
+  end
+
+  defp log(key, parse) do
+    with {:ok, path} <- Streams.path(key),
+         {:ok, base, :updates} <- Store.parse_path(path),
+         {:ok, _fields} = decoded <- parse.(base) do
+      decoded
+    else
+      _other -> :skip
+    end
+  end
+
   def capture(cluster, shard, version, budget, opts) do
     Inspection.request(cluster, shard, version, budget, &Capture.read(&1, &2, opts))
   end

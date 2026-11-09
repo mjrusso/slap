@@ -11,6 +11,21 @@ defmodule Slap.SnapshotLog.IntrospectCaptureTest do
     :ok
   end
 
+  test "snapshot log listings exclude unrelated streams" do
+    for base <- ["/listed/a", "/listed/b"], do: assert({:ok, _} = SnapshotLog.append(base, "x"))
+    assert {:ok, _, _} = Streams.create("/listed/plain", body: "x")
+    assert {:ok, _, _} = Streams.create("/listed/not-a-log/.index", body: "x")
+
+    listed =
+      for shard <- 0..1,
+          {:ok, %{rows: rows, stopped: :end}} =
+            Introspect.list(Streams.Cluster, shard, 1, 5000, []),
+          %{decoded: {:ok, %{kind: :log, base: base}}} <- rows,
+          do: base
+
+    assert Enum.sort(listed) == ["/listed/a", "/listed/b"]
+  end
+
   test "capture returns component identities, the selected snapshot and bounded input size" do
     base = "/capture/current"
     assert {:ok, first} = SnapshotLog.append(base, "first")
