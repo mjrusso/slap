@@ -66,7 +66,8 @@ defmodule Slap.Inspect.CLI do
   gain another $ at every nesting level: "$bytes" becomes "$$bytes".
   Root names are unchanged. A single leading $ is reserved for encoder tags.
 
-  JSON preserves document content; raw binaries are hexadecimal strings.
+  JSON writes printable text as strings and other binaries as
+  {"$bytes": "<hex>"}. Page cursors remain hexadecimal for --cursor.
   Errors exit nonzero.
   Reads can include durable writes whose replies are pending or lost.
   Distributed Erlang permits full remote access; restrict it as you would
@@ -126,29 +127,10 @@ defmodule Slap.Inspect.CLI do
         :ok
 
       {:error, reason} ->
-        IO.puts(:stderr, Elixir.JSON.encode!(%{error: error_term(reason)}))
+        IO.puts(:stderr, JSON.encode(%{error: reason}))
         exit({:shutdown, 1})
     end
   end
-
-  # Error reasons hold option names and messages, so their binaries stay
-  # text. JSON.encode/1 writes binaries as hexadecimal, for stored bytes.
-  defp error_term(reason) when is_binary(reason),
-    do: if(String.printable?(reason), do: reason, else: inspect(reason))
-
-  defp error_term(reason) when is_tuple(reason),
-    do: reason |> Tuple.to_list() |> error_term()
-
-  defp error_term(reason) when is_list(reason), do: Enum.map(reason, &error_term/1)
-
-  defp error_term(reason) when is_map(reason),
-    do: Map.new(reason, fn {key, value} -> {error_key(key), error_term(value)} end)
-
-  defp error_term(reason) when is_atom(reason) or is_number(reason), do: reason
-  defp error_term(reason), do: inspect(reason)
-
-  defp error_key(key) when is_atom(key), do: key
-  defp error_key(key), do: inspect(key)
 
   def parse(args) do
     case OptionParser.parse(args, strict: @switches) do
@@ -395,8 +377,7 @@ defmodule Slap.Inspect.CLI do
 
   defp list(entry) do
     with {:ok, clusters} <- Clusters.discover(entry) do
-      # Slap.Inspect.JSON would write the cluster names, which are binaries, as hexadecimal.
-      IO.puts(Elixir.JSON.encode!(%{clusters: Enum.map(clusters, &listed/1)}))
+      IO.puts(JSON.encode(%{clusters: Enum.map(clusters, &listed/1)}))
     end
   end
 

@@ -256,16 +256,42 @@ defmodule Slap.Inspect.CLITest do
     end
   end
 
-  test "JSON encodes binaries as hex and status atoms as text" do
-    assert %{"ff" => "00"} = Elixir.JSON.decode!(JSON.encode(%{<<255>> => <<0>>}))
+  test "JSON encodes nonprintable map keys before escaping a leading dollar" do
+    value = %{
+      <<36, 255>> => "invalid UTF-8",
+      <<36, 0>> => "nonprintable UTF-8",
+      "$name" => "printable",
+      "$bytes:24ff" => "literal tag",
+      "nested" => [%{<<36, 255>> => "nested value"}]
+    }
 
-    assert %{"value" => "ff001b", "error" => "busy"} =
-             Elixir.JSON.decode!(JSON.encode(%{value: <<255, 0, 27>>, error: :busy}))
+    assert Elixir.JSON.decode!(JSON.encode(value)) == %{
+             "$bytes:24ff" => "invalid UTF-8",
+             "$bytes:2400" => "nonprintable UTF-8",
+             "$$name" => "printable",
+             "$$bytes:24ff" => "literal tag",
+             "nested" => [%{"$bytes:24ff" => "nested value"}]
+           }
+  end
 
-    assert %{"content" => %{"text" => "hello"}, "raw" => "68656c6c6f"} =
-             Elixir.JSON.decode!(
-               JSON.encode(%{content: {:json, ~s({"text":"hello"})}, raw: "hello"})
-             )
+  test "JSON distinguishes text, binary data and page cursors" do
+    page = %{
+      cursor: "/next",
+      path: "/demo/events",
+      value: <<255, 0, 27>>,
+      error: :busy,
+      metadata: %{"$user" => "a", <<255>> => "b"},
+      content: {:json, ~s({"text":"hello"})}
+    }
+
+    assert Elixir.JSON.decode!(JSON.encode(page)) == %{
+             "cursor" => "2f6e657874",
+             "path" => "/demo/events",
+             "value" => %{"$bytes" => "ff001b"},
+             "error" => "busy",
+             "metadata" => %{"$$user" => "a", "$bytes:ff" => "b"},
+             "content" => %{"text" => "hello"}
+           }
   end
 
   test "content commands parse root interpretations and history offsets" do

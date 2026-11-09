@@ -181,10 +181,15 @@ terminal, selects another. An empty listing therefore does not mean the
 cluster is empty. Commands that take `--path` or `--partition` find the shard
 themselves.
 
-JSON encodes every binary as a hexadecimal string, including paths, partition
-names and keys. [Yjs content](#yjs-content) is the exception: its values are
-written as JSON. Errors are written to stderr as JSON, and the inspector exits
-nonzero.
+JSON writes printable binaries as strings. Nonprintable binaries are
+written as `{"$bytes": "<hex>"}`; pass the hex to `--key` or `--prefix`.
+A page's `cursor` is hexadecimal, for `--cursor`.
+
+A map key that starts with `$` gains another `$`: `"$name"` becomes
+`"$$name"`. A nonprintable map key is written as `"$bytes:<hex>"`. A key with
+exactly one leading `$` is an encoder tag, as in [Yjs content](#yjs-content).
+
+Errors are written to stderr as JSON, and the inspector exits nonzero.
 
 ### Streams, snapshot logs and Yjs
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking:** JSON output now encodes printable stored binaries as strings
+  and other stored binaries as `{"$bytes": "<hex>"}`. Previously, these were
+  hexadecimal strings. Page cursors remain hexadecimal. See
+  [Commands](README.md#commands) for map key encoding.
+
 ## 0.1.0
 
 Initial release of `slap-inspect`, a read-only terminal UI and JSON CLI for raw
