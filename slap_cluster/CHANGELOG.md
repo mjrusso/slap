@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Adds inspection helpers to list key groups without reading values, apply
+  page limits after filtering, and read the final page in a key range.
+  `slap_inspect` uses these helpers for partition, log and document listings
+  and backward message paging.
+
 ## 0.6.0
 
 - Uses `slap_slatedb` 0.4.0, which upgrades SlateDB from 0.17 to 0.18.

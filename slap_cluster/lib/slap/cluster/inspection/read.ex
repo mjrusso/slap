@@ -36,12 +36,29 @@ defmodule Slap.Cluster.Inspection.Read do
     end
   end
 
-  def page(ctx, deadline, opts, decode) do
-    with {:ok, limits} <- limits(opts),
-         do: page(ctx, deadline, opts, decode, limits)
+  def page(ctx, deadline, opts, decode),
+    do: read_page(ctx, deadline, opts, &decoded(&1, decode))
+
+  @doc """
+  Reads rows whose keys `select` accepts. `select.(key)` returns decoded
+  fields or `:skip`. Skipped rows count against the deadline but not the
+  page's row or byte limits. Truncated keys bypass `select` and end the
+  page with a diagnostic.
+  """
+  def filtered(ctx, deadline, opts, select) do
+    read_page(ctx, deadline, opts, fn
+      %{oversized_key: true} = row -> oversized(row)
+      row -> with decoded when decoded != :skip <- select.(row.key), do: listed(row, decoded)
+    end)
   end
 
-  defp page(ctx, deadline, opts, decode, limits) do
+  # `build.(row)` returns a page row or `:skip`.
+  defp read_page(ctx, deadline, opts, build) do
+    with {:ok, limits} <- limits(opts),
+         do: page(ctx, deadline, opts, build, limits)
+  end
+
+  defp page(ctx, deadline, opts, build, limits) do
     bounds = opts |> Keyword.take([:prefix, :gte, :gt, :lt, :lte]) |> absolute_bounds()
 
     bounds =
@@ -50,15 +67,7 @@ defmodule Slap.Cluster.Inspection.Read do
     {bounds, stop} = lookahead(bounds, Keyword.get(opts, :lookahead_lt))
     start = {Keyword.get(bounds, :gte, Keyword.get(bounds, :gt, <<>>)), is_binary(bounds[:gt])}
 
-    scan = %{
-      ctx: ctx,
-      deadline: deadline,
-      limits: limits,
-      decode: decode,
-      stop: stop,
-      rows: [],
-      bytes: 0
-    }
+    scan = scan(ctx, deadline, limits, build: build, stop: stop)
 
     cond do
       expired?(deadline) ->
@@ -70,6 +79,159 @@ defmodule Slap.Cluster.Inspection.Read do
       true ->
         with {:ok, iter} <- SlateDB.preview_iterator(ctx.db, bounds ++ read_opts(limits)),
              do: collect(iter, scan, start)
+    end
+  end
+
+  @doc """
+  Reads the last rows within the key bounds, subject to page limits.
+  Returns `{:ok, %{rows: rows, stopped: :end | :limit}}`, with rows in
+  ascending key order.
+
+  A forward read from the first returned key reaches the upper bound within
+  the same page limits, provided the keys are complete and the bounds and
+  decoder are unchanged. Truncated keys can stop that page early.
+  """
+  def last(ctx, deadline, opts, decode) do
+    with {:ok, limits} <- limits(opts) do
+      bounds = opts |> Keyword.take([:prefix, :gte, :gt, :lt, :lte]) |> absolute_bounds()
+      scan = scan(ctx, deadline, limits, build: &decoded(&1, decode))
+
+      if empty_bounds?(bounds),
+        do: {:ok, %{rows: [], stopped: :end}},
+        else: last(ctx, bounds, scan)
+    end
+  end
+
+  defp last(ctx, bounds, scan) do
+    with {:ok, iter} <-
+           SlateDB.preview_iterator(ctx.db, bounds ++ [order: :desc] ++ read_opts(scan.limits)),
+         do: descend(iter, scan)
+  end
+
+  defp descend(iter, scan) do
+    cond do
+      expired?(scan.deadline) ->
+        {:error, :deadline}
+
+      full?(scan) ->
+        {:ok, %{rows: within_target(scan), stopped: :limit}}
+
+      true ->
+        case Iterator.next_batch(iter, 1) do
+          {:ok, []} ->
+            {:ok, %{rows: scan.rows, stopped: :end}}
+
+          {:ok, [{key, value, seq, key_size, value_size}]} ->
+            row = key |> row(value, key_size, value_size) |> Map.put(:seq, seq)
+            descend(iter, push(scan, scan.build.(row)))
+
+          {:error, error} ->
+            storage_error(error)
+        end
+    end
+  end
+
+  # A forward page stops at the byte target. Drop leading rows until only
+  # the last row can reach or exceed it.
+  defp within_target(%{rows: rows, bytes: bytes, limits: %{target: target}}) do
+    last = rows |> List.last() |> :erlang.external_size()
+    drop_until_under(rows, bytes - last, target)
+  end
+
+  defp drop_until_under([_last] = rows, _before_last, _target), do: rows
+
+  defp drop_until_under([first | rest] = rows, before_last, target) do
+    if before_last < target,
+      do: rows,
+      else: drop_until_under(rest, before_last - :erlang.external_size(first), target)
+  end
+
+  @doc """
+  Reads one row per key group from `:cursor`, without reading values.
+  `group.(key, key_size)` receives the key preview and its full size. It
+  returns `{:list, scope, decoded}` to list a row or `{:skip, scope}` to skip
+  it. The scope is `:key` for the current key or `{:prefix, prefix}` for all
+  keys starting with `prefix`. Listed rows use the current key or the prefix
+  as their key, and `decoded` as their decoded fields.
+  For a truncated key, `:key` advances past all keys sharing its preview.
+
+  An `:unknown` result lists the key with an `:unknown_key` diagnostic.
+  If an unknown key exceeds `:max_key_bytes`, it is listed with an
+  oversized-key diagnostic, and keys starting with its preview are skipped.
+  """
+  def groups(ctx, deadline, opts, group) do
+    with {:ok, limits} <- limits(opts) do
+      start = Keyword.get(opts, :cursor, <<>>)
+      scan = scan(ctx, deadline, limits, group: group)
+      if expired?(deadline), do: finish(scan, start, :deadline), else: open_groups(scan, start)
+    end
+  end
+
+  defp open_groups(scan, start) do
+    read_opts = [gte: start] ++ read_opts(%{scan.limits | value: 0})
+
+    with {:ok, iter} <- SlateDB.preview_iterator(scan.ctx.db, read_opts),
+         do: next_group(iter, scan, start)
+  end
+
+  defp next_group(iter, scan, cursor) do
+    if expired?(scan.deadline) do
+      finish(scan, cursor, :deadline)
+    else
+      case Iterator.next_batch(iter, 1) do
+        {:ok, []} -> finish(scan, nil, :end)
+        {:ok, [{key, _value, _seq, key_size, _}]} -> group(iter, scan, key, key_size)
+        {:error, error} -> storage_error(error)
+      end
+    end
+  end
+
+  defp group(iter, scan, key, key_size) do
+    {row, next} =
+      case scan.group.(key, key_size) do
+        {:list, scope, decoded} ->
+          {key, size, next} = group_scope(key, key_size, scope)
+          {key |> row(<<>>, size, 0) |> listed(decoded), next}
+
+        {:skip, scope} ->
+          {_key, _size, next} = group_scope(key, key_size, scope)
+          {nil, next}
+
+        :unknown when key_size > byte_size(key) ->
+          {oversized(row(key, <<>>, key_size, 0)), successor(key)}
+
+        :unknown ->
+          {Map.put(row(key, <<>>, key_size, 0), :diagnostic, :unknown_key), key <> <<0>>}
+      end
+
+    scan = if row, do: push(scan, row), else: scan
+
+    advance(iter, scan, next)
+  end
+
+  defp group_scope(key, size, :key) when size > byte_size(key),
+    do: {key, size, successor(key)}
+
+  defp group_scope(key, size, :key), do: {key, size, key <> <<0>>}
+
+  defp group_scope(_key, _size, {:prefix, prefix}),
+    do: {prefix, byte_size(prefix), successor(prefix)}
+
+  defp advance(_iter, scan, nil), do: finish(scan, nil, :end)
+
+  defp advance(iter, scan, next) do
+    cond do
+      expired?(scan.deadline) ->
+        finish(scan, next, :deadline)
+
+      full?(scan) ->
+        finish(scan, next, :limit)
+
+      true ->
+        case Iterator.seek(iter, next) do
+          :ok -> next_group(iter, scan, next)
+          {:error, error} -> storage_error(error)
+        end
     end
   end
 
@@ -106,6 +268,20 @@ defmodule Slap.Cluster.Inspection.Read do
       true -> :unknown
     end
   end
+
+  defp full?(scan), do: length(scan.rows) >= scan.limits.rows or scan.bytes >= scan.limits.target
+
+  defp push(scan, row),
+    do: %{scan | rows: [row | scan.rows], bytes: scan.bytes + :erlang.external_size(row)}
+
+  defp oversized(row), do: Map.put(row, :diagnostic, :oversized_keys_with_prefix_skipped)
+
+  defp scan(ctx, deadline, limits, fields),
+    do:
+      Map.merge(
+        %{ctx: ctx, deadline: deadline, limits: limits, stop: nil, rows: [], bytes: 0},
+        Map.new(fields)
+      )
 
   defp empty_bounds?(bounds) do
     lower = bounds[:gte] || bounds[:gt]
@@ -165,7 +341,7 @@ defmodule Slap.Cluster.Inspection.Read do
       expired?(scan.deadline) ->
         finish(scan, cursor, :deadline)
 
-      length(scan.rows) >= scan.limits.rows or scan.bytes >= scan.limits.target ->
+      full?(scan) ->
         full(iter, scan, cursor)
 
       true ->
@@ -199,17 +375,16 @@ defmodule Slap.Cluster.Inspection.Read do
   end
 
   defp add(iter, scan, row) do
-    row = decoded(row, scan.decode)
-    scan = %{scan | rows: [row | scan.rows]}
+    case scan.build.(row) do
+      :skip -> collect(iter, scan, next_cursor(row.key, scan.limits.key))
+      row -> keep(iter, scan, row)
+    end
+  end
 
+  defp keep(iter, scan, row) do
     if row.oversized_key,
-      do: finish(scan, successor(row.key), :oversized_keys_skipped),
-      else:
-        collect(
-          iter,
-          %{scan | bytes: scan.bytes + :erlang.external_size(row)},
-          next_cursor(row.key, scan.limits.key)
-        )
+      do: finish(%{scan | rows: [row | scan.rows]}, successor(row.key), :oversized_keys_skipped),
+      else: collect(iter, push(scan, row), next_cursor(row.key, scan.limits.key))
   end
 
   defp row(key, value, key_size, value_size) do
@@ -228,19 +403,20 @@ defmodule Slap.Cluster.Inspection.Read do
     Map.merge(row, %{offset: offset, truncated: row.truncated or offset != 0})
   end
 
-  defp decoded(%{oversized_key: true} = row, _decode),
-    do: Map.put(row, :diagnostic, :oversized_keys_with_prefix_skipped)
+  defp listed(row, decoded) do
+    if :erlang.external_size(decoded) <= @allowance,
+      do: Map.put(row, :decoded, decoded),
+      else: Map.put(row, :diagnostic, :decoded_fields_too_large)
+  end
+
+  defp decoded(%{oversized_key: true} = row, _decode), do: oversized(row)
 
   defp decoded(%{truncated: true} = row, _decode), do: Map.put(row, :diagnostic, :truncated_value)
 
   # Decoders may raise on malformed stored rows; this is the one place that
   # turns that into a diagnostic.
   defp decoded(row, decode) do
-    decoded = decode.(row.key, row.value)
-
-    if :erlang.external_size(decoded) <= @allowance,
-      do: Map.put(row, :decoded, decoded),
-      else: Map.put(row, :diagnostic, :decoded_fields_too_large)
+    listed(row, decode.(row.key, row.value))
   rescue
     _error in [
       ArgumentError,

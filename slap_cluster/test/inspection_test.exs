@@ -129,6 +129,100 @@ defmodule Slap.Cluster.InspectionTest do
     assert [%{key: "bc"}] = fourth.rows
   end
 
+  test "grouped reads return one row per group without loading values", %{ctx: ctx} do
+    for key <- [
+          "a1",
+          "a2",
+          "b1",
+          "c" <> String.duplicate("x", 8),
+          "c" <> String.duplicate("y", 8),
+          "d1",
+          "e"
+        ] do
+      assert {:ok, _} = SlateDB.put(ctx.db, key, String.duplicate("v", 4096), await_durable: true)
+    end
+
+    group = fn
+      <<"b", _::binary>>, _size ->
+        {:skip, {:prefix, "b"}}
+
+      <<"e">>, _size ->
+        :unknown
+
+      <<first, _, _::binary>>, _size when first != ?c ->
+        {:list, {:prefix, <<first>>}, {:ok, <<first>>}}
+
+      _key, _size ->
+        :unknown
+    end
+
+    read = fn opts ->
+      Inspection.request(TestCluster, 0, 1, 1000, fn ctx, deadline ->
+        Read.groups(ctx, deadline, Keyword.put(opts, :max_key_bytes, 4), group)
+      end)
+    end
+
+    assert {:ok, page} = read.([])
+
+    assert [
+             %{key: "a", value: "", decoded: {:ok, "a"}},
+             %{key: "cxxx", key_size: 9, oversized_key: true},
+             %{key: "cyyy", oversized_key: true},
+             %{key: "d", decoded: {:ok, "d"}},
+             %{key: "e", oversized_key: false, diagnostic: :unknown_key}
+           ] = page.rows
+
+    assert %{cursor: nil, stopped: :end} = page
+    assert :erlang.external_size(page) <= page.hard_max_bytes
+
+    assert {:ok, %{rows: [%{key: "a"}], cursor: "b", stopped: :limit}} = read.(limit: 1)
+
+    assert {:ok, %{rows: [%{key: "cxxx"}], cursor: "cxxy"}} = read.(limit: 1, cursor: "b")
+
+    # After the first key, any further storage call fails.
+    closing = fn key, size ->
+      assert :ok = SlateDB.close(ctx.db)
+      group.(key, size)
+    end
+
+    assert {:ok, %{rows: [%{key: "a"}], cursor: "b", stopped: :limit}} =
+             Inspection.request(TestCluster, 0, 1, 1000, fn ctx, deadline ->
+               Read.groups(ctx, deadline, [limit: 1], closing)
+             end)
+  end
+
+  test "grouped reads skip keys sharing a truncated preview", %{ctx: ctx} do
+    keys = ["a", "abcd1", "abcd2", "abce", <<255, 255, 255, 255, 1>>]
+    assert {:ok, _} = SlateDB.write(ctx.db, Enum.map(keys, &{:put, &1, "v"}), await_durable: true)
+
+    for action <- [:list, :skip] do
+      group = fn key, _size ->
+        case action do
+          :list -> {:list, :key, {:ok, key}}
+          :skip -> {:skip, :key}
+        end
+      end
+
+      assert {:ok, %{stopped: :end, cursor: nil} = page} =
+               Inspection.request(TestCluster, 0, 1, 1000, fn ctx, deadline ->
+                 Read.groups(ctx, deadline, [max_key_bytes: 4, limit: 4], group)
+               end)
+
+      case action do
+        :list ->
+          assert [
+                   %{key: "a", oversized_key: false},
+                   %{key: "abcd", key_size: 5, oversized_key: true},
+                   %{key: "abce", oversized_key: false},
+                   %{key: <<255, 255, 255, 255>>, key_size: 5, oversized_key: true}
+                 ] = page.rows
+
+        :skip ->
+          assert page.rows == []
+      end
+    end
+  end
+
   test "invalid limits return errors before reading storage", %{ctx: ctx} do
     for {key, maximum} <- [
           max_key_bytes: 4096,
@@ -173,6 +267,75 @@ defmodule Slap.Cluster.InspectionTest do
 
     assert {:ok, page} = read.(gte: "a", lt: "c")
     refute Map.has_key?(page, :next_key)
+  end
+
+  test "last/4 returns a final page that fits the forward read limits", %{ctx: ctx} do
+    values = [{"a", 10}, {"b", 400}, {"c", 10}, {"d", 300}, {"e", 10}, {"f", 10}]
+
+    assert {:ok, _} =
+             SlateDB.write(
+               ctx.db,
+               for({key, size} <- values, do: {:put, key, :binary.copy("v", size)}),
+               await_durable: true
+             )
+
+    read = fn fun, opts ->
+      Inspection.request(TestCluster, 0, 1, 1000, fn ctx, deadline ->
+        fun.(ctx, deadline, opts, fn _, _ -> :raw end)
+      end)
+    end
+
+    assert {:ok, %{rows: [%{key: "d"}, %{key: "e"}], stopped: :limit}} =
+             read.(&Read.last/4, gte: "a", lt: "f", limit: 2)
+
+    assert {:ok, %{rows: [%{key: "a"}, %{key: "b"}], stopped: :end}} =
+             read.(&Read.last/4, gte: "a", lt: "c")
+
+    assert {:ok, %{rows: [], stopped: :end}} = read.(&Read.last/4, gte: "c", lt: "c")
+
+    for opts <- [[target_bytes: 200], [target_bytes: 500], [target_bytes: 800], [limit: 3]] do
+      opts = [gte: "a", lt: "f"] ++ opts
+
+      assert {:ok, %{rows: [%{key: from} | _] = last, stopped: :limit}} =
+               read.(&Read.last/4, opts)
+
+      assert {:ok, %{rows: rows}} = read.(&Read.page/4, Keyword.put(opts, :gte, from))
+      assert Enum.map(rows, & &1.key) == Enum.map(last, & &1.key)
+    end
+
+    assert {:error, :deadline} =
+             Read.last(ctx, System.monotonic_time(:millisecond) - 1, [], fn _, _ -> :raw end)
+  end
+
+  test "filtered reads exclude skipped rows from page limits", %{ctx: ctx} do
+    assert {:ok, _} =
+             SlateDB.write(ctx.db, for(key <- ["a", "b", "c", "d", "e"], do: {:put, key, "v"}),
+               await_durable: true
+             )
+
+    read = fn opts ->
+      Inspection.request(TestCluster, 0, 1, 1000, fn ctx, deadline ->
+        Read.filtered(ctx, deadline, opts, &if(&1 in ["b", "e"], do: {:ok, &1}, else: :skip))
+      end)
+    end
+
+    assert {:ok,
+            %{rows: [%{key: "b", decoded: {:ok, "b"}}], cursor: "b" <> <<0>>, stopped: :limit}} =
+             read.(limit: 1)
+
+    assert {:ok, %{rows: [%{key: "e"}], stopped: :end}} = read.(limit: 2, cursor: "b" <> <<0>>)
+
+    # Truncated keys bypass the selector, even when their preview would match.
+    assert {:ok, _} = SlateDB.put(ctx.db, "e-long", "v", await_durable: true)
+
+    assert {:ok, %{rows: [%{key: "e-", diagnostic: :oversized_keys_with_prefix_skipped}]} = page} =
+             Inspection.request(TestCluster, 0, 1, 1000, fn ctx, deadline ->
+               Read.filtered(ctx, deadline, [gte: "e-", max_key_bytes: 2], fn key ->
+                 if key == "e-", do: {:ok, key}, else: :skip
+               end)
+             end)
+
+    assert page.stopped == :oversized_keys_skipped
   end
 
   test "a lookahead page stops at a cut key only when its preview is past the bound", %{
