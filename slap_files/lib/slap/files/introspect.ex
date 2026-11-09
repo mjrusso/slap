@@ -17,6 +17,19 @@ defmodule Slap.Files.Introspect do
     )
   end
 
+  def partitions(cluster, shard, version, budget, opts) do
+    Inspection.request(cluster, shard, version, budget, fn ctx, deadline ->
+      KV.partitions(ctx, deadline, opts, &partition/1)
+    end)
+  end
+
+  defp partition(:confirm), do: {:error, :not_files_partition}
+
+  defp partition(partition) do
+    with {:ok, fields} <- Config.parse_partition(partition),
+         do: {:ok, Map.merge(fields, %{kind: :files_partition, partition: partition})}
+  end
+
   # Reads the object store, not the shard, so any node can answer.
   def object(cluster, _shard, version, budget, opts) do
     Inspection.exclusive(version, budget, fn deadline ->

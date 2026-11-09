@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Lists a shard's Files partitions for `slap_inspect` without reading values.
+
 ## 0.6.0
 
 - Uses `slap_slatedb` 0.4.0, which upgrades SlateDB from 0.17 to 0.18.
