@@ -2,9 +2,32 @@ defmodule Slap.Inspect.UXTest do
   use ExUnit.Case, async: true
 
   import Slap.Inspect.ViewCase,
-    only: [start_view: 1, answer: 2, reply: 3, fire_refresh: 1, type: 2]
+    only: [start_view: 1, answer: 2, reply: 3, fire_refresh: 1, show: 2, type: 2]
 
   alias Breeze.Test
+
+  test "a stalled read shows a spinner and its elapsed time in warning colours" do
+    session = start_view([])
+    # The spinner appears after 200 ms; the stall makes it appear at once.
+    assert status_line(session) =~ ~r/^Loading +$/
+    Test.info(session, {:inspection_stalled, :active, :owner@localhost, 0})
+
+    assert status_line(session) =~
+             ~r/^\e\[38;5;3m. \d+\.\ds · Owner owner@localhost read stalled/u
+
+    answer(session, {:ok, page()})
+    assert status_line(session) =~ ~r/^Ready · durable seq 4 +$/
+  end
+
+  defp status_line(session), do: session |> Test.render!() |> String.split("\n") |> Enum.at(2)
+
+  test "reenabling refresh restores the configured interval" do
+    session = start_view(refresh: 1000)
+    Test.input(session, "t")
+    assert Test.render!(session) =~ "Refresh off"
+    Test.input(session, "t")
+    assert Test.render!(session) =~ "Refresh 1000ms"
+  end
 
   test "query, refresh, stale data and diagnostics remain visible at 80 columns" do
     session = start(opts: [partition: "users", key_prefix: <<0>>], view: :kv)
@@ -29,14 +52,14 @@ defmodule Slap.Inspect.UXTest do
   test "Enter opens the first row and a missing selection returns to the list" do
     session = start()
     Test.input(session, "Enter")
-    assert Test.render!(session) =~ "00000000"
+    assert Test.render!(session) =~ "Details · text · Focused"
     Test.input(session, "r")
     answer(session, {:ok, %{page() | rows: []}})
     screen = Test.render!(session)
     assert screen =~ "Selected record is no longer present"
     assert screen =~ "No rows"
     Test.input(session, "Enter")
-    assert Test.render!(session) =~ "Records · Focused"
+    assert Test.render!(session) =~ ~r"Records · .* · Focused"
   end
 
   test "commands can be edited in place, recalled and cancelled without a read" do
@@ -56,6 +79,9 @@ defmodule Slap.Inspect.UXTest do
     assert_receive {:read, %{view: :streams}, worker}
     reply(session, worker, {:ok, page()})
     Test.input(session, "/")
+    assert Test.render!(session) =~ "streams --shard 0_"
+    Test.input(session, "ArrowUp")
+    assert Test.render!(session) =~ "Command: streams_"
     Test.input(session, "ArrowUp")
     assert Test.render!(session) =~ "kv --shard 0 --partition useX_"
     Test.input(session, "ArrowDown")
@@ -101,6 +127,15 @@ defmodule Slap.Inspect.UXTest do
     refute_receive {:read, _, _}
   end
 
+  test "help descriptions use hanging indents at 80 columns" do
+    session = start_view(size: {80, 40})
+    answer(session, {:ok, page()})
+    Test.input(session, "?")
+    screen = Test.render!(session)
+    assert screen =~ ~r/  T {14}Read near the tail/
+    assert screen =~ ~r/ {17}Large messages may need n to reach the end/
+  end
+
   test "help preserves query, selection and scroll position" do
     session = start(value: String.duplicate("0123456789", 100))
     Test.input(session, "Enter")
@@ -116,15 +151,46 @@ defmodule Slap.Inspect.UXTest do
   test "text and JSON modes wrap multiline values and retain exact bytes" do
     session = start(value: ~s({"message":"hello\\nworld"}))
     Test.input(session, "Enter")
-    Test.input(session, "d")
-    assert Test.render!(session) =~ "Text"
+    show(session, :text)
     assert Test.render!(session) =~ "hello"
+    show(session, :json)
+    assert Test.render!(session) =~ ~s("message":)
+    show(session, :bytes)
+    assert Test.render!(session) =~ "00000000"
+  end
+
+  test "JSON fallback preserves the chosen view across records" do
+    json = %{row() | key: "j", value: ~s({"n":1}), value_size: 7}
+    text = %{row() | key: "t", value: "plain words", value_size: 11}
+    binary = %{row() | value: <<0, 255, 27>>}
+    session = start_view(size: {80, 30})
+    answer(session, {:ok, %{page() | rows: [json, text, binary]}})
+    Test.input(session, "Enter")
+    show(session, :json)
+
+    for {mode, shown} <- [text: "plain words", bytes: "00000000  00 FF 1B"] do
+      Test.input(session, "Escape")
+      Test.input(session, "ArrowDown")
+      Test.input(session, "Enter")
+      screen = Test.render!(session)
+      assert screen =~ "Details · #{mode}"
+      assert screen =~ "Not a complete JSON value; showing #{mode}."
+      assert screen =~ shown
+    end
+
+    Test.input(session, "Escape")
+    Test.input(session, "Home")
+    Test.input(session, "Enter")
+    assert Test.render!(session) =~ "Details · json"
+  end
+
+  test "d cycles through the selected record's available display modes" do
+    session = start(value: <<0, 255>>)
+    Test.input(session, "Enter")
     Test.input(session, "d")
     screen = Test.render!(session)
-    assert screen =~ "JSON"
-    assert screen =~ ~s("message":)
-    Test.input(session, "d")
-    assert Test.render!(session) =~ "00000000"
+    assert screen =~ "Details · term"
+    refute screen =~ "showing"
   end
 
   test "byte ranges show bounds, reset scrolling and allow returning to the previous range" do
@@ -147,7 +213,7 @@ defmodule Slap.Inspect.UXTest do
     assert Test.render!(session) =~ "Bytes 0–4095 of 8192"
   end
 
-  test "byte navigation and refresh preserve configured read limits" do
+  test "byte navigation and refresh preserve the configured value limit" do
     for view <- [:raw, :object] do
       opts = [max_value_bytes: 64, max_key_bytes: 128, target_bytes: 512]
       opts = if view == :object, do: opts ++ [object_key: "a", instance: "files"], else: opts
@@ -157,8 +223,7 @@ defmodule Slap.Inspect.UXTest do
       assert_receive {:read, %{view: next_view, opts: next}, worker}
       assert next_view == if(view == :object, do: :object, else: :get)
       assert next[:max_value_bytes] == 64
-      assert next[:max_key_bytes] == 128
-      assert next[:target_bytes] == 512
+      assert Keyword.take(next, [:max_key_bytes, :target_bytes]) == []
       assert next[:value_range] == {64, 64}
       if view == :object, do: assert(next[:instance] == "files")
 
@@ -188,7 +253,7 @@ defmodule Slap.Inspect.UXTest do
       assert screen =~ "Selected record is no longer present"
       assert screen =~ "No rows"
       refute screen =~ "Bytes 0–"
-      assert screen =~ "Records · Focused"
+      assert screen =~ ~r"Records · .* · Focused"
     end
   end
 
@@ -207,6 +272,17 @@ defmodule Slap.Inspect.UXTest do
     assert Test.render!(session) =~ "Bytes 3–5 of 9"
   end
 
+  test "long header titles leave room for the last read status" do
+    cluster = %{cluster: Module.concat([String.duplicate("Long", 30)]), services: [:streams]}
+    session = start_view(clusters: [cluster])
+    answer(session, {:ok, page()})
+    [title, query, status, border | _] = session |> Test.render!() |> String.split("\n")
+    assert title =~ ~r/LongLong.* · Refresh off · Last read \d\d:\d\d:\d\d UTC/
+    assert query =~ "Query: scan"
+    assert status =~ "Ready"
+    assert border =~ "┌"
+  end
+
   test "long query arguments use the available header width" do
     session = start(view: :object, opts: [object_key: "objects/" <> String.duplicate("x", 160)])
     assert session |> Test.render!() |> String.split("\n") |> Enum.at(1) =~ "objects/"
@@ -217,37 +293,10 @@ defmodule Slap.Inspect.UXTest do
     rows = for index <- 1..30, do: %{row() | key: "row#{index}-" <> String.duplicate("x", 160)}
     Test.input(session, "r")
     answer(session, {:ok, %{page() | rows: rows}})
-    for _ <- 1..15, do: Test.input(session, "ArrowDown")
+    for _ <- 1..14, do: Test.input(session, "ArrowDown")
     assert Test.render!(session) =~ ~s(15 "row15-)
     Test.input(session, "Enter")
     assert Test.render!(session) =~ "row15-"
-  end
-
-  test "view shortcuts request missing arguments without starting a read" do
-    for {key, status, command} <- [
-          {"5", "Required: --base", "log --shard 0 --base _"},
-          {"6", "Required: --base or --sid", "yjs --shard 0 --base _"}
-        ] do
-      session = start(view: :kv, opts: [partition: "users", key_prefix: <<0>>])
-      Test.input(session, key)
-      screen = Test.render!(session)
-      assert screen =~ status
-      assert screen =~ "Command: " <> command
-      refute screen =~ "--partition users_"
-      refute_receive {:read, _, _}
-      Test.input(session, "Escape")
-      assert Test.render!(session) =~ "kv --shard 0 --partition users"
-    end
-  end
-
-  test "a view shortcut prefills the missing option, and Enter reads the value typed after it" do
-    session = start(view: :kv, opts: [partition: "users"])
-    Test.input(session, "6")
-    for key <- String.graphemes("/docs/a"), do: Test.input(session, key)
-    Test.input(session, "Enter")
-    assert_receive {:read, %{view: :yjs, opts: opts}, _worker}
-    assert opts[:base] == "/docs/a"
-    refute Test.render!(session) =~ "Required:"
   end
 
   test "view shortcuts discard unrelated filters and restart pagination" do
@@ -264,6 +313,15 @@ defmodule Slap.Inspect.UXTest do
     assert Test.render!(session) =~ "Query: streams"
   end
 
+  test "opening Yjs from a log catalog clears the selected shard and base" do
+    session = start_view(request: [view: :log, shard: 1, opts: [base: "/demo/log"]])
+    answer(session, {:ok, page()})
+    Test.input(session, "6")
+    assert %{view: :yjs, shard: nil, opts: opts} = answer(session, {:ok, page()})
+    refute opts[:base]
+    assert Test.render!(session) =~ "Query: yjs"
+  end
+
   test "Tab changes the focused pane and its keyboard help" do
     session = start()
     Test.render!(session)
@@ -273,17 +331,28 @@ defmodule Slap.Inspect.UXTest do
     assert screen =~ "Focused"
     assert screen =~ "Esc List"
     Test.input(session, "\t")
-    assert Test.render!(session) =~ "Records · Focused"
+    assert Test.render!(session) =~ ~r"Records · .* · Focused"
   end
 
   test "shard selection shows available shards and clears the old page cursor" do
     session = start(opts: [cursor: <<0>>, cursor_exclusive: true])
     Test.input(session, "s")
-    answer(session, {:ok, [0, 1, 2]})
-    assert Test.render!(session) =~ "Select shard"
-    assert Test.render!(session) =~ "> 0"
+
+    shards = [
+      %{shard: 0, owner: :a@host, status: :running},
+      %{shard: 1, owner: :b@host, status: :starting},
+      %{shard: 2, owner: nil, status: nil},
+      %{shard: 3, owner: :c@host, status: :unknown}
+    ]
+
+    answer(session, {:ok, shards})
+    screen = Test.render!(session)
+    assert screen =~ "Select shard"
+    assert screen =~ ">  0  a@host      running"
+    assert screen =~ "   2  unassigned"
+    assert screen =~ "   3  c@host      status unknown"
     Test.input(session, "ArrowDown")
-    assert Test.render!(session) =~ "> 1"
+    assert Test.render!(session) =~ ">  1  b@host      starting"
     Test.input(session, "Enter")
     assert_receive {:read, %{shard: 1, opts: opts}, worker}
     refute opts[:cursor]
@@ -292,13 +361,124 @@ defmodule Slap.Inspect.UXTest do
     assert Test.render!(session) =~ "shard 1"
   end
 
+  test "the shard picker shows matching row counts" do
+    session = start(opts: [prefix: "a"])
+    Test.input(session, "s")
+    assert_receive {:read, %{view: :shards, listing: listing}, worker}
+    assert %{operation: :raw, opts: [prefix: "a"]} = listing
+
+    shards = [
+      %{shard: 0, owner: :a@host, status: :running, rows: {:exactly, 0}},
+      %{shard: 1, owner: :a@host, status: :running, rows: {:exactly, 3}},
+      %{shard: 2, owner: :a@host, status: :running, rows: {:at_least, 50}},
+      %{shard: 3, owner: :a@host, status: :running, rows: :unchecked}
+    ]
+
+    reply(session, worker, {:ok, shards})
+    screen = Test.render!(session)
+    assert screen =~ ">  0  a@host  running  empty"
+    assert screen =~ "   1  a@host  running  3 rows"
+    assert screen =~ "   2  a@host  running  50+ rows"
+    assert screen =~ "   3  a@host  running  not counted in time"
+  end
+
+  test "the shard picker omits counts for single-record views" do
+    session = start(view: :stream, opts: [path: "/a"])
+    Test.input(session, "s")
+    assert_receive {:read, %{view: :shards} = request, _worker}
+    refute Map.has_key?(request, :listing)
+  end
+
+  test "refresh preserves the initial empty-shard results" do
+    session = start_view(request: [view: :streams, shard: nil], refresh: 1000)
+    assert_receive {:read, %{count_others: true}, worker}
+
+    others = [
+      %{shard: 1, owner: :a@host, rows: {:exactly, 0}},
+      %{shard: 2, owner: :a@host, rows: :unchecked},
+      %{shard: 3, owner: nil, rows: nil}
+    ]
+
+    reply(session, worker, {:ok, %{page() | rows: [], cursor: nil} |> Map.put(:others, others)})
+    message = "No rows on shard 0. s counts each shard's rows."
+    assert Test.render!(session) =~ message
+
+    fire_refresh(session)
+    assert_receive {:read, %{count_others: false}, worker}
+    reply(session, worker, {:ok, %{page() | rows: [], cursor: nil}})
+    assert Test.render!(session) =~ message
+
+    Test.input(session, "s")
+
+    answer(
+      session,
+      {:ok,
+       [
+         %{shard: 0, owner: :a@host, status: :running},
+         %{shard: 1, owner: :a@host, status: :running}
+       ]}
+    )
+
+    Test.input(session, "ArrowDown")
+    Test.input(session, "Enter")
+    answer(session, {:ok, %{page() | rows: [], cursor: nil, shard: 1}})
+    assert Test.render!(session) =~ "No rows here. s selects another shard."
+  end
+
+  test "log listings hide record actions when empty and omit the content action" do
+    session = start_view(request: [view: :log], size: {140, 24})
+    answer(session, {:ok, %{page() | rows: [], cursor: nil}})
+
+    for key <- ["f", "g"] do
+      Test.input(session, key)
+      assert Test.render!(session) =~ "No record is selected"
+    end
+
+    screen = Test.render!(session)
+    assert screen =~ "This page has no records."
+    refute screen =~ "Select a record"
+    refute screen =~ "Enter Details"
+    refute screen =~ "c Content"
+
+    session = start_view(request: [view: :log, opts: [base: "/log"]], size: {140, 24})
+    answer(session, {:ok, page()})
+    assert Test.render!(session) =~ "c Content"
+  end
+
+  test "automatic shard selection reports the switch and preserves the selected shard" do
+    session = start_view(request: [view: :streams, shard: nil], refresh: 1000)
+    assert_receive {:read, %{count_others: true}, worker}
+    reply(session, worker, {:ok, Map.put(%{page() | shard: 1}, :moved_from, 0)})
+    screen = Test.render!(session)
+    assert screen =~ "Shard 0 has no rows; showing shard 1"
+    assert screen =~ "shard 1"
+
+    fire_refresh(session)
+    assert_receive {:read, %{shard: 1, count_others: false}, _worker}
+  end
+
+  test "switching listings preserves the selected shard without recounting other shards" do
+    session = start_view(request: [view: :streams, shard: nil])
+    assert_receive {:read, %{count_others: true}, worker}
+    reply(session, worker, {:ok, %{page() | shard: 1}})
+    Test.input(session, "1")
+    assert_receive {:read, %{view: :raw, shard: 1, count_others: false}, _worker}
+  end
+
+  test "an explicitly selected shard does not trigger counts on other shards" do
+    session = start_view(request: [view: :streams, shard: 2])
+    assert_receive {:read, %{count_others: false}, worker}
+    reply(session, worker, {:ok, %{page() | rows: [], cursor: nil, shard: 2}})
+    assert Test.render!(session) =~ "No rows here. s selects another shard."
+  end
+
   test "a completed shard listing preserves an active command edit" do
     session = start()
     Test.input(session, "s")
     Test.input(session, "/")
     Test.input(session, "\x15")
     type(session, "draft")
-    answer(session, {:ok, [0, 1]})
+    answer(session, {:ok, [%{shard: 0, owner: nil, status: nil}]})
     assert Test.render!(session) =~ "Command: draft_"
     Test.input(session, "Escape")
     assert Test.render!(session) =~ "Select shard"
@@ -321,7 +501,7 @@ defmodule Slap.Inspect.UXTest do
     Test.input(session, "r")
     answer(session, {:ok, data})
     Test.input(session, "Enter")
-    Test.input(session, "d")
+    show(session, :text)
     screen = Test.render!(session)
     assert screen =~ "First line"
     assert screen =~ "Second line"

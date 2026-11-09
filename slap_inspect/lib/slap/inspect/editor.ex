@@ -2,7 +2,7 @@ defmodule Slap.Inspect.Editor do
   @moduledoc false
 
   alias BackBreeze.Utils
-  alias Slap.Inspect.{Bytes, CLI, Command, Operation}
+  alias Slap.Inspect.{Bytes, Command, Operation, Options, Prefix}
 
   defstruct text: "", cursor: 0, history: [], index: 0, draft: "", matches: []
 
@@ -120,8 +120,8 @@ defmodule Slap.Inspect.Editor do
   defp options(command, word) do
     cond do
       not (word == "" or String.starts_with?(word, "-")) -> []
-      command in Operation.commands() -> CLI.query_options(command)
-      true -> CLI.query_options()
+      command in Operation.commands() -> Options.query_options(command)
+      true -> Options.query_options()
     end
   end
 
@@ -142,15 +142,8 @@ defmodule Slap.Inspect.Editor do
     end
   end
 
-  defp shared_prefix([first | rest]) do
-    Enum.reduce(rest, first, fn match, prefix ->
-      prefix
-      |> String.graphemes()
-      |> Enum.zip(String.graphemes(match))
-      |> Enum.take_while(fn {a, b} -> a == b end)
-      |> Enum.map_join(&elem(&1, 0))
-    end)
-  end
+  defp shared_prefix(matches),
+    do: matches |> Enum.map(&String.graphemes/1) |> Prefix.common() |> Enum.join()
 
   defp recall(editor, index) do
     draft = if editor.index == 0, do: editor.text, else: editor.draft

@@ -1,13 +1,23 @@
 defmodule Slap.Inspect.Operation do
   @moduledoc false
 
-  @stream [:path, :placement_key, :expected_sid]
   @messages [:sid, :from, :until]
-  @content [:roots, :at_offset, :max_input_bytes, :max_entries, :max_output_bytes]
-  @log [:base, :component, :placement_key, :expected_sid, :from, :until] ++ @content
-  @yjs [:base, :placement_key, :expected_sid] ++ @messages ++ @content
+  @read_limits [:max_key_bytes, :max_value_bytes, :target_bytes]
+  @page [:limit, :cursor, :cursor_exclusive | @read_limits]
 
-  @definitions %{
+  # Definition order breaks ties between equally matching command forms.
+  @forms [
+    home: %{
+      scope: :every_cluster,
+      command: "home",
+      view: :home,
+      options: [],
+      page: [],
+      listing: true,
+      required: [],
+      route: :entry,
+      budget: 10_000
+    },
     raw: %{
       command: "scan",
       view: :raw,
@@ -21,6 +31,7 @@ defmodule Slap.Inspect.Operation do
       command: "get",
       view: :get,
       options: [:key, :value_range],
+      page: [:max_value_bytes],
       required: [:key],
       target: {Slap.Cluster.Inspection, :get}
     },
@@ -36,11 +47,13 @@ defmodule Slap.Inspect.Operation do
     stream: %{
       command: "stream",
       view: :stream,
-      options: @stream,
+      options: [:path, :placement_key],
+      page: [:max_value_bytes],
       required: [:path],
       target: {Slap.Streams.Introspect, :stream}
     },
     messages: %{
+      tail: true,
       command: "messages",
       view: :messages,
       options: @messages,
@@ -49,9 +62,10 @@ defmodule Slap.Inspect.Operation do
       target: {Slap.Streams.Introspect, :messages}
     },
     logical: %{
+      tail: true,
       command: "logical",
       view: :logical,
-      options: @stream ++ [:from, :until, :retained],
+      options: [:path, :placement_key, :expected_sid, :from, :until, :retained],
       listing: true,
       required: [:path],
       target: {Slap.Streams.Introspect, :messages}
@@ -59,7 +73,7 @@ defmodule Slap.Inspect.Operation do
     retention: %{
       command: "retention",
       view: :retention,
-      options: @stream ++ [:sid, :pins],
+      options: [:placement_key, :sid, :pins],
       listing: true,
       required: [:sid],
       target: {Slap.Streams.Introspect, :retention}
@@ -67,83 +81,144 @@ defmodule Slap.Inspect.Operation do
     retention_metadata: %{
       command: "retention",
       view: :retention,
-      options: @stream ++ [:sid, :pins],
+      options: [:path, :placement_key, :sid, :pins],
       listing: true,
       required: [:sid, :path],
       target: {Slap.Streams.Introspect, :retention}
+    },
+    kv_partitions: %{
+      command: "kv",
+      view: :kv,
+      options: [],
+      page: [:limit, :cursor, :max_key_bytes, :target_bytes],
+      listing: true,
+      required: [],
+      target: {Slap.KV.Introspect, :list_partitions},
+      route: :partition,
+      menu: 3
     },
     kv: %{
       command: "kv",
       view: :kv,
       options: [:partition, :key_prefix],
       listing: true,
-      required: [],
+      required: [:partition],
       target: {Slap.KV.Introspect, :scan},
+      route: :partition
+    },
+    files_partitions: %{
+      command: "files",
+      view: :files,
+      options: [:instance],
+      page: [:limit, :cursor, :max_key_bytes, :target_bytes],
+      listing: true,
+      required: [],
+      target: {Slap.Files.Introspect, :partitions},
       route: :partition,
-      menu: 3
+      menu: 4
     },
     files: %{
       command: "files",
       view: :files,
       options: [:partition, :key_prefix, :instance],
       listing: true,
-      required: [],
+      required: [:partition],
       target: {Slap.Files.Introspect, :scan},
-      route: :partition,
-      menu: 4
+      route: :partition
     },
     object: %{
       command: "object",
       view: :object,
       options: [:object_key, :instance, :value_range],
+      page: [:max_value_bytes],
       required: [:object_key],
       target: {Slap.Files.Introspect, :object},
       route: :entry
     },
-    log_catalog: %{
+    log_content: %{
+      manual: true,
       command: "log",
-      view: :log,
-      options: @log,
+      flags: [:content],
+      view: :log_content,
+      options: [:base, :placement_key, :preflight, :at_offset, :max_input_bytes, :max_entries],
+      page: [],
       required: [:base],
-      target: {Slap.SnapshotLog.Introspect, :scan},
-      menu: 5
+      budget: 10_000
     },
     log_component: %{
       command: "log",
       view: :log,
-      options: @log,
+      options: [:base, :component, :placement_key, :expected_sid, :from, :until],
       listing: true,
       required: [:base, :component],
       target: {Slap.SnapshotLog.Introspect, :messages}
     },
-    yjs_messages: %{
-      command: "yjs",
-      view: :yjs,
-      options: @yjs,
+    log_catalog: %{
+      command: "log",
+      view: :log,
+      options: [:base, :placement_key],
+      required: [:base],
+      target: {Slap.SnapshotLog.Introspect, :scan}
+    },
+    log_list: %{
+      command: "log",
+      view: :log,
+      options: [],
       listing: true,
-      required: [:sid],
-      target: {Slap.Yjs.Introspect, :messages}
+      required: [],
+      target: {Slap.SnapshotLog.Introspect, :list},
+      menu: 5
+    },
+    yjs_content: %{
+      manual: true,
+      command: "yjs",
+      flags: [:content],
+      view: :yjs_content,
+      options: [
+        :base,
+        :placement_key,
+        :preflight,
+        :roots,
+        :at_offset,
+        :max_input_bytes,
+        :max_entries,
+        :max_output_bytes
+      ],
+      page: [],
+      required: [:base],
+      budget: 10_000
     },
     yjs_log: %{
       command: "yjs",
       view: :yjs,
-      options: @yjs,
+      options: [:base, :placement_key, :from, :until],
       required: [:base],
-      target: {Slap.Yjs.Introspect, :messages},
-      menu: 6
+      target: {Slap.Yjs.Introspect, :messages}
     },
-    yjs_content: %{
+    yjs_messages: %{
       command: "yjs",
-      flags: [:content],
-      view: :yjs_content,
-      options: [:base, :placement_key, :preflight] ++ @content,
-      required: [:base],
-      budget: 10_000
+      view: :yjs,
+      options: [:placement_key | @messages],
+      listing: true,
+      required: [:sid],
+      target: {Slap.Yjs.Introspect, :messages}
+    },
+    yjs_list: %{
+      command: "yjs",
+      view: :yjs,
+      options: [],
+      listing: true,
+      required: [],
+      target: {Slap.Yjs.Introspect, :list},
+      menu: 6
     }
-  }
+  ]
+
+  @definitions Map.new(@forms)
   # :any views read any cluster. The other names must match the services/0 of
   # Slap.Streams.ShardChildren and Slap.KV.PartitionWriter.
   @services %{
+    home: :any,
     raw: :any,
     get: :any,
     streams: :streams,
@@ -152,6 +227,7 @@ defmodule Slap.Inspect.Operation do
     logical: :streams,
     retention: :streams,
     log: :streams,
+    log_content: :streams,
     yjs: :streams,
     yjs_content: :streams,
     kv: :kv,
@@ -170,20 +246,22 @@ defmodule Slap.Inspect.Operation do
           "extra: #{inspect(MapSet.to_list(MapSet.difference(named, views)))}"
       )
 
+  @content_views for {_operation, %{flags: flags} = form} <- @definitions,
+                     :content in flags,
+                     into: %{},
+                     do: {form.command, form.view}
+
   @commands @definitions
             |> Enum.reject(fn {_operation, definition} -> Map.has_key?(definition, :flags) end)
             |> Map.new(fn {_operation, definition} -> {definition.command, definition.view} end)
 
-  @doc "The options and flags of the operations that `command` names."
-  def command_options(command) do
-    @definitions
-    |> Map.values()
-    |> Enum.filter(&(&1.command == command))
-    |> Enum.flat_map(&(&1.options ++ Map.get(&1, :flags, [])))
-    |> Enum.uniq()
-  end
+  def read_limits, do: @read_limits
 
-  @doc "The query command names."
+  def page(%{tail: true} = form), do: [:before | Map.get(form, :page, @page)]
+  def page(form), do: Map.get(form, :page, @page)
+
+  def forms(command), do: for({_operation, %{command: ^command} = form} <- @forms, do: form)
+
   def commands, do: Map.keys(@commands)
 
   def command([]), do: {:ok, :raw}
@@ -197,67 +275,76 @@ defmodule Slap.Inspect.Operation do
 
   def command(_commands), do: {:error, :one_command_required}
 
-  def normalize(:yjs, opts) do
-    operation =
-      cond do
-        opts[:content] -> :yjs_content
-        opts[:base] -> :yjs_log
-        true -> :yjs_messages
-      end
+  @doc """
+  Chooses a command form by its flags and required options. Ranks forms by
+  how many of these options are supplied, then how few are missing.
+  Definition order breaks remaining ties.
+  """
+  def normalize(view, opts) do
+    case for(
+           {operation, form} <- @forms,
+           view in [form.view | content_of(form)],
+           do: {operation, form}
+         ) do
+      [] ->
+        {:error, :unknown_view}
 
-    definition(operation)
-  end
+      forms ->
+        {operation, form} =
+          Enum.min_by(forms, fn {_operation, form} ->
+            {present, missing} = Enum.split_with(selectors(form), &opts[&1])
+            {-length(present), length(missing)}
+          end)
 
-  def normalize(:log, opts),
-    do: definition(if(opts[:component], do: :log_component, else: :log_catalog))
-
-  def normalize(:retention, opts),
-    do: definition(if(opts[:path], do: :retention_metadata, else: :retention))
-
-  def normalize(view, _opts), do: definition(view)
-
-  defp definition(operation) do
-    case Map.fetch(@definitions, operation) do
-      {:ok, definition} -> {:ok, operation, definition}
-      :error -> {:error, :unknown_view}
+        {:ok, operation, form}
     end
   end
 
-  def options(view) do
-    @definitions
-    |> Map.values()
-    |> Enum.filter(&(&1.view == view))
-    |> Enum.flat_map(& &1.options)
-    |> Enum.uniq()
+  defp content_of(%{flags: flags, command: command}) do
+    if :content in flags,
+      do: for(%{command: ^command, view: view} <- Map.values(@definitions), do: view),
+      else: []
   end
 
-  @doc "The option sets that satisfy `view`, with the menu definition's set first."
-  def required(view) do
-    sets =
-      @definitions
-      |> Map.values()
-      |> Enum.filter(&(&1.view == view))
-      |> Enum.sort_by(&is_nil(&1[:menu]))
-      |> Enum.map(& &1.required)
-      |> Enum.uniq()
+  defp content_of(_form), do: []
 
-    # A set that contains another set only adds options to it.
-    Enum.reject(sets, fn set -> Enum.any?(sets, &(&1 != set and &1 -- set == [])) end)
-  end
+  def selectors(form), do: Map.get(form, :flags, []) ++ form.required
+
+  def manual?(operation), do: field(operation, :manual, false)
+
+  def refresh?(operation), do: not (manual?(operation) or every_cluster?(operation))
+
+  def tail?(operation), do: field(operation, :tail, false)
+
+  def content_view(operation), do: @content_views[Map.fetch!(@definitions, operation).command]
+
+  def every_cluster?(operation), do: field(operation, :scope, :cluster) == :every_cluster
+
+  defp field(operation, name, default),
+    do: Map.get(Map.fetch!(@definitions, operation), name, default)
 
   def target(operation), do: Map.fetch!(@definitions, operation).target
 
-  def route(operation), do: Map.get(Map.fetch!(@definitions, operation), :route, :stream)
+  def route(operation), do: field(operation, :route, :stream)
 
   @doc """
-  Whether a smaller page of `operation` holds fewer rows and nothing else
-  changes. Log catalogs and Yjs logs are not listings: the component reads
-  that recognize their log use the request's byte limits, and recognition
-  needs complete component pages.
+  Checks whether page limits only affect how many rows are returned.
+  Snapshot log overviews (`log --base`) and `yjs --base` need complete
+  component pages to identify the log, so they are excluded.
   """
-  def listing?(operation), do: Map.get(Map.fetch!(@definitions, operation), :listing, false)
+  def listing?(operation), do: field(operation, :listing, false)
 
-  def budget(operation), do: Map.get(Map.fetch!(@definitions, operation), :budget, 5000)
+  @doc """
+  Checks whether a listing allows shard selection without a path, base or partition.
+  """
+  def spans_shard?(operation) do
+    definition = Map.fetch!(@definitions, operation)
+
+    Map.get(definition, :listing, false) and definition.required == [] and
+      route(operation) != :entry
+  end
+
+  def budget(operation), do: field(operation, :budget, 5000)
   def targets, do: for(%{target: target} <- Map.values(@definitions), uniq: true, do: target)
 
   def service(view), do: Map.fetch!(@services, view)

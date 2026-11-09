@@ -18,17 +18,23 @@ defmodule Slap.Inspect.Clusters do
     end
   end
 
-  defp supports?(%{services: services}, view) do
+  @doc "Checks whether a cluster or menu entry provides the service needed by `view`."
+  def serves?(%{services: services}, view) do
     case Operation.service(view) do
       :any -> true
       service -> service in services
     end
   end
 
-  def views(cluster), do: Enum.filter(Operation.views(), &supports?(cluster, &1))
+  def views(cluster), do: Enum.filter(Operation.views(), &serves?(cluster, &1))
 
   @spec menu([map()]) :: [
-          %{cluster: module(), items: [%{view: atom(), key: String.t() | nil}]}
+          %{
+            cluster: module(),
+            shards: pos_integer() | nil,
+            services: [atom()],
+            items: [%{view: atom(), key: String.t() | nil}]
+          }
         ]
   def menu(clusters) do
     {groups, _count} =
@@ -39,7 +45,14 @@ defmodule Slap.Inspect.Clusters do
           for {view, number} <- Enum.with_index(views, count + 1),
               do: %{view: view, key: if(number <= 9, do: Integer.to_string(number))}
 
-        {%{cluster: cluster.cluster, items: items}, count + length(views)}
+        group = %{
+          cluster: cluster.cluster,
+          shards: cluster[:shards],
+          services: cluster.services,
+          items: items
+        }
+
+        {group, count + length(views)}
       end)
 
     groups
@@ -68,7 +81,7 @@ defmodule Slap.Inspect.Clusters do
   defp candidates([], _view), do: {:error, :no_clusters}
 
   defp candidates(clusters, view) do
-    case for(cluster <- clusters, supports?(cluster, view), do: cluster.cluster) do
+    case for(cluster <- clusters, serves?(cluster, view), do: cluster.cluster) do
       [] -> {:error, {:no_cluster_for_view, view}}
       found -> {:ok, found}
     end

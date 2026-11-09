@@ -3,14 +3,14 @@ defmodule Slap.Inspect.View.Dialogs do
   import Breeze.View, only: [focus: 2]
   import Breeze.Component, only: [assign: 2]
 
-  alias Slap.Inspect.{CLI, Command, Editor, Feedback, Request}
+  alias Slap.Inspect.{CLI, Clusters, Command, Editor, Feedback, Request}
   alias Slap.Inspect.View.Read
 
   @root_types [nil, :text, :array, :map, :xml_fragment]
 
   def open_shards(term) do
     id = {:shards, make_ref()}
-    Read.submit(term, id, Request.shards())
+    Read.submit(term, id, Request.shards(term.assigns.request))
 
     {:noreply, assign(term, id: id, operation: :reading, status: "Loading available shards")}
   end
@@ -21,11 +21,12 @@ defmodule Slap.Inspect.View.Dialogs do
   def choose_shard("Enter", shards, index, term) do
     request = %{
       term.assigns.request
-      | shard: Enum.at(shards, index),
+      | shard: Enum.at(shards, index).shard,
         opts: Keyword.drop(term.assigns.request.opts, [:cursor, :cursor_exclusive])
     }
 
-    {:noreply, term |> assign(mode: :browse, request: request, history: []) |> Read.page()}
+    {:noreply,
+     term |> assign(mode: :browse, request: request, history: [], paging: :forward) |> Read.page()}
   end
 
   def choose_shard(key, shards, index, term) when key in ["ArrowUp", "ArrowDown"] do
@@ -71,7 +72,10 @@ defmodule Slap.Inspect.View.Dialogs do
         } = term
       ) do
     choices = Map.new(request.opts[:roots] || [])
-    roots = for root <- JSON.decode!(json)["roots"], do: {root["name"], choices[root["name"]]}
+    listed = JSON.decode!(json)["roots"]
+    roots = for root <- listed, do: {root["name"], choices[root["name"]] || inferred(root)}
+
+    holds = for %{"holds" => holds} = root <- listed, into: %{}, do: {root["name"], holds}
 
     case roots do
       [] ->
@@ -80,7 +84,7 @@ defmodule Slap.Inspect.View.Dialogs do
       _roots ->
         {:noreply,
          term
-         |> assign(mode: {:roots, %{choices: roots, index: 0}})
+         |> assign(mode: {:roots, %{choices: roots, index: 0, holds: holds}})
          |> focus("root-chooser")}
     end
   end
@@ -90,6 +94,10 @@ defmodule Slap.Inspect.View.Dialogs do
 
   def open_roots(term),
     do: {:noreply, assign(term, status: "Load Yjs content to choose its roots")}
+
+  defp inferred(%{"inferred" => true, "interpretation" => "map"}), do: :map
+  defp inferred(%{"inferred" => true, "interpretation" => "text"}), do: :text
+  defp inferred(_root), do: nil
 
   def choose_root("Escape", term), do: {:noreply, close_roots(term)}
 
@@ -138,7 +146,8 @@ defmodule Slap.Inspect.View.Dialogs do
     {:editor, editor, _return_mode} = term.assigns.mode
 
     with {:ok, tokens} <- Command.split(editor.text),
-         {:ok, request} <- CLI.parse_query(tokens) do
+         {:ok, request} <- CLI.parse_query(tokens),
+         :ok <- served(term, request.view) do
       commands =
         [
           editor.text
@@ -148,7 +157,13 @@ defmodule Slap.Inspect.View.Dialogs do
 
       {:noreply,
        term
-       |> assign(request: request, mode: :browse, commands: commands, history: [])
+       |> assign(
+         request: request,
+         mode: :browse,
+         commands: commands,
+         history: [],
+         paging: :forward
+       )
        |> Read.page()}
     else
       {:error, reason} ->
@@ -162,24 +177,29 @@ defmodule Slap.Inspect.View.Dialogs do
     {:noreply, assign(term, mode: {:editor, Editor.input(editor, key), return_mode})}
   end
 
+  # Home can find that the open cluster has stopped and drop it from the menu.
+  defp served(%{assigns: %{menu: menu, connection: %{cluster: current}}}, view) do
+    case Enum.split_with(menu, &(&1.cluster == current)) do
+      {[], _others} ->
+        {:error, {:stopped, current}}
+
+      {[here], others} ->
+        if Clusters.serves?(here, view),
+          do: :ok,
+          else:
+            {:error,
+             {:not_served, current, view,
+              for(group <- others, Clusters.serves?(group, view), do: group.cluster)}}
+    end
+  end
+
   def editor(term, command) do
     history = Enum.reject(term.assigns.commands, &(&1 == command))
     assign(term, mode: {:editor, Editor.new(command, history), term.assigns.mode})
   end
 
-  def confirm(%{assigns: %{mode: {:confirm, request, _capture}}} = term) do
-    id = make_ref()
-    Read.submit(term, id, request)
-
-    {:noreply,
-     assign(term,
-       id: id,
-       request: request,
-       mode: :browse,
-       operation: :reading,
-       status: "Reconstructing"
-     )}
-  end
+  def confirm(%{assigns: %{mode: {:confirm, request, capture}}} = term),
+    do: {:noreply, term |> assign(mode: :browse) |> Read.read_content(request, capture)}
 
   def cancel(term),
     do:
@@ -188,6 +208,6 @@ defmodule Slap.Inspect.View.Dialogs do
          id: make_ref(),
          mode: :browse,
          operation: :idle,
-         status: "Reconstruction cancelled"
+         status: "Read cancelled"
        )}
 end

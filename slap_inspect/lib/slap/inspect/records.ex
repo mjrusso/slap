@@ -1,20 +1,31 @@
 defmodule Slap.Inspect.Records do
   @moduledoc false
 
-  alias Slap.Inspect.{Content, Log, Operation, Remote}
+  alias Slap.Inspect.{Content, Home, Log, Operation, Remote}
 
   @streams Slap.Streams.Introspect
 
-  def page(connection, %{operation: operation} = request, deadline) do
-    case operation do
-      :logical -> logical(connection, request, deadline)
-      :retention_metadata -> retention_metadata(connection, request, deadline)
-      :log_catalog -> log_catalog(connection, request, deadline)
-      :log_component -> log_component(connection, request, deadline)
-      :yjs_log -> yjs_log(connection, request, deadline)
-      :yjs_content -> Content.execute(connection, request, deadline)
-      _target -> target(connection, request, deadline)
-    end
+  def page(connection, %{operation: :home}, deadline), do: Home.page(connection, deadline)
+
+  def page(connection, %{operation: :logical} = request, deadline),
+    do: logical(connection, request, deadline)
+
+  def page(connection, %{operation: :retention_metadata} = request, deadline),
+    do: retention_metadata(connection, request, deadline)
+
+  def page(connection, %{operation: :log_catalog} = request, deadline),
+    do: log_catalog(connection, request, deadline)
+
+  def page(connection, %{operation: :log_component} = request, deadline),
+    do: log_component(connection, request, deadline)
+
+  def page(connection, %{operation: :yjs_log} = request, deadline),
+    do: yjs_log(connection, request, deadline)
+
+  def page(connection, request, deadline) do
+    if Operation.manual?(request.operation),
+      do: Content.execute(connection, request, deadline),
+      else: target(connection, request, deadline)
   end
 
   defp target(connection, request, deadline),
@@ -34,7 +45,16 @@ defmodule Slap.Inspect.Records do
 
   defp log_catalog(connection, request, deadline) do
     with {:ok, page} <- target(connection, request, deadline),
-         do: {:ok, Map.put(page, :log, Log.describe(connection, request, page, deadline))}
+         {:ok, log} <- describe(connection, request, page, deadline),
+         do: {:ok, Map.put(page, :log, log)}
+  end
+
+  defp describe(connection, request, page, deadline) do
+    log = Log.describe(connection, request, page, deadline)
+
+    if page.rows == [] and Enum.all?(Map.values(log.components), &is_nil/1),
+      do: {:error, {:log_not_found, request.shard}},
+      else: {:ok, log}
   end
 
   defp log_component(connection, request, deadline) do
@@ -55,7 +75,7 @@ defmodule Slap.Inspect.Records do
 
     with {:ok, page} <-
            Remote.read(connection, catalog, {Slap.SnapshotLog.Introspect, :scan}, deadline),
-         log = Log.describe(connection, catalog, page, deadline),
+         {:ok, log} <- describe(connection, catalog, page, deadline),
          %{decoded: {:ok, %{path: path, value: %{sid: sid}}}} <- log.components.updates do
       opts =
         Keyword.merge(request.opts, path: path, expected_sid: sid)

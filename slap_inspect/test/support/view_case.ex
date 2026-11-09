@@ -12,7 +12,7 @@ defmodule Slap.Inspect.ViewCase do
   import ExUnit.Callbacks, only: [on_exit: 1]
 
   alias Breeze.Test
-  alias Slap.Inspect.View
+  alias Slap.Inspect.{Request, View}
 
   def start_view(opts \\ []) do
     client = self()
@@ -22,8 +22,10 @@ defmodule Slap.Inspect.ViewCase do
       receive do: ({:reply, result} -> result)
     end
 
-    request =
-      Map.merge(%{view: :raw, shard: 0, budget: 5000, opts: []}, Map.new(opts[:request] || []))
+    {:ok, request} =
+      %{view: :raw, shard: 0, budget: 5000, opts: []}
+      |> Map.merge(Map.new(opts[:request] || []))
+      |> Request.new()
 
     default = %{cluster: Slap.Streams.Cluster, services: [:streams, :kv]}
     clusters = Keyword.get(opts, :clusters, [default])
@@ -72,6 +74,21 @@ defmodule Slap.Inspect.ViewCase do
     # The editor takes focus when the screen next renders, as in a terminal.
     Test.render!(session)
     type(session, command)
+  end
+
+  @doc "Presses d until the details pane shows `mode`."
+  def show(session, mode, presses \\ 4) do
+    cond do
+      Test.render!(session) =~ "Details · #{mode}" ->
+        :ok
+
+      presses == 0 ->
+        flunk("details never showed #{mode}")
+
+      true ->
+        Test.input(session, "d")
+        show(session, mode, presses - 1)
+    end
   end
 
   def type(session, text), do: Enum.each(String.graphemes(text), &Test.input(session, &1))

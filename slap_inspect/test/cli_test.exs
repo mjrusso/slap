@@ -10,7 +10,9 @@ defmodule Slap.Inspect.CLITest do
     Command,
     Feedback,
     JSON,
+    Labels,
     Operation,
+    Options,
     Query,
     Remote,
     Request
@@ -45,6 +47,26 @@ defmodule Slap.Inspect.CLITest do
     assert {:ok, _endpoint, :clusters} = CLI.parse(["clusters" | connection])
     assert {:error, {:required, :cluster}} = CLI.parse(connection ++ ["--cluster", ""])
     assert {:error, {:invalid, _message}} = CLI.parse(["clusters" | @connection])
+  end
+
+  test "the terminal starts on home unless a cluster, command or query option is given" do
+    connection = Enum.take(@connection, 4)
+
+    assert {:ok, _endpoint, nil, %{view: :home}, %{json: false}} = CLI.parse(connection)
+
+    assert {:ok, _endpoint, nil, %{view: :home}, %{refresh: 1000}} =
+             CLI.parse(connection ++ ["--refresh", "1000"])
+
+    assert {:ok, _endpoint, nil, %{view: :raw}, _mode} = CLI.parse(connection ++ ["--limit", "5"])
+
+    assert {:ok, _endpoint, nil, %{view: :raw}, %{json: true}} =
+             CLI.parse(["--json" | connection])
+
+    assert {:ok, _endpoint, nil, %{view: :home}, %{json: true}} =
+             CLI.parse(connection ++ ["--json", "home"])
+
+    assert {:error, {:invalid, "home lists every cluster; omit --cluster"}} =
+             CLI.parse(["home" | @connection])
   end
 
   test "the cookie file is optional, and the node's host selects long names" do
@@ -140,21 +162,59 @@ defmodule Slap.Inspect.CLITest do
              CLI.parse(@connection ++ ["get", "--key", "61", "--offset", "0", "--length", "0"])
   end
 
+  test "command selection ranks supplied options, missing options and definition order" do
+    for {view, opts, operation} <- [
+          {:yjs, [], :yjs_list},
+          {:yjs, [base: "/d", sid: 1], :yjs_log},
+          {:yjs, [sid: 1], :yjs_messages},
+          {:yjs, [content: true, base: "/d"], :yjs_content},
+          {:yjs_content, [], :yjs_content},
+          {:log, [], :log_list},
+          {:log, [content: true, base: "/l", component: :index], :log_content},
+          {:log, [component: :index], :log_component},
+          {:retention, [path: "/s"], :retention_metadata},
+          {:retention, [], :retention},
+          {:kv, [], :kv_partitions},
+          {:kv, [partition: "p"], :kv}
+        ] do
+      assert {:ok, ^operation, _form} = Operation.normalize(view, opts)
+    end
+
+    assert {:error, :unknown_view} = Operation.normalize(:nothing, [])
+  end
+
   test "command option lists contain only query options" do
     for command <- Operation.commands() do
-      assert CLI.query_options(command) -- CLI.query_options() == []
+      assert Options.query_options(command) -- Options.query_options() == []
     end
   end
 
-  test "a command rejects options that only other commands use" do
-    assert {:error, {:unsupported_options, "kv", ["--path"]}} =
-             CLI.parse_query(["kv", "--path", "/x", "--partition", "p"])
-
-    assert {:error, {:unsupported_options, "scan", ["--root"]}} =
-             CLI.parse_query(["--root", "text:a"])
-
-    assert {:error, reason} = CLI.parse_query(["streams", "--content"])
-    assert Feedback.error(reason) == "streams does not take --content"
+  test "command forms reject unused options" do
+    for {args, message} <- [
+          {["kv", "--path", "/x", "--partition", "p"], "kv --partition does not take --path"},
+          {["kv", "--key-prefix", "a"], "kv does not take --key-prefix without --partition"},
+          {["--root", "text:a"], "scan does not take --root"},
+          {["streams", "--content"], "streams does not take --content"},
+          {["files", "--key-prefix", "a"],
+           "files does not take --key-prefix without --partition"},
+          {["log", "--from", "5"], "log does not take --from without --base and --component"},
+          {["log", "--base", "/b", "--from", "5"],
+           "log --base does not take --from without --component"},
+          {["log", "--content", "--base", "/b", "--component", "index"],
+           "log --content --base does not take --component"},
+          {["yjs", "--sid", "1", "--root", "text:text"],
+           "yjs --sid does not take --root without --content and --base"},
+          {["stream", "--path", "/x", "--expected-sid", "1"],
+           "stream --path does not take --expected-sid"},
+          {["log", "--content", "--base", "/x", "--limit", "1", "--cursor", "61"],
+           "log --content --base does not take --limit, --cursor"},
+          {["get", "--key", "61", "--limit", "1"], "get --key does not take --limit"},
+          {["files", "--max-value-bytes", "5"],
+           "files does not take --max-value-bytes without --partition"}
+        ] do
+      assert {:error, {:unsupported_options, _, _, _} = reason} = CLI.parse_query(args)
+      assert Feedback.error(reason) == message
+    end
 
     assert {:ok, _, _, %{view: :kv}, _} =
              CLI.parse(@connection ++ ["--json", "kv", "--partition", "p", "--limit", "5"])
@@ -162,9 +222,7 @@ defmodule Slap.Inspect.CLITest do
 
   test "programmatic queries reject missing arguments before connecting" do
     for {view, opts, required} <- [
-          {:log, [], [[:base]]},
-          {:log, [component: "index"], [[:base]]},
-          {:yjs, [], [[:base], [:sid]]},
+          {:log, [component: "index"], [[:base, :component]]},
           {:yjs, [content: true], [[:base]]},
           {:logical, [], [[:path]]}
         ] do
@@ -229,7 +287,7 @@ defmodule Slap.Inspect.CLITest do
           ["scan"],
           ["--json", "get", "--key", "61"],
           ["--json", "log", "--base", "/l"],
-          ["--json", "yjs", "--base", "/d", "--sid", "3"]
+          ["--json", "yjs", "--base", "/d"]
         ] do
       assert {:ok, _, _, %{opts: opts}, _} = CLI.parse(@connection ++ args)
       refute Keyword.has_key?(opts, :limit)
@@ -355,10 +413,55 @@ defmodule Slap.Inspect.CLITest do
              )
   end
 
+  test "hex dumps adapt byte counts and spacing to the available width" do
+    bytes = :binary.list_to_bin(Enum.to_list(0..15))
+
+    spaced16 =
+      "00000000  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  " <> String.duplicate(".", 16)
+
+    grouped16 = "00000000  00010203 04050607 08090A0B 0C0D0E0F  " <> String.duplicate(".", 16)
+    spaced8 = "00000000  00 01 02 03 04 05 06 07  ........"
+    grouped8 = "00000000  00010203 04050607  ........"
+    spaced4 = "00000000  00 01 02 03  ...."
+
+    for {width, line} <- [
+          {80, spaced16},
+          {75, spaced16},
+          {74, grouped16},
+          {63, grouped16},
+          {62, spaced8},
+          {43, spaced8},
+          {42, grouped8},
+          {37, grouped8},
+          {36, spaced4},
+          {10, spaced4}
+        ] do
+      assert [^line | _] = String.split(Bytes.hex(bytes, 0, width), "\n")
+      assert String.length(line) <= max(width, 27)
+    end
+
+    assert Bytes.hex(<<1, 2, 3, 4, 5>>, 0, 63) ==
+             "00000000  01020304 05" <> String.duplicate(" ", 24) <> "  ....."
+  end
+
   test "byte rendering escapes terminal controls" do
     refute Bytes.text(<<27, ?[, ?3, ?1, ?m>>) =~ <<27>>
-    refute Bytes.hex(<<27, 255, 10>>) =~ <<27>>
-    assert Bytes.hex("abc", 16) =~ "00000010"
+    refute Bytes.hex(<<27, 255, 10>>, 0, 80) =~ <<27>>
+    assert Bytes.hex("abc", 16, 80) =~ "00000010"
+
+    controls = "/a\e[2J\r\a\b\v\f\u0085"
+    message = %{kind: :message, offset: 1, part: 0}
+
+    for text <- [
+          Bytes.name(controls),
+          Bytes.display(controls),
+          Labels.label(%{key: "", decoded: {:ok, %{path: controls}}}),
+          Labels.label(%{key: "", decoded: {:ok, message}, value: controls, value_size: 13})
+        ] do
+      refute text =~ ~r/[[:cntrl:]]/u
+    end
+
+    assert Bytes.display("a\nb") == "a\nb"
   end
 
   test "invalid cookie files return a sanitized error before distribution starts" do

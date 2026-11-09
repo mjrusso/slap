@@ -6,9 +6,12 @@ defmodule Slap.Inspect.Collection do
   @doc "Reads the messages of `stream` (its `path` and `sid`) in `from..until`."
   def read(connection, request, stream, from, until, limits, deadline) do
     opts =
-      request.opts
-      |> Keyword.drop(Request.page_options())
-      |> Keyword.merge(path: stream.path, expected_sid: stream.sid, from: from, until: until)
+      Keyword.merge(request.opts,
+        path: stream.path,
+        expected_sid: stream.sid,
+        from: from,
+        until: until
+      )
 
     state = %{messages: [], pending: nil, bytes: 0, entries: 0}
 

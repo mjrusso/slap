@@ -5,10 +5,11 @@ defmodule Slap.Inspect.ViewContentTest do
 
   alias Breeze.Test
 
-  @capture %{owner: :slap@localhost, encoded_bytes: 12}
+  @capture %{owner: :slap@localhost, encoded_bytes: 2_000_000}
+  @grown %{@capture | encoded_bytes: 2_500_000}
 
   test "content waits for confirmation and cancellation does not reconstruct" do
-    capture = %{@capture | encoded_bytes: 1024}
+    capture = %{@capture | encoded_bytes: 3_000_000}
 
     session =
       start_view(request: [view: :yjs_content, opts: [base: "/doc", roots: [{"body", :text}]]])
@@ -20,10 +21,10 @@ defmodule Slap.Inspect.ViewContentTest do
     Test.input(session, "y")
     editing = Test.render!(session)
     assert editing =~ "Command: y_"
-    refute editing =~ "1024 wire bytes"
+    refute editing =~ "3000000 wire bytes"
     Test.input(session, "Escape")
     screen = Test.render!(session)
-    assert screen =~ "1024 wire bytes"
+    assert screen =~ "3000000 wire bytes"
     assert screen =~ "y Confirm"
     refute screen =~ "n/p Page"
     Test.input(session, "n")
@@ -35,6 +36,56 @@ defmodule Slap.Inspect.ViewContentTest do
     assert_receive {:read, %{opts: confirmed}, _worker}
     refute confirmed[:preflight]
     assert confirmed[:roots] == [{"body", :text}]
+  end
+
+  test "log content returns entries with local byte paging" do
+    session = start_view(request: [view: :log, opts: [base: "/log"]])
+    answer(session, {:ok, page()})
+    Test.input(session, "c")
+    assert %{view: :log_content, opts: opts} = answer(session, {:ok, @capture})
+    assert opts[:preflight]
+    Test.input(session, "y")
+    large = String.duplicate("a", 5000)
+
+    rows = [
+      %{
+        key: "entry 7",
+        value: large,
+        value_size: 5000,
+        oversized_key: false,
+        decoded: {:ok, %{kind: :entry, key: "offset 7"}}
+      }
+    ]
+
+    assert %{view: :log_content, opts: opts} =
+             answer(session, {:ok, %{owner: :slap@localhost, shard: 0, cursor: nil, rows: rows}})
+
+    refute opts[:preflight]
+    show(session, :bytes)
+    assert Test.render!(session) =~ "Details · bytes · Focused"
+    assert Test.render!(session) =~ "Bytes 0–4095 of 5000"
+    Test.input(session, "m")
+    refute_receive {:read, _, _}
+    assert Test.render!(session) =~ "Bytes 4096–4999 of 5000"
+  end
+
+  test "small or previously confirmed content skips confirmation" do
+    session = start_view(request: [view: :yjs_content, opts: [base: "/doc", roots: []]])
+    assert %{opts: opts} = answer(session, {:ok, %{@capture | encoded_bytes: 1024}})
+    assert opts[:preflight]
+    assert %{opts: opts} = answer(session, {:ok, root_page([], ["body"])})
+    refute opts[:preflight]
+
+    session = root_session([], ["body"])
+    Test.input(session, "i")
+    Test.input(session, "ArrowRight")
+    Test.input(session, "Enter")
+    assert %{opts: opts} = answer(session, {:ok, @capture})
+    assert opts[:preflight]
+    assert %{opts: opts} = answer(session, {:ok, root_page([{"body", :text}], ["body"])})
+    refute opts[:preflight]
+    assert opts[:roots] == [{"body", :text}]
+    refute Test.render!(session) =~ "y Confirm"
   end
 
   test "a confirmation that arrives under help is shown when help closes" do
@@ -49,7 +100,7 @@ defmodule Slap.Inspect.ViewContentTest do
     refute Test.render!(session) =~ "y Confirm"
     refute_receive {:read, _, _}
     Test.input(session, "Escape")
-    assert Test.render!(session) =~ "12 wire bytes"
+    assert Test.render!(session) =~ "2000000 wire bytes"
     Test.input(session, "y")
     assert_receive {:read, %{opts: confirmed}, _worker}
     refute confirmed[:preflight]
@@ -96,7 +147,7 @@ defmodule Slap.Inspect.ViewContentTest do
     refute_receive {:read, _, _}
     Test.input(session, "Enter")
     roots = [{"body", :text}, {"items", :array}, {"meta", :map}, {"xml", :xml_fragment}]
-    assert %{opts: opts} = answer(session, {:ok, @capture})
+    assert %{opts: opts} = answer(session, {:ok, @grown})
     assert opts[:roots] == roots
     assert opts[:preflight]
     screen = Test.render!(session)
@@ -107,6 +158,7 @@ defmodule Slap.Inspect.ViewContentTest do
     assert %{opts: opts} = answer(session, {:ok, root_page(roots, names)})
     assert opts[:roots] == roots
     refute opts[:preflight]
+    show(session, :term)
     assert Test.render!(session) =~ ~s("interpretation" => "text")
     Test.input(session, "i")
     assert Test.render!(session) =~ ~r/text\s+"body"/
@@ -116,16 +168,81 @@ defmodule Slap.Inspect.ViewContentTest do
     name = String.duplicate("long-root-", 10)
     session = root_session([{name, :text}, {"body", :xml_fragment}], [name, "body"])
     Test.input(session, "Enter")
-    Test.input(session, "d")
+    show(session, :text)
     screen = Test.render!(session)
     refute screen |> lines() |> Enum.at(1) =~ "xml_fragment"
     assert screen =~ "(text)"
     assert screen =~ "body (xml_fragment)"
   end
 
+  test "text mode explains root type mismatches" do
+    session = start_view(request: [view: :yjs_content, opts: [base: "/doc"]])
+    answer(session, {:ok, @capture})
+    Test.input(session, "y")
+    root = %{name: "body", interpretation: :text, status: :wrong_type, holds: :map}
+
+    answer(
+      session,
+      {:ok, %{root_page([], []) | content: {:json, JSON.encode!(%{roots: [root]})}}}
+    )
+
+    Test.input(session, "Enter")
+    show(session, :text)
+
+    assert Test.render!(session) =~ "Cannot display as text: this root contains map entries."
+  end
+
+  test "ambiguous sequence content is not labelled as a wrong type" do
+    session = start_view(request: [view: :yjs_content, opts: [base: "/doc"]])
+    answer(session, {:ok, @capture})
+    Test.input(session, "y")
+    root = %{name: "body", interpretation: :text, status: :ambiguous, holds: :sequence}
+    page = %{root_page([], []) | content: {:json, JSON.encode!(%{roots: [root]})}}
+    answer(session, {:ok, page})
+    Test.input(session, "Enter")
+    show(session, :text)
+    screen = Test.render!(session)
+    assert screen =~ "Type uncertain:"
+    assert screen =~ "text containing only embeds"
+    refute screen =~ "Cannot display as text:"
+  end
+
+  test "inferred root types are labelled and preselected in the dialog" do
+    session = start_view(request: [view: :yjs_content, opts: [base: "/doc"]], size: {120, 30})
+    answer(session, {:ok, @capture})
+    Test.input(session, "y")
+
+    roots = [
+      %{name: "body", interpretation: :text, value: "hello", inferred: true},
+      %{name: "list", status: :uninterpreted, type: :untyped, holds: :sequence},
+      %{name: "meta", interpretation: :map, value: %{"k" => "v"}, inferred: true},
+      %{name: "other", status: :uninterpreted, type: :untyped}
+    ]
+
+    answer(session, {:ok, %{root_page([], []) | content: {:json, JSON.encode!(%{roots: roots})}}})
+    Test.input(session, "Enter")
+    show(session, :text)
+    screen = Test.render!(session)
+    assert screen =~ "body (text, inferred)"
+    assert screen =~ "meta (map, inferred)"
+    assert screen =~ ~s("k": "v")
+    refute screen =~ ~s("inferred": true)
+    assert screen =~ "No root type selected. It contains a"
+    Test.input(session, "Escape")
+    Test.input(session, "i")
+    screen = Test.render!(session)
+    assert screen =~ ~r/> text +"body"/
+    assert screen =~ ~r/  none +"list"  \(holds an array, XML or text containing only embeds\)/
+    assert screen =~ ~r/  map +"meta"/
+    assert screen =~ ~r/  none +"other"/
+    Test.input(session, "Enter")
+    assert_receive {:read, %{opts: opts}, _worker}
+    assert opts[:roots] == [{"body", :text}, {"meta", :map}]
+  end
+
   test "Yjs content stays manual when timed refresh is enabled" do
     session = root_session([], ["body"], 30_000)
-    assert Test.render!(session) =~ "Manual reconstruction"
+    assert Test.render!(session) =~ "Manual read"
     fire_refresh(session)
     refute_receive {:read, _, _}
     Test.input(session, "t")
@@ -142,10 +259,12 @@ defmodule Slap.Inspect.ViewContentTest do
     session = root_session([{"body", :map}], names)
     before = Test.render!(session)
     Test.input(session, "i")
-    assert Test.render!(session) =~ ~r/map\s+"body"/
+    assert Test.render!(session) =~ ~r/> map\s+"body"/
     for _ <- 1..20, do: Test.input(session, "ArrowDown")
     Test.input(session, "ArrowLeft")
-    assert Test.render!(session) =~ ~r/xml_fragment\s+"root20"/
+    screen = Test.render!(session)
+    assert screen =~ ~r/> xml_fragment\s+"root20"/
+    assert screen =~ ~r/  none\s+"root19"/
     Test.input(session, "Escape")
     refute_receive {:read, _, _}
     assert query_line(Test.render!(session)) == query_line(before)
@@ -165,11 +284,11 @@ defmodule Slap.Inspect.ViewContentTest do
       Test.input(session, "i")
       Test.input(session, "ArrowRight")
       Test.input(session, "Enter")
-      assert %{opts: opts} = answer(session, {:ok, @capture})
+      assert %{opts: opts} = answer(session, {:ok, @grown})
       assert opts[:roots] == [{"body", :xml_fragment}]
       Test.input(session, key)
       screen = Test.render!(session)
-      assert screen =~ "Reconstruction cancelled"
+      assert screen =~ "Read cancelled"
       assert query_line(screen) == query_line(before)
       refute_receive {:read, _, _}
       Test.input(session, "i")
@@ -192,7 +311,7 @@ defmodule Slap.Inspect.ViewContentTest do
     Test.input(session, "i")
     assert Test.render!(session) =~ "Loading"
     refute Test.render!(session) =~ "Interpret roots"
-    reply(session, worker, {:ok, @capture})
+    reply(session, worker, {:ok, @grown})
     assert Test.render!(session) =~ "y Confirm"
     refute Test.render!(session) =~ "Interpret roots"
     Test.input(session, "y")

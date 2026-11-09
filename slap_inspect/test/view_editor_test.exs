@@ -124,7 +124,7 @@ defmodule Slap.Inspect.ViewEditorTest do
       answer(session, {:ok, data})
       Test.input(session, "ArrowDown")
       Test.input(session, "Enter")
-      Test.render!(session)
+      show(session, :bytes)
       edit(session, "yjs --base /jk")
       editing = Test.render!(session)
       assert editing =~ "Command: yjs --base /jk_"

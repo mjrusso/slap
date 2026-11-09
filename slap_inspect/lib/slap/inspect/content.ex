@@ -156,6 +156,23 @@ defmodule Slap.Inspect.Content do
     end
   end
 
+  defp apply_content(
+         _connection,
+         %{operation: :log_content} = request,
+         capture,
+         snapshot,
+         messages,
+         _deadline
+       ) do
+    snapshot_rows =
+      if capture.snapshot,
+        do: [content_row(:snapshot, capture.snapshot.offset, snapshot)],
+        else: []
+
+    rows = snapshot_rows ++ Enum.map(messages, &content_row(:entry, &1.offset, &1.value))
+    {:ok, Map.put(result(request, capture), :rows, rows)}
+  end
+
   defp apply_content(connection, request, capture, snapshot, messages, deadline) do
     budget = deadline - System.monotonic_time(:millisecond)
 
@@ -177,27 +194,38 @@ defmodule Slap.Inspect.Content do
              budget + 1000
            ),
          {:ok, result} <- reply do
-      {:ok,
-       Map.merge(result, %{
-         owner: capture.owner,
-         shard: request.shard,
-         durable_seq: nil,
-         coverage: %{
-           from: capture.from,
-           until: capture.until,
-           snapshot_offset: capture.snapshot && capture.snapshot.offset,
-           exact: capture.history
-         },
-         label: label(capture)
-       })}
+      {:ok, Map.merge(result, result(request, capture))}
     else
       false -> {:error, :deadline}
       error -> error
     end
   end
 
+  defp result(request, capture),
+    do: %{
+      owner: capture.owner,
+      shard: request.shard,
+      durable_seq: nil,
+      coverage: %{
+        from: capture.from,
+        until: capture.until,
+        snapshot_offset: capture.snapshot && capture.snapshot.offset,
+        exact: capture.history
+      },
+      label: label(capture)
+    }
+
+  defp content_row(kind, offset, value),
+    do: %{
+      key: "#{kind} #{offset}",
+      value: value,
+      value_size: byte_size(value),
+      oversized_key: false,
+      decoded: {:ok, %{kind: kind, key: "offset #{offset}"}}
+    }
+
   defp label(%{history: true, until: offset}),
-    do: "History before offset #{offset}; reconstructed without a snapshot"
+    do: "History before offset #{offset}, without a snapshot"
 
   defp label(capture),
     do:

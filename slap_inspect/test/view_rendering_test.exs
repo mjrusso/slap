@@ -17,7 +17,6 @@ defmodule Slap.Inspect.ViewRenderingTest do
   test "hidden details stay unformatted and visible details update only with their inputs" do
     session = start_view(request: [opts: [base: "/doc"]])
     answer(session, {:ok, page("first")})
-    Test.input(session, "ArrowDown")
     Test.render!(session)
     assert renders() == 0
 

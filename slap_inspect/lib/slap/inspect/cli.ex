@@ -4,9 +4,9 @@ defmodule Slap.Inspect.CLI do
   alias Slap.Inspect.{
     Clusters,
     Command,
-    Feedback,
     JSON,
     Operation,
+    Options,
     Query,
     Remote,
     Request,
@@ -24,17 +24,26 @@ defmodule Slap.Inspect.CLI do
       slap-inspect --node slap@host --cookie-file ~/.slap-cookie --cluster MyApp.Cluster scan
 
   Without --cluster, the inspector lists the clusters running on NODE and
-  shows each one's views; keys 1-9 open them. A command opens the first
-  listed cluster that serves it. With --json, exactly one cluster must serve
-  the command; when several do, choose one with --cluster. --cluster reads
-  one cluster and also works with servers that cannot list their clusters.
-  The clusters command prints the list as JSON, with or without --json.
+  shows each one's views; keys 1-9 open them. Given no --cluster, command or
+  query option, the terminal opens home: every cluster's views, with row
+  counts per shard, up to 50 per view and shard. h returns to it. A command
+  supplied at startup opens the first listed cluster that serves it.
 
-  Commands: clusters, scan, get, streams, stream, messages, logical,
+  With --json, commands other than home and clusters require exactly one
+  cluster to serve them; when several do, choose one with --cluster.
+  home --json prints the home view. The clusters command prints the cluster
+  list as JSON, with or without --json.
+
+  --cluster reads one cluster and also works with servers that cannot list
+  their clusters.
+
+  Commands: clusters, home, scan, get, streams, stream, messages, logical,
   retention, kv, files, object, log, yjs. Use --shard N for raw scans or sid
-  lookups, --path PATH for a stream, --base PATH for a log, --partition NAME
-  for KV, and --sid N for messages or retention. --placement-key overrides stream
-  routing. A command rejects options it does not use.
+  lookups, --path PATH for a stream, --base PATH for a log or Yjs document
+  and --partition NAME for KV and files. Use --sid N for messages or retention.
+  Without --base, log lists logs and yjs lists documents. Without --partition,
+  kv and files list partitions. --placement-key overrides stream routing.
+  Commands reject options they do not use.
   --prefix, --key, --key-prefix and --cursor take hexadecimal pairs.
   Use --offset N --length N for a value or object byte range.
 
@@ -46,21 +55,25 @@ defmodule Slap.Inspect.CLI do
   --max-value-bytes N the bytes kept from each value (at most 512 KiB) and
   --max-key-bytes N from each key (at most 4096). Terminal pages default to
   the maximums. --json listings default to 50 rows and 256 KiB. Single
-  records, document content, log --base without --component, and yjs --base
-  keep the maximums.
-  --budget MS defaults to 5000, or 10000 for document content (maximum 30000).
-  --refresh MS refreshes terminal pages at that interval, except Yjs content.
+  records, log --base without --component, and yjs --base keep the
+  maximums. get, stream and object take only --max-value-bytes.
+  log --content and yjs --content take none of these.
+  --budget MS defaults to 5000, or 10000 for home, log content and Yjs content
+  (maximum 30000).
+  --refresh MS refreshes terminal pages at that interval, skipping home,
+  log content and Yjs content.
 
   Without --cookie-file, the inspector uses Erlang's default cookie
   (~/.erlang.cookie). It uses long node names when NODE's host contains a
   dot, as in slap@127.0.0.1; --longnames selects them for other hosts.
 
+  Use log --content --base PATH to read a log's snapshot and later entries.
   Use yjs --content --base PATH --root text:body to read document content.
   Repeat --root TYPE:NAME for text, array, map or xml_fragment roots.
   In the terminal, i opens the root interpretation chooser for loaded content.
   Add --at-offset N to replay retained updates before N without a snapshot.
-  --max-input-bytes, --max-entries and --max-output-bytes set the input,
-  entry count and JSON output limits.
+  --max-input-bytes and --max-entries limit the input size and entry count.
+  Yjs content also accepts --max-output-bytes to limit the JSON output size.
   Input sizes count wire bytes: each message's body plus a four-byte header.
 
   Content buffers use {"$bytes": "<hex>"}. User map keys starting with $
@@ -75,50 +88,7 @@ defmodule Slap.Inspect.CLI do
   a remote console. The inspector never opens a database.
   """
 
-  # Hexadecimal JSON doubles each stored byte, so --json listings read
-  # smaller pages than the terminal by default.
   @json_page [limit: 50, target_bytes: 256 * 1024]
-
-  @connection_options [:node, :cookie_file, :cluster, :json, :longnames, :refresh]
-  @switches [
-    node: :string,
-    cookie_file: :string,
-    cluster: :string,
-    json: :boolean,
-    longnames: :boolean,
-    shard: :integer,
-    prefix: :string,
-    key: :string,
-    key_prefix: :string,
-    partition: :string,
-    path: :string,
-    base: :string,
-    component: :string,
-    sid: :integer,
-    expected_sid: :integer,
-    from: :integer,
-    until: :integer,
-    limit: :integer,
-    cursor: :string,
-    cursor_exclusive: :boolean,
-    offset: :integer,
-    length: :integer,
-    placement_key: :string,
-    object_key: :string,
-    instance: :string,
-    budget: :integer,
-    refresh: :integer,
-    max_value_bytes: :integer,
-    max_key_bytes: :integer,
-    target_bytes: :integer,
-    pins: :boolean,
-    content: :boolean,
-    root: :keep,
-    at_offset: :integer,
-    max_input_bytes: :integer,
-    max_entries: :integer,
-    max_output_bytes: :integer
-  ]
 
   def main([arg]) when arg in ["--help", "-h"], do: IO.puts(@usage)
 
@@ -134,7 +104,7 @@ defmodule Slap.Inspect.CLI do
   end
 
   def parse(args) do
-    case OptionParser.parse(args, strict: @switches) do
+    case OptionParser.parse(args, strict: Options.switches()) do
       {opts, commands, []} ->
         with {:ok, endpoint} <- endpoint(opts), do: selection(endpoint, opts, commands)
 
@@ -181,15 +151,30 @@ defmodule Slap.Inspect.CLI do
       else: {:ok, endpoint, :clusters}
   end
 
-  defp selection(endpoint, opts, commands) do
+  defp selection(endpoint, opts, []) do
+    if Options.query(opts) == [] and is_nil(opts[:cluster]) and opts[:json] != true,
+      do: query_selection(endpoint, opts, ["home"]),
+      else: query_selection(endpoint, opts, [])
+  end
+
+  defp selection(endpoint, opts, commands), do: query_selection(endpoint, opts, commands)
+
+  defp query_selection(endpoint, opts, commands) do
     with {:ok, cluster} <- cluster(opts),
          :ok <- Request.refresh(opts[:refresh] || 0),
-         {:ok, request} <- query(opts, commands) do
+         {:ok, request} <- query(opts, commands),
+         :ok <- one_cluster(request, opts) do
       json = opts[:json] || false
 
       {:ok, endpoint, cluster, json_page(request, json),
        %{json: json, refresh: opts[:refresh] || 0}}
     end
+  end
+
+  defp one_cluster(request, opts) do
+    if Operation.every_cluster?(request.operation) and opts[:cluster],
+      do: {:error, {:invalid, "#{request.view} lists every cluster; omit --cluster"}},
+      else: :ok
   end
 
   defp json_page(request, false), do: request
@@ -208,24 +193,8 @@ defmodule Slap.Inspect.CLI do
     end
   end
 
-  @doc "The options a query accepts, as they are written."
-  def query_options,
-    do:
-      for({key, _type} <- Keyword.drop(@switches, @connection_options), do: Feedback.option(key))
-
-  # Read options that other switches set, or that no switch sets.
-  @from_switches %{roots: [:root], value_range: [:offset, :length], preflight: [], retained: []}
-
-  @doc "The options that `command` accepts, as they are written."
-  def query_options(command) do
-    (Operation.command_options(command) ++ Request.page_options() ++ [:shard, :budget])
-    |> Enum.flat_map(&Map.get(@from_switches, &1, [&1]))
-    |> Enum.uniq()
-    |> Enum.map(&Feedback.option/1)
-  end
-
   def parse_query(args) do
-    case OptionParser.parse(args, strict: Keyword.drop(@switches, @connection_options)) do
+    case OptionParser.parse(args, strict: Options.query_switches()) do
       {opts, commands, []} ->
         query(opts, commands)
 
@@ -236,24 +205,11 @@ defmodule Slap.Inspect.CLI do
 
   defp query(opts, commands) do
     with {:ok, view} <- Operation.command(commands),
-         :ok <- accepted(opts, List.first(commands, "scan")),
+         {:ok, _operation, form} <- Operation.normalize(view, opts),
+         :ok <- Options.check(opts, List.first(commands, "scan"), form),
          {:ok, read_opts} <- read_opts(opts, view),
          do:
            Request.new(%{view: view, shard: opts[:shard], budget: opts[:budget], opts: read_opts})
-  end
-
-  # Without this check, a read would ignore an option its command does not use.
-  defp accepted(opts, command) do
-    accepted = query_options(command)
-
-    case for {key, _value} <- Keyword.drop(opts, @connection_options),
-             option = Feedback.option(key),
-             option not in accepted,
-             uniq: true,
-             do: option do
-      [] -> :ok
-      unsupported -> {:error, {:unsupported_options, command, unsupported}}
-    end
   end
 
   defp required(opts, key) do
@@ -350,7 +306,7 @@ defmodule Slap.Inspect.CLI do
 
   defp words(request) do
     {:ok, operation, definition} = Operation.normalize(request.view, request.opts)
-    flags = Enum.map(Map.get(definition, :flags, []), &Feedback.option/1)
+    flags = Enum.map(Map.get(definition, :flags, []), &Options.option/1)
     options = Enum.flat_map(request.opts, &command_option/1)
     shard = if is_nil(request.shard), do: [], else: ["--shard", to_string(request.shard)]
 
@@ -375,14 +331,14 @@ defmodule Slap.Inspect.CLI do
     do: ["--offset", to_string(offset), "--length", to_string(length)]
 
   defp command_option({key, value}) when key in [:prefix, :key_prefix, :key, :cursor],
-    do: [Feedback.option(key), Base.encode16(value, case: :lower)]
+    do: [Options.option(key), Base.encode16(value, case: :lower)]
 
   defp command_option({_key, false}), do: []
-  defp command_option({key, true}), do: [Feedback.option(key)]
+  defp command_option({key, true}), do: [Options.option(key)]
 
   defp command_option({key, value}) do
-    if Keyword.has_key?(@switches, key),
-      do: [Feedback.option(key), to_string(value)],
+    if Options.switch?(key),
+      do: [Options.option(key), to_string(value)],
       else: []
   end
 
@@ -418,7 +374,7 @@ defmodule Slap.Inspect.CLI do
 
   defp json(endpoint, cluster, request) do
     with {:ok, clusters} <- Clusters.load(endpoint.entry, cluster),
-         {:ok, cluster} <- Clusters.only(clusters, request.view),
+         {:ok, cluster} <- json_cluster(clusters, request),
          {:ok, page} <- fetch_page(endpoint.entry, cluster, request) do
       IO.puts(JSON.encode(page))
 
@@ -427,6 +383,13 @@ defmodule Slap.Inspect.CLI do
         next -> IO.puts(:stderr, "Next page: " <> shell_command(endpoint, cluster, next))
       end
     end
+  end
+
+  # Home discovers clusters again, even if the connected cluster has stopped.
+  defp json_cluster(clusters, request) do
+    if Operation.every_cluster?(request.operation),
+      do: Clusters.first(clusters, request.view),
+      else: Clusters.only(clusters, request.view)
   end
 
   defp fetch_page(entry, cluster, request) do

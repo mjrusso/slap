@@ -1,7 +1,7 @@
 defmodule Slap.Inspect.Log do
   @moduledoc false
 
-  alias Slap.Inspect.{Messages, Remote, Request}
+  alias Slap.Inspect.{Messages, Operation, Remote}
 
   # Component pages keep the catalog request's byte limits. Metadata is read
   # whole, because a component is identified by its decoded sid; its size is
@@ -49,7 +49,7 @@ defmodule Slap.Inspect.Log do
   defp component(connection, request, %{decoded: {:ok, %{value: %{sid: sid}}}}, kind, deadline) do
     opts =
       [sid: sid, component: kind, base: Keyword.fetch!(request.opts, :base), limit: 100] ++
-        Keyword.take(request.opts, Request.read_limits())
+        Keyword.take(request.opts, Operation.read_limits())
 
     with {:ok, page} <-
            Remote.read(

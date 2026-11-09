@@ -3,10 +3,14 @@ defmodule Slap.Inspect.Capture do
 
   alias Slap.Inspect.Remote
 
+  # Keep log-content limits local so servers do not need slap_yjs.
+  @log_limits %{
+    defaults: %{input_bytes: 8 * 1024 * 1024, entries: 50_000},
+    maximums: %{input_bytes: 32 * 1024 * 1024, entries: 200_000}
+  }
+
   def prepare(connection, request, deadline) do
-    with {:ok, budget} <- Remote.remaining(deadline),
-         {:ok, advertised} <-
-           Remote.call(connection.entry, Slap.Yjs.Introspect, :limits, [], min(budget, 5000)),
+    with {:ok, advertised} <- advertised(connection, request.operation, deadline),
          {:ok, limits} <- limits(advertised, request.opts),
          {:ok, capture} <- capture(connection, request, deadline) do
       if capture.encoded_bytes > limits.input_bytes do
@@ -15,6 +19,13 @@ defmodule Slap.Inspect.Capture do
         {:ok, Map.put(capture, :limits, limits)}
       end
     end
+  end
+
+  defp advertised(_connection, :log_content, _deadline), do: {:ok, @log_limits}
+
+  defp advertised(connection, :yjs_content, deadline) do
+    with {:ok, budget} <- Remote.remaining(deadline),
+         do: Remote.call(connection.entry, Slap.Yjs.Introspect, :limits, [], min(budget, 5000))
   end
 
   defp capture(connection, request, deadline) do

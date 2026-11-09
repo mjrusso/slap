@@ -121,11 +121,20 @@ snapshot logs and Yjs documents; a KV cluster holds KV rows and files. `scan`
 and `get` read any cluster. A cluster whose shard children report no services,
 such as one built directly on `slap_cluster`, offers only those two.
 
-The terminal lists each cluster's views in the navigation pane and opens a
-command in the first cluster that serves it.
+The terminal lists each cluster's views in the navigation pane. A command
+supplied at startup opens in the first cluster that serves it. Home lists
+every cluster's views and their row counts by shard. Counts are limited to
+50 rows per view and shard; `50+ rows` means at least 50. The `raw` view is
+not counted because it includes each service's internal rows. Counts run
+sequentially until home's read budget expires (10 seconds by default),
+leaving any remaining views or shards uncounted.
 
-With `--json`, exactly one cluster must serve the command. If several do, the
-inspector exits with `ambiguous_cluster` and names them; on a node with
+Press `r` to refresh home and update the cluster menu. This discovers
+clusters started after the inspector.
+
+With `--json`, commands other than `home` and `clusters` require exactly one
+cluster to serve them. If several do, the inspector exits with
+`ambiguous_cluster` and names them; on a node with
 several clusters, this is always the case for `scan` and `get`. If none does,
 it exits with `no_cluster_for_view`, or `no_clusters` if the node runs none.
 Pass `--cluster` to choose one.
@@ -153,8 +162,9 @@ slap-inspect --node slap@127.0.0.1
 
 ## Commands
 
-Add a command after the connection options; without one, the inspector opens
-`scan`. For example:
+Add a command after the connection options. Without a command, the terminal
+opens home if no cluster or query options are given; otherwise, the command
+defaults to `scan`. With `--json`, the default is always `scan`. For example:
 
 ```sh
 slap-inspect --node my_app@my-host --json kv --partition users
@@ -163,26 +173,44 @@ slap-inspect --node my_app@my-host --json kv --partition users
 | Command | Reads |
 | --- | --- |
 | `clusters` | The node's clusters, with their shard counts, local shards, services and views. Always prints JSON, and does not take `--cluster`. |
+| `home` | Each cluster's views, with row counts per shard. Does not take `--cluster`. |
 | `scan --shard N --prefix HEX` | Raw stored rows. |
 | `get --shard N --key HEX` | One stored value. |
 | `streams` / `stream --path PATH` | Stream metadata. |
 | `messages --shard N --sid ID` | The message records stored under one stream ID. |
 | `logical --path PATH` | A stream's messages, including those a fork inherits. |
 | `retention --shard N --sid ID` | Source registrations. |
+| `kv` | The KV partitions on a shard. |
 | `kv --partition NAME` | KV rows; `--key-prefix HEX` filters keys. |
+| `files` | The Files partitions on a shard. |
 | `files --partition PARTITION` | File records, intents and object registrations. |
 | `object --object-key KEY` | A file's object body. |
+| `log` | The snapshot logs on a shard. |
 | `log --base PATH` | Snapshot-log state and components. |
+| `log --content --base PATH` | A log's current snapshot and the entries after it. |
+| `yjs` | The Yjs documents on a shard. |
 | `yjs --base PATH` | The selected snapshot, and the number and size of update frames. |
 | `yjs --content --base PATH --root text:body` | Yjs content with `body` read as text. |
 
-A command rejects options that it does not use, such as `--path` for `kv`,
-instead of reading without them.
+Commands reject options they do not use: `kv` does not take `--path`,
+and `kv` and `files` take `--key-prefix` only with `--partition`.
 
-A listing reads one shard: the first, unless `--shard N`, or `s` in the
-terminal, selects another. An empty listing therefore does not mean the
-cluster is empty. Commands that take `--path` or `--partition` find the shard
-themselves.
+A listing reads one shard, so an empty listing does not mean the cluster is
+empty. By default, it reads the first shard; `--shard N` selects another.
+Commands that take `--path` or `--partition` find the shard themselves.
+
+In the terminal, listings such as `streams` and `kv` can find a shard with
+rows automatically. If no shard was selected and the first page is empty
+with no continuation cursor, the inspector checks the other shards and
+switches to the first with rows. The status line names the old and new
+shards. If all shards are empty, the page says so.
+
+Press `s` to open the shard picker. It shows each shard's owner and status.
+It also counts up to 50 rows per shard for `scan` and `streams`, for `kv`
+and `files` without `--partition`, and for `log` and `yjs` without `--base`.
+Counts stop when the read budget expires. Refreshing or switching between
+these listings in the same cluster keeps the selected shard. Press `s` to
+recount and choose another shard.
 
 JSON writes printable binaries as strings. Nonprintable binaries are
 written as `{"$bytes": "<hex>"}`; pass the hex to `--key` or `--prefix`.
@@ -212,6 +240,12 @@ trimming the source does not delete them. `retention` lists a stream's
 registrations; `--pins` lists them by the first offset each protects, and
 `--path PATH` adds the stream's metadata summary.
 
+Without `--base`, `log` lists the snapshot logs on one shard and `yjs` lists
+its Yjs documents. Each row comes from a log's `.updates` stream metadata.
+Unrelated streams do not count toward page limits. The read stops at a page
+limit, the end of the metadata, or the deadline. In the terminal, `f` opens
+the selected log or document.
+
 For a snapshot log, `--base` is the path passed to `Slap.SnapshotLog`. For a
 Yjs document, `Slap.Yjs.Store.base/2` returns it from the document ID and the
 server's store options; with the default prefix, `{"demo", "notes"}` has the
@@ -220,7 +254,23 @@ base `/v1/stream/yjs/demo/docs/notes`.
 `log --base PATH --component NAME` pages one component: `control`, `index` or
 `updates`. `yjs --shard N --sid ID` pages a Yjs update stream by itself.
 
+### KV
+
+Without `--partition`, `kv` lists the shard's KV partitions and
+ownership-confirmation row. The partition writer uses that row to verify
+that its node still owns the shard. In the terminal, `f` opens the selected
+partition. Like `files`, the listing reads one key per partition.
+
+`slap_files` keeps its records, intents and object registrations in KV
+partitions. The listing includes these partitions.
+
 ### Files
+
+Without `--partition`, `files` lists the Files partitions on one shard, with
+their namespace, family (`record`, `intent` or `object`) and suffix; in the
+terminal, `f` opens the selected partition. The listing reads one key per
+partition without reading values, then skips the remaining keys in that
+partition. Other KV partitions are excluded.
 
 For `files`, `--partition` names a KV partition. File records for the
 Files partition `users` are in `files-ns:<namespace>:record:users`, where
@@ -246,16 +296,23 @@ stderr, after `Next page: `.
 
 Terminal pages default to 200 rows and a 1 MiB target, and `--json` listings
 to 50 rows and 256 KiB. A page includes the row that crosses its target.
-Single-record reads, Yjs content, `log --base` without `--component`, and
+Single-record reads, `log --base` without `--component`, and
 `yjs --base` use the terminal defaults with `--json` too. Values are cut at
 512 KiB and keys at 4 KiB. `--limit`, `--target-bytes`, `--max-value-bytes`
 and `--max-key-bytes` lower these limits. They bound the reply; SlateDB still
 loads whole rows into native memory.
 
-A key cut by `--max-key-bytes` ends its page, and the next page starts after
-every key that begins with the shown bytes, so those keys are skipped. A cut
-key cannot be fetched or followed; raise `--max-key-bytes` to read it, up to
-4 KiB.
+`get`, `stream` and `object` take only `--max-value-bytes`. `log --content`
+and `yjs --content` take none of these limits. Without `--partition`, `kv`
+and `files` accept `--limit`, `--target-bytes` and `--max-key-bytes`, but
+reject `--max-value-bytes`. These two listings also reject
+`--cursor-exclusive`.
+
+In ordinary and filtered listings, a key cut by `--max-key-bytes` ends its
+page. The next page skips every key beginning with the shown bytes. KV and
+Files partition listings can continue within the same page after skipping
+these keys. A cut key cannot be fetched or followed; raise `--max-key-bytes`
+to read it, up to 4 KiB.
 
 `--offset N --length N` selects a byte range for `get` or `object`. Without
 `--length`, a range is 4096 bytes, or `--max-value-bytes` if that is smaller.
@@ -271,67 +328,150 @@ view's `metadata` and `lineage`.
 
 ## Terminal
 
-The footer lists the keys for the current screen, and `?` lists them all
-with the full query.
+At widths of 110 columns or more, the terminal shows the views, the records
+and the selected record's details side by side. Narrower terminals show one
+pane: Enter opens a record's details, Escape returns to the records, and
+`1`–`9` open the views that the navigation pane would list (`?` lists them).
+
+A page opens with its first row selected. Returning from a link with `b`
+restores the selection to the row you followed. Views that read one record,
+such as an object opened from a file, show its details directly. The records
+title shows the selected row's position, the page number, and `n more` when
+another page follows. The footer lists the keys for the current screen;
+`?` lists all keys and the full query.
 
 | Key                           | Action                                            |
 |-------------------------------|---------------------------------------------------|
 | Arrows                        | Select rows, or scroll and pan details.           |
-| PageUp / PageDown, Home / End | Scroll details by a page, or to the top / bottom. |
+| PageUp / PageDown             | Scroll details by a page.                         |
+| Home / End                    | Select the first or last row, or scroll details to the top or bottom. |
 | `[` / `]`                     | Pan details by twenty columns.                    |
 | Tab                           | Switch between records and details.               |
 | Enter                         | Open details.                                     |
-| Escape / `b`                  | Go back.                                          |
+| Escape                        | Close details, a dialog or the editor.            |
+| `b`                           | Close details, or return to the previous query.   |
 | `n` / `p`                     | Next / previous page.                             |
+| `T`                           | In `messages` and `logical`, read near the tail and select the newest returned message. |
 | `m` / `M`                     | Next / previous byte range of a value.            |
-| `d`                           | Show details as bytes, text or JSON.              |
+| `d`                           | Show details as text, JSON, bytes or the term.    |
 | `/`                           | Edit the command.                                 |
 | `1`–`9`                       | Open a view listed in the navigation pane.        |
+| `h`                           | Open home; `f` opens the selected view from it, on the first shard with rows. |
 | `s`                           | Choose a shard.                                   |
-| `f`                           | Follow a linked stream or object.                 |
+| `f`                           | Follow the selected row's link.                   |
 | `g`                           | Show a stream's retention.                        |
-| `c`                           | Reconstruct the content of a log or Yjs document. |
+| `c`                           | Read the content of a log or Yjs document.        |
 | `i`                           | Choose how Yjs roots are read.                    |
 | `r`                           | Read again.                                       |
-| `t`                           | Turn timed refresh off, or on at five seconds.    |
+| `t`                           | Turn timed refresh off, or back on.               |
 | `e`                           | Diagnostics for the last read, if it failed.      |
 | `?`                           | Help.                                             |
 | `q`                           | Quit.                                             |
 
+`T` starts reading at a message boundary near the stream's tail or `--until`.
+A large message may require `n` to reach that bound. From there, `p` reads
+backward one page at a time, stopping at `--from`, and `n` steps forward
+again. Each backward read uses the first offset on the current page as its
+upper bound. Large messages may require forward pages to reach that bound.
+Press `b` to return to the query you opened the tail from.
+
 Timed refresh rereads the current page and keeps the selection when its key
 is still present. It is off unless the inspector starts with `--refresh MS`.
-When it is on, `t` turns it off; when it is off, `t` turns it on at five
-seconds, even if `--refresh` set another interval. It pauses while a read is
-running or a dialog or the command editor is open, and it skips Yjs content.
+When it is on, `t` turns it off; when it is off, `t` turns it on at the
+`--refresh` interval, or at five seconds without one. It pauses while a read is
+running or a dialog or the command editor is open. Timed refresh skips home,
+log content and Yjs content.
+
+A read that takes longer than 200 ms shows a spinner and its elapsed time on
+the status line, in the warning colour once the read has stalled.
 If a refresh fails, the previous results stay on screen, labelled
-`Last good data`.
+`Last good data`. When the connection to a node is lost, the terminal reads
+again every two seconds until it reconnects, whether or not timed refresh is
+on.
 
 The command editor accepts query options; connection, output and refresh
-options are set at startup. Tab completes the command name or a
-query option, and lists the matches when several remain. An unsupported option is reported with the
-closest query option, as in `--partiton (did you mean --partition?)`. Outside single quotes, a backslash escapes the
-next character: `\n`, `\r`, `\t`, `\b`, `\f`, two-digit `\xHH` and four-digit
+options are set at startup. It runs a command in the open cluster, and
+refuses one for a service that cluster does not run, naming the clusters
+that run it. Tab completes the command name or a query option, and lists the
+matches when several remain. For likely misspellings, the error suggests a
+matching query option, as in `--partiton (did you mean --partition?)`.
+
+Outside single quotes, a backslash escapes the next character: `\n`, `\r`,
+`\t`, `\b`, `\f`, two-digit `\xHH` and four-digit
 `\uXXXX` are recognized, and any other escaped character stands for itself.
 The editor shows binary paths with byte escapes, so submitting the displayed
 command keeps their bytes.
 
-The byte and text views show up to 4096 bytes at a time. The terminal shows
+Details start with a summary identifying the record and its metadata. For
+example, a file summary includes its name, size, content type, storage and
+SHA-256. Stream overviews include offsets, fork source, tail and trim; log
+overviews also show the log's state, current snapshot and components. Other
+decoded fields follow, one per line, then any message interpretation.
+
+Details open in the text view. Press `d` to cycle through text, JSON, bytes
+and Elixir term views. The term view shows the record's metadata and decoded
+fields. The bytes view shows hexadecimal. Stream metadata, file records and
+overviews show only their summary in text mode. Other records without a
+stored value open in the term view.
+
+Your chosen view applies to subsequent records when they have data for it.
+When JSON is selected, an invalid or incomplete JSON value falls back to
+text. Text falls back to bytes when the range is not valid UTF-8. A note
+explains the fallback. The JSON view preserves stored object key order,
+including repeated keys. The byte and text views show up to 4096 bytes at
+a time.
+
+Record labels identify messages by byte offset (`@32`), size and body
+preview; streams by path, content type and status; files by name, size,
+content type and storage; and KV rows by partition, key, size and value
+preview.
+
+A key or path that is not UTF-8 appears as hexadecimal with a `0x` prefix,
+after any leading printable ASCII: `"id" 0xdc9aff`. The terminal shows
 zero-width code points as `\u{HEX}`: a key holding `e` followed by U+0301
 appears as `"e\u{301}"`, and a key holding the characters `\u{301}` appears
 with a doubled backslash.
 
+## Log content
+
+`log --content --base PATH` reads a snapshot log's current snapshot and every
+entry after it, as one row each. In the terminal, `c` in the log view reads
+it, and confirmation works as for [Yjs content](#yjs-content).
+
+`--at-offset N` reads the entries before `N` without a snapshot, under the
+same conditions as [Yjs content](#yjs-content). `--max-input-bytes` (8 MiB by
+default, at most 32 MiB) and `--max-entries` (50,000 by default, at most
+200,000) bound the read, and `--budget` defaults to 10,000 ms.
+
 ## Yjs content
 
 `yjs --content --base PATH` reconstructs a stored document: the shard owners
-read its updates, and the node the inspector connects to applies them. The
-terminal shows the owner and the input size and asks for confirmation;
-`--json` does not ask.
+read its updates, and the node the inspector connects to applies them. When
+the input is over 1 MiB, the terminal shows the owner and the input size and
+asks for confirmation. For the same view and base, confirmation is reused
+while the owner and input size stay unchanged, as when only the root types
+change. `--json` does not ask.
 
 `--root TYPE:NAME` reads a root as `text`, `array`, `map` or `xml_fragment`;
-repeat it for more roots. Use the types the application uses; others can
-return empty values. Roots without a type are listed without values, and
-missing roots are reported as absent. Text omits formatting. In the terminal,
-`i` changes the types.
+repeat it to choose types for more roots. Use the types your application
+uses; stored roots do not retain their declared types. Text omits formatting
+and embedded content.
+
+For roots without a requested type, the inspector infers map and text
+types from their contents and marks them `"inferred": true`. Other roots
+are listed without values, with `"holds": "sequence"` for content that could
+be an array, XML or text containing only embeds. Missing roots are reported
+as absent.
+
+When a root's contents rule out the requested type, the inspector reports
+`"status": "wrong_type"`. The `"holds"` field describes the detected content:
+`map` for keyed entries, `text` for text, or `sequence` for an array, XML or
+text containing only embeds. If nonempty sequence content produces an
+empty text or XML result, the inspector reports `"status": "ambiguous"`
+because it cannot determine the root's type.
+
+In the terminal, `i` opens the root type dialog with inferred types selected.
+The dialog notes roots with ambiguous sequence content.
 
 Buffers in arrays and maps are written as `{"$bytes": "<hex>"}`. A user map
 key that starts with `$` gains another `$` at every nesting level: `"$bytes"`
@@ -371,9 +511,11 @@ one snapshot: data can change between reads, so a missing row or object alone
 does not establish corruption. Malformed and truncated records are shown
 with their bytes and a diagnostic.
 
-Reads have a five-second budget by default; Yjs content reconstruction has
-ten seconds. Set `--budget MS` to change it, up to 30,000 ms. The budget is
-checked between storage calls, so a call in progress can run past it.
+Reads have a five-second budget by default. Home, log content and Yjs
+content reads have ten seconds. Set `--budget MS` to change it, up to
+30,000 ms. When switching views in the terminal, a nondefault budget carries
+over. Otherwise, the new view uses its own default. The budget is checked
+between storage calls, so a call in progress can run past it.
 
 If a read stalls, the terminal waits for it to finish. You can submit another
 request while waiting; only the latest waiting request is kept. With
@@ -387,7 +529,9 @@ In the terminal, press `r` to retry after the node finishes its current read.
 If the server reports `owner_does_not_support_inspection`, it needs a version
 with inspection support. If it reports `unsupported_api`, upgrade the
 inspector or server so their inspection API versions match; the error
-includes the server's inspection API version.
+includes the server's inspection API version. `T` and `p` from the tail need
+a server that reads the page before an offset. The inspector reports an
+error if the server does not support backward paging.
 
 Remote exceptions include diagnostics: the node, the function called, the
 kind (`error`, `exit` or `throw`), a summary of the reason, and up to eight

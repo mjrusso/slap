@@ -2,12 +2,14 @@ defmodule Slap.Inspect.View do
   @moduledoc false
   use Breeze.View
 
-  alias Slap.Inspect.{CLI, Clusters, Help, Query, Requests}
-  alias Slap.Inspect.View.{Dialogs, Layout, Navigation, Read}
+  alias Slap.Inspect.{CLI, Clusters, Help, Query, Request, Requests}
+  import Slap.Inspect.View.PendingKeys, only: [selection_key?: 1]
+
+  alias Slap.Inspect.View.{Activity, Dialogs, Layout, Navigation, PendingKeys, Read}
 
   def mount(opts, term) do
     read = Keyword.get(opts, :read, &Query.execute/2)
-    request = Keyword.fetch!(opts, :request)
+    %Request{} = request = Keyword.fetch!(opts, :request)
     {:ok, worker} = Requests.start_link(client: self(), read: read)
 
     term =
@@ -21,21 +23,35 @@ defmodule Slap.Inspect.View do
         detail_cache: nil,
         mode: :browse,
         commands: [CLI.command(request)],
-        display: :bytes,
+        display: :text,
         refresh: Keyword.get(opts, :refresh, 0),
-        refresh_timer: nil
+        refresh_interval: if(Keyword.get(opts, :refresh, 0) > 0, do: opts[:refresh], else: 5000),
+        refresh_timer: nil,
+        activity: nil
       )
 
-    {:ok, term |> Read.start() |> Read.sync_refresh() |> Layout.prepare()}
+    {:ok, term |> Read.start() |> Read.sync_refresh() |> Activity.sync() |> Layout.prepare()}
   end
 
   defdelegate render(assigns), to: Layout
-  def handle_info(message, term), do: prepare_reply(Read.handle_info(message, term))
+
+  def handle_info({:activity_tick, id}, term),
+    do: prepare_reply({:noreply, Activity.tick(term, id)})
+
+  def handle_info(message, term) do
+    {:noreply, term} = Read.handle_info(message, term)
+    prepare_reply({:noreply, PendingKeys.replay(term, &input/2)})
+  end
+
+  defp input(key, term) do
+    {:noreply, term} = event(:input, %{"key" => key}, term)
+    term
+  end
 
   def handle_event(name, payload, term), do: prepare_reply(event(name, payload, term))
 
   defp prepare_reply({:noreply, term}),
-    do: {:noreply, term |> Read.sync_refresh() |> Layout.prepare()}
+    do: {:noreply, term |> Read.sync_refresh() |> Activity.sync() |> Layout.prepare()}
 
   defp prepare_reply({:stop, term}), do: {:stop, term}
 
@@ -99,14 +115,28 @@ defmodule Slap.Inspect.View do
   defp event(:input, _payload, %{assigns: %{mode: {:confirm, _, _}}} = term),
     do: {:noreply, term}
 
+  defp event(
+         :input,
+         %{"key" => key},
+         %{assigns: %{mode: :browse, page: nil, operation: :reading}} = term
+       )
+       when selection_key?(key),
+       do: {:noreply, PendingKeys.queue(term, key)}
+
   defp event(:input, %{"key" => key}, %{focused: "details"} = term)
-       when key in ["ArrowDown", "ArrowUp"], do: {:noreply, term}
+       when key in ["ArrowDown", "ArrowUp", "Home", "End"], do: {:noreply, term}
 
   defp event(:input, %{"key" => "ArrowDown"}, term),
     do: {:noreply, Navigation.select(term, 1)}
 
   defp event(:input, %{"key" => "ArrowUp"}, term),
     do: {:noreply, Navigation.select(term, -1)}
+
+  defp event(:input, %{"key" => "Home"}, term),
+    do: {:noreply, Navigation.select(term, -length(term.assigns.rows))}
+
+  defp event(:input, %{"key" => "End"}, term),
+    do: {:noreply, Navigation.select(term, length(term.assigns.rows))}
 
   defp event(:input, %{"key" => "Enter"}, %{assigns: %{rows: []}} = term),
     do: {:noreply, term}
@@ -116,8 +146,10 @@ defmodule Slap.Inspect.View do
     {:noreply, term |> assign(detail: true) |> focus("details")}
   end
 
-  defp event(:input, %{"key" => key}, term) when key in ["Escape", "b"],
-    do: Navigation.back(term)
+  defp event(:input, %{"key" => "Escape"}, term), do: Navigation.close_details(term)
+  defp event(:input, %{"key" => "b"}, term), do: Navigation.back(term)
+  defp event(:input, %{"key" => "h"}, term), do: Navigation.home(term)
+  defp event(:input, %{"key" => "T"}, term), do: Navigation.tail(term)
 
   defp event(:input, %{"key" => "/"}, term),
     do: {:noreply, Dialogs.editor(term, CLI.command(term.assigns.request))}
