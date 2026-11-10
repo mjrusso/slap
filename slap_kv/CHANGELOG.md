@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.1
 
 - Adds a KV partition listing for `slap_inspect` that reads keys only and
   includes the shard's ownership-confirmation row. Malformed keys appear
