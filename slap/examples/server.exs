@@ -8,7 +8,7 @@
 {:ok, _} = Application.ensure_all_started(:mix)
 
 if is_nil(Mix.Project.get()) and not Mix.installed?() do
-  Mix.install([{:slap, "~> 0.7.0"}, {:bandit, "~> 1.12"}])
+  Mix.install([{:slap, "~> 0.7.1"}, {:bandit, "~> 1.12"}])
 end
 
 {opts, args, invalid} =

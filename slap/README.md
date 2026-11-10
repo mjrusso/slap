@@ -23,7 +23,7 @@ Add `slap` to the dependencies in your application's `mix.exs`:
 ```elixir
 defp deps do
   [
-    {:slap, "~> 0.7.0"}
+    {:slap, "~> 0.7.1"}
   ]
 end
 ```

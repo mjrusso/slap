@@ -1,7 +1,7 @@
 {:ok, _} = Application.ensure_all_started(:mix)
 
 if is_nil(Mix.Project.get()) do
-  Mix.install([{:slap, "~> 0.7.0"}])
+  Mix.install([{:slap, "~> 0.7.1"}])
 end
 
 defmodule Slap.Examples.DemoDoc do

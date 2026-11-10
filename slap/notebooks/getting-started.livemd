@@ -1,7 +1,7 @@
 # Getting started with Slap
 
 ```elixir
-Mix.install([{:slap, "~> 0.7.0"}])
+Mix.install([{:slap, "~> 0.7.1"}])
 ```
 
 ## About this notebook
@@ -12,7 +12,7 @@ Erlang/OTP 26.2 or later. Run the cells in order. They keep data in memory,
 so it is lost when the runtime stops.
 
 To run it without Livebook, paste the cells into IEx started with
-`iex -e 'Mix.install([{:slap, "~> 0.7.0"}])'`.
+`iex -e 'Mix.install([{:slap, "~> 0.7.1"}])'`.
 
 ## SlateDB
 

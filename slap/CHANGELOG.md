@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.1
+
+- Adds server-side support for `slap_inspect` 0.2.0: KV and Files
+  partition listings, snapshot log and Yjs document listings, and backward
+  message paging.
+- Yjs content inspection now infers map and text roots and reports root
+  type mismatches.
+- Raises the minimum dependency versions to `slap_yjs` 0.6.2 and
+  `slap_cluster`, `slap_streams`, `slap_snapshot_log`, `slap_kv` and
+  `slap_files` 0.6.1.
+
 ## 0.7.0
 
 - Add the `Slap` module to start the selected Streams, KV, Files and Yjs

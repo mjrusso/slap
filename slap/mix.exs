@@ -1,7 +1,7 @@
 defmodule Slap.MixProject do
   use Mix.Project
 
-  @version "0.7.0"
+  @version "0.7.1"
   @source_url "https://github.com/mjrusso/slap"
   @package_url "#{@source_url}/tree/main/slap"
   @notebooks ["notebooks/getting-started.livemd", "notebooks/internals.livemd"]
@@ -135,12 +135,12 @@ defmodule Slap.MixProject do
 
   defp deps do
     [
-      slap_dep(:slap_streams, "~> 0.6.0"),
-      slap_dep(:slap_snapshot_log, "~> 0.6.0"),
-      slap_dep(:slap_yjs, "~> 0.6.0"),
-      slap_dep(:slap_kv, "~> 0.6.0"),
-      slap_dep(:slap_files, "~> 0.6.0"),
-      slap_dep(:slap_cluster, "~> 0.6.0"),
+      slap_dep(:slap_streams, "~> 0.6.1"),
+      slap_dep(:slap_snapshot_log, "~> 0.6.1"),
+      slap_dep(:slap_yjs, "~> 0.6.2"),
+      slap_dep(:slap_kv, "~> 0.6.1"),
+      slap_dep(:slap_files, "~> 0.6.1"),
+      slap_dep(:slap_cluster, "~> 0.6.1"),
       slap_dep(:slap_slatedb, "~> 0.4.0"),
       {:slap_inspect, path: "../slap_inspect", only: :test, runtime: false},
       {:bandit, "~> 1.12", only: [:dev, :test]},
