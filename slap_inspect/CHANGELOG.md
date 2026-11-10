@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - **Breaking:** JSON output now encodes printable stored binaries as strings
   and other stored binaries as `{"$bytes": "<hex>"}`. Previously, these were
