@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.1
 
 - Lists a shard's Files partitions for `slap_inspect` without reading values.
 

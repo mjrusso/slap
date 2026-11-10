@@ -1,7 +1,7 @@
 defmodule Slap.Files.MixProject do
   use Mix.Project
 
-  @version "0.6.0"
+  @version "0.6.1"
   @source_url "https://github.com/mjrusso/slap"
   @package_url "#{@source_url}/tree/main/slap_files"
 
@@ -66,8 +66,8 @@ defmodule Slap.Files.MixProject do
 
   defp deps do
     [
-      slap_dep(:slap_kv, "~> 0.6.0"),
-      slap_dep(:slap_cluster, "~> 0.6.0"),
+      slap_dep(:slap_kv, "~> 0.6.1"),
+      slap_dep(:slap_cluster, "~> 0.6.1"),
       slap_dep(:slap_slatedb, "~> 0.4.0"),
       {:telemetry, "~> 1.0"},
       {:rustler, "~> 0.38", optional: true, runtime: false},
