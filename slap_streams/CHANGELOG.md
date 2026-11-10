@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.1
 
 - Adds backward message paging for `slap_inspect`, bounded by `:from` and
   `:until`. For forks, backward reads use the fork's own messages when they
