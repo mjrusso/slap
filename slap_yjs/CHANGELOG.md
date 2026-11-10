@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.2
 
 - Inspection infers map and text roots when no type is requested and marks
   them `"inferred": true`.
