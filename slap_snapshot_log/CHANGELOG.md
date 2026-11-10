@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.1
 
 - Lists a shard's snapshot logs for `slap_inspect`, skipping unrelated
   streams without counting them toward the page limits.
