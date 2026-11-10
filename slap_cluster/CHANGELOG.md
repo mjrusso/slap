@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.1
 
 - Adds inspection helpers to list key groups without reading values, apply
   page limits after filtering, and read the final page in a key range.
