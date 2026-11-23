@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794838495523,
+  "lastUpdate": 1795452367430,
   "repoUrl": "https://github.com/mjrusso/slap",
   "entries": {
     "Durable Streams (lower is better)": [
@@ -1715,6 +1715,58 @@ window.BENCHMARK_DATA = {
           {
             "name": "slap-s3: Latency - Total RTT p99",
             "value": 12.25864299999921,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Michael Russo",
+            "username": "mjrusso",
+            "email": "mjr@mjrusso.com"
+          },
+          "committer": {
+            "name": "Michael Russo",
+            "username": "mjrusso",
+            "email": "mjr@mjrusso.com"
+          },
+          "id": "a7a8a998887c58c4d7f99993749afbac9b190d65",
+          "message": "chore(slap): prepare 0.7.1 release",
+          "timestamp": "2026-11-10T14:36:12Z",
+          "url": "https://github.com/mjrusso/slap/commit/a7a8a998887c58c4d7f99993749afbac9b190d65"
+        },
+        "date": 1795452367038,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "caddy-file: Latency - Total RTT p50",
+            "value": 1.06293899999946,
+            "unit": "ms"
+          },
+          {
+            "name": "slap-local: Latency - Total RTT p50",
+            "value": 11.32902599999943,
+            "unit": "ms"
+          },
+          {
+            "name": "slap-s3: Latency - Total RTT p50",
+            "value": 11.22917199999938,
+            "unit": "ms"
+          },
+          {
+            "name": "caddy-file: Latency - Total RTT p99",
+            "value": 3.9041849999994156,
+            "unit": "ms"
+          },
+          {
+            "name": "slap-local: Latency - Total RTT p99",
+            "value": 12.934860000000299,
+            "unit": "ms"
+          },
+          {
+            "name": "slap-s3: Latency - Total RTT p99",
+            "value": 12.583337000000029,
             "unit": "ms"
           }
         ]
